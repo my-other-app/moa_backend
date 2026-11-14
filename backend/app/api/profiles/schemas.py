@@ -100,6 +100,9 @@ class RelationOut(CustomBaseModel):
 
 
 class PublicProfile(CustomBaseModel):
+    #: The owner's user id, for a signed-in viewer only (report and block);
+    #: always null when signed out, so a cached public page never carries it.
+    user_id: Optional[int] = None
     handle: str
     full_name: str
     picture: Optional[str] = None
@@ -248,7 +251,7 @@ class NetworkingSummary(CustomBaseModel):
     codes_active: int
     saves_7d: int
     saves_30d: int
-    #: Of all saves, the share whose pair is mutual, 0 to 1.
+    #: Of all saves, the percentage whose pair is mutual, 0 to 100.
     mutual_rate: float
     reports_open: int
 

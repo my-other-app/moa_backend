@@ -53,8 +53,8 @@ initials tile.
 
 **QR.** `<div class="moa-qr" …>` with the QR of the context's payload as
 black-on-white SVG, quietZone modules round it (doc_designs/qr.py). A
-Personal QR (`source: "profile"`) encodes values["holder.profile_qr_url"]
-instead, and is left out when that is empty.
+bound QR (`bind`, the Personal QR) encodes values[bind] instead, and is
+left out when that is empty.
 """
 from __future__ import annotations
 
@@ -424,15 +424,12 @@ def qr_svg(payload: str, quiet_zone: int) -> str:
     return svg.replace("<svg", '<svg width="100%" height="100%" style="display:block"', 1)
 
 
-#: The value a Personal QR layer (`source: "profile"`) encodes (doc_presets.values.PROFILE_QR_VALUE).
-PROFILE_QR_VALUE = "holder.profile_qr_url"
-
-
 def _qr(layer: QrLayer, ctx: Context, paint: _Paint, values: Optional[Mapping[str, Any]] = None) -> str:
     payload = ctx.qr
-    if layer.source == "profile":
-        # The holder's own profile code; none (no code, scanning off): not drawn.
-        payload = str((values or {}).get(PROFILE_QR_VALUE) or "")
+    if layer.bind:
+        # A bound QR (the Personal QR) encodes its value; empty (the holder
+        # has no code, or scanning is off): not drawn at all.
+        payload = str((values or {}).get(layer.bind) or "")
         if not payload:
             return ""
     look = ""
@@ -454,7 +451,7 @@ def _qr(layer: QrLayer, ctx: Context, paint: _Paint, values: Optional[Mapping[st
 def _on_stock(layer) -> bool:
     if not layer.preprinted:
         return False
-    if isinstance(layer, QrLayer) and layer.source == "profile":
+    if isinstance(layer, QrLayer) and layer.bind:
         return False  # the holder's own: never on the stock
     if isinstance(layer, TextLayer) and carries_per_guest_token(layer.text):
         return False

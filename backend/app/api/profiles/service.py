@@ -170,6 +170,7 @@ def _minimal(user: Users, rel: Relation) -> dict:
     client reads one shape."""
     profile = user.profile
     return {
+        "user_id": user.id if rel.viewer_id is not None else None,
         "handle": user.username, "full_name": full_name_of(user), "picture": picture_of(user),
         "headline": profile.headline if profile is not None else None,
         "bio": None, "city": None, "org": None, "interests": [], "links": [], "projects": [],
@@ -191,6 +192,8 @@ async def public_profile(session, user: Users, rel: Relation) -> dict:
     sees = {section: rel.sees(levels.get(section)) for section in SECTIONS}
     org = profile.org if profile is not None and profile.org_id else None
     out = {
+        # Only for a signed-in viewer: a signed-out read (the site's cached page) never carries it.
+        "user_id": user.id if rel.viewer_id is not None else None,
         "handle": user.username,
         "full_name": full_name_of(user),
         "picture": picture_of(user),
@@ -428,11 +431,14 @@ async def order_projects(session, user: Users, ids: list[int]) -> dict:
 
 
 async def set_project_image(session, user: Users, project_id: int, upload) -> dict:
+    from app.core.storage.fields import upload as store_upload
+
     row = await _own_project(session, user, project_id)
     previous = row.image_key
-    row.image_key = {"bytes": io.BytesIO(await upload.read()), "filename": upload.filename}
-    # The column checks and sizes the picture as it saves (storage.fields):
-    # anything that is not one, or too large, is refused here.
+    # Checked, sized and stored first (storage.fields.upload, off the event
+    # loop): anything that is not a picture, or is too large, is refused
+    # here, before the row changes.
+    row.image_key = await store_upload(ProfileProjects.image_key, {"bytes": io.BytesIO(await upload.read()), "filename": upload.filename})
     await session.commit()
     if previous is not None and hasattr(previous, "delete"):
         previous.delete()

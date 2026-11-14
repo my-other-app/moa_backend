@@ -20,7 +20,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, literal_column, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.api.profiles import access, service
@@ -47,7 +47,8 @@ async def note_save(session, *, person_id: int, saver_id: int, event_id: Optiona
         pg_insert(N)
         .values(person_id=person_id, event_id=event_id, saver_ids=[saver_id], due_at=_now() + BATCH)
         .on_conflict_do_update(
-            index_elements=[N.person_id, func.coalesce(N.event_id, 0)],
+            # The index's expression as written there: a bound 0 would not match it.
+            index_elements=[N.person_id, func.coalesce(N.event_id, literal_column("0"))],
             index_where=N.sent_at.is_(None),
             set_={"saver_ids": case((N.saver_ids.op("@>")(one), N.saver_ids), else_=N.saver_ids.op("||")(one))},
         )

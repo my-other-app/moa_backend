@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import Integer, cast, exists, func, literal_column, select
+from sqlalchemy import Boolean, Integer, cast, exists, func, literal_column, select
 
 from app.api.events.models import EventRegistrationsLink as R
 from app.api.profiles.models import NetworkEncounters, NetworkPeople, ProfileCodes, ProfileLinks, ProfileProjects
@@ -51,13 +51,16 @@ async def summary(session) -> dict:
 
     now = _now()
     live = (Users.user_type == UserTypes.app_user, Users.is_deleted == False)  # noqa: E712
-    profiles = select(UserProfiles.user_id, UserProfiles.headline, UserProfiles.profile_pic).join(Users, Users.id == UserProfiles.user_id).where(
+    # The photo column's type cannot be part of a cached statement (its
+    # sizes are a dict): whether there is one is asked in SQL text.
+    has_photo = literal_column("user_profiles.profile_pic IS NOT NULL", Boolean).label("has_photo")
+    profiles = select(UserProfiles.user_id, UserProfiles.headline, has_photo).join(Users, Users.id == UserProfiles.user_id).where(
         UserProfiles.is_deleted == False, *live,  # noqa: E712
     ).subquery()
     total = int(await session.scalar(select(func.count()).select_from(profiles)) or 0)
     completed = int(await session.scalar(
         select(func.count()).select_from(profiles).where(
-            profiles.c.headline.isnot(None), profiles.c.headline != "", profiles.c.profile_pic.isnot(None),
+            profiles.c.headline.isnot(None), profiles.c.headline != "", profiles.c.has_photo.is_(True),
             exists().where(ProfileLinks.user_id == profiles.c.user_id),
             exists().where(ProfileProjects.user_id == profiles.c.user_id),
         )
@@ -72,5 +75,5 @@ async def summary(session) -> dict:
     ) or 0)
     return {
         "profiles_completed": completed, "profiles_total": total, "codes_active": codes, "saves_7d": s7, "saves_30d": s30,
-        "mutual_rate": round(int(mutual) / int(all_saves), 4) if all_saves else 0.0, "reports_open": reports,
+        "mutual_rate": round(100 * int(mutual) / int(all_saves), 1) if all_saves else 0.0, "reports_open": reports,
     }

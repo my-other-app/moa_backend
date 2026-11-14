@@ -279,7 +279,7 @@ def subject_of(registration, event=None) -> Subject:
 
 #: The editor's sample guest's personal QR: a code that can never be real
 #: (it holds letters the codes leave out), so the board can draw the layer.
-SAMPLE_PROFILE_QR = "https://myotherapp.in/p/sample"
+SAMPLE_PROFILE_QR = "https://myotherapp.in/p/samplecode"
 
 
 def profile_qr_url_of(user, profile) -> Optional[str]:
@@ -457,8 +457,8 @@ def badge_values(event, subject: Subject, *, door: Optional[str] = None, printed
         "wave": "",
         "start_time": fmt_time(start),
         **subject.answers,
-        # The Personal QR layer's payload (a v2 qr layer with source "profile");
-        # empty: the layer is not drawn.
+        # The Personal QR layer's payload (a v2 qr layer with bind
+        # "holder.profile_qr_url"); empty: the layer is not drawn.
         PROFILE_QR_VALUE: subject.profile_qr_url or "",
     }
     return Mapped(values=values, images={"photo_url": ("photo", subject)}, qr_text=subject.ticket_code)

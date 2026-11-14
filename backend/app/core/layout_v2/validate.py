@@ -114,8 +114,8 @@ def problems(layout: Union[LayoutV2, dict, Any], kind: str = "ticket") -> list[d
                       f"The canvas is {c.width:g} × {c.height:g}, which is not the shape of a "
                       f"{page.width_mm:g} × {page.height_mm:g} mm page. Resize it, or change the page."))
     px_per_mm = c.width / page.width_mm
-    qrs = [i for i, l in enumerate(lay.layers) if isinstance(l, QrLayer) and l.source != "profile"]
-    personal = [i for i, l in enumerate(lay.layers) if isinstance(l, QrLayer) and l.source == "profile"]
+    qrs = [i for i, l in enumerate(lay.layers) if isinstance(l, QrLayer) and not l.bind]
+    personal = [i for i, l in enumerate(lay.layers) if isinstance(l, QrLayer) and l.bind]
     if kind in QR_KINDS and not qrs:
         out.append(_p("qr_missing", "layers", "This design needs its QR code: it is what the gate scans."))
     if len(qrs) > 1:
@@ -176,7 +176,7 @@ def problems(layout: Union[LayoutV2, dict, Any], kind: str = "ticket") -> list[d
             if st:
                 out += _font_problems(st.family, st.weight, "normal", f"{at}.placeholderStyle", name, lid)
         elif isinstance(layer, QrLayer):
-            if layer.source != "profile" and (layer.hidden or layer.show_if):
+            if not layer.bind and (layer.hidden or layer.show_if):
                 out.append(_p("qr_hidden", f"{at}.hidden", f"{name}: the QR code is always printed.", layer=lid))
             side_mm = min(layer.width, layer.height) / px_per_mm
             if side_mm < MIN_QR_MM:
