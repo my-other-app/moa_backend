@@ -3,7 +3,10 @@ import json
 import logging
 import uuid
 from datetime import datetime
+from functools import lru_cache
+
 from fastapi.encoders import jsonable_encoder
+from limits import parse
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from pydantic import Field
 from app.config import settings
@@ -92,22 +95,59 @@ async def create_order(
         raise CustomHTTPException(status_code=500, message="Failed to create order", error_code="ORDER_FAILED")
 
 
+#: Verify needs no session (the app sends it without one) and asks Razorpay,
+#: with the keys of the account an order was made on, about any payment id
+#: sent for a known order: limited per order -- one checkout and its retries --
+#: and per address at a ceiling sized for a campus paying behind one Wi-Fi
+#: address after a bulk confirmation, so a flood cannot spend the Razorpay
+#: quota real checkouts need.
+VERIFY_PER_ORDER = "20/minute"
+VERIFY_PER_ADDRESS = "120/minute"
+
+
+@lru_cache(maxsize=None)
+def _rate(text: str):
+    return parse(text)
+
+
+def _count_verify(request: Request, razorpay_order_id: str) -> None:
+    """One verify, counted against both limits; 429 RATE_LIMITED when over."""
+    from app.core.net import client_address
+    from app.core.rate_limit import limiter
+
+    if not limiter.enabled:
+        return
+    for rate, scope, who in (
+        (VERIFY_PER_ORDER, "payments:verify:order", (razorpay_order_id or "")[:64]),
+        (VERIFY_PER_ADDRESS, "payments:verify:address", client_address(request) or "unknown"),
+    ):
+        if not limiter.limiter.hit(_rate(rate), scope, who):
+            raise CustomHTTPException(
+                429, message="Too many payment checks in a short time. Wait a minute and try again.",
+                error_code="RATE_LIMITED", errors={"retry_after": 60},
+            )
+
+
 @router.post("/verify", summary="Verify a payment")
 async def verify_payment(
-    request: PaymentVerifyRequest,
+    request: Request,
+    body: PaymentVerifyRequest,
     session: SessionDep,
     background_tasks: BackgroundTasks,
 ) -> PaymentVerifyResponse:
-
+    """What checkout says was paid, asked of Razorpay and applied. Limited per
+    order and per address (VERIFY_PER_ORDER, VERIFY_PER_ADDRESS): 429
+    RATE_LIMITED; the webhook applies the payment meanwhile."""
     from razorpay.errors import BadRequestError
 
     from app.api.payment_gateways import service as gateways
 
+    _count_verify(request, body.razorpay_order_id)
     try:
         payment = await service.verify_razorpay_payment(
             session=session,
-            razorpay_order_id=request.razorpay_order_id,
-            razorpay_payment_id=request.razorpay_payment_id,
+            razorpay_order_id=body.razorpay_order_id,
+            razorpay_payment_id=body.razorpay_payment_id,
             background_tasks=background_tasks,
         )
     except BadRequestError as exc:
@@ -162,20 +202,24 @@ async def refund_payment(
 
 @router.post("/webhook")
 async def razorpay_webhook(request: Request, session: SessionDep):
+    """The platform account's webhook. Its signature is checked over the
+    body's bytes before anything in the body is read: an unsigned or
+    tampered body is a 400, never parsed. A signed body that is not a JSON
+    object is a 400 too. Without Razorpay's event id the body itself names
+    the event (a hash of it), so a delivery repeated is still one event."""
+    from app.api.payment_gateways import service as gateways
+
     webhook_signature = request.headers.get("X-Razorpay-Signature", "")
-    event_id = request.headers.get("X-Razorpay-Event-Id", "")
-
-    request_body = await request.body()
-    request_body = request_body.decode("utf-8")
-    payload = await request.json()
-
-    try:
-        if not service.razorpay_client.utility.verify_webhook_signature(
-            request_body, webhook_signature, settings.RAZORPAY_WEBHOOK_SECRET
-        ):
-            raise Exception("Invalid webhook signature")
-    except Exception:
+    raw = await request.body()
+    if not gateways.signature_ok(raw, webhook_signature, settings.RAZORPAY_WEBHOOK_SECRET):
         raise HTTPException(status_code=400, detail="Invalid webhook signature")
+    try:
+        payload = json.loads(raw.decode("utf-8") or "{}")
+    except ValueError:
+        raise CustomHTTPException(status_code=400, message="Invalid payload")
+    if not isinstance(payload, dict):
+        raise CustomHTTPException(status_code=400, message="Invalid payload")
+    event_id = request.headers.get("X-Razorpay-Event-Id") or ("body:" + hashlib.sha256(raw).hexdigest()[:40])
 
     try:
         return await service.handle_razorpay_webhook(

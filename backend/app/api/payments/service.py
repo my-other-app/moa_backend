@@ -939,8 +939,20 @@ async def get_payment_totals(session: AsyncSession) -> dict:
     return {**overall, "platform": platform, "club": club}
 
 
+def _already_refunded_answer() -> CustomHTTPException:
+    return CustomHTTPException(
+        409, "This payment has already been refunded in full.", error_code="ALREADY_REFUNDED",
+    )
+
+
 async def refund_payment(session: AsyncSession, payment_log_id) -> PaymentLogs:
-    """Admin-triggered full refund of a captured payment."""
+    """Admin-triggered full refund of a captured payment.
+
+    A payment refunded already -- by another admin a moment before, or from
+    Razorpay's dashboard -- answers 409 ALREADY_REFUNDED, and is recorded
+    here first when it was not yet (once: the row is re-read under its lock).
+    Razorpay refusing the refund for any other reason answers 502
+    REFUND_FAILED, and nothing changes."""
     db_payment = await session.scalar(
         select(PaymentLogs)
         .where(PaymentLogs.id == payment_log_id)
@@ -948,6 +960,8 @@ async def refund_payment(session: AsyncSession, payment_log_id) -> PaymentLogs:
     )
     if not db_payment:
         raise CustomHTTPException(404, "Payment not found")
+    if db_payment.status == PaymentStatus.refunded:
+        raise _already_refunded_answer()
     if db_payment.status != PaymentStatus.captured:
         raise RequestValidationError(
             payment_log_id="Only a captured payment can be refunded"
@@ -966,8 +980,18 @@ async def refund_payment(session: AsyncSession, payment_log_id) -> PaymentLogs:
     rest = {"amount": money.to_paise(money.rupees(db_payment.amount) - done)} if done else None
     # Nothing held while Razorpay answers.
     await session.commit()
-    # No `amount` param — Razorpay refunds the full captured amount.
-    refund_id = _refund_id(await rzp.call(account.client.payment.refund, payment_id, *((rest,) if rest else ())))
+    refused = None
+    try:
+        # No `amount` param — Razorpay refunds the full captured amount.
+        refund_id = _refund_id(await rzp.call(account.client.payment.refund, payment_id, *((rest,) if rest else ())))
+    except Exception as exc:  # noqa: BLE001
+        if not await _already_refunded(account, payment_id):
+            logger.warning("Refund of %s failed: %s", payment_id, type(exc).__name__)
+            raise CustomHTTPException(
+                502, f"Razorpay did not take the refund: {gateways.short_reason(exc)}", error_code="REFUND_FAILED",
+            )
+        # Razorpay holds it as refunded in full already: someone got there first.
+        refund_id, refused = None, _already_refunded_answer()
 
     db_payment = await session.scalar(
         select(PaymentLogs).where(PaymentLogs.id == payment_log_id).options(joinedload(PaymentLogs.order))
@@ -977,6 +1001,8 @@ async def refund_payment(session: AsyncSession, payment_log_id) -> PaymentLogs:
         await _apply_refund(session, db_payment, refund_id=refund_id)
     else:
         await session.commit()
+    if refused is not None:
+        raise refused
     # Read back with its order: the caller reports both, and a refresh alone
     # leaves the order to a lazy load that async IO cannot do.
     db_payment = await session.scalar(
