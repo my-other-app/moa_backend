@@ -3,7 +3,7 @@ phone pages its QR opens."""
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Query, Response
+from fastapi import APIRouter, BackgroundTasks, Query, Request, Response
 
 from app.api.deliveries import service as deliveries
 from app.api.kiosk import self_service, service
@@ -27,6 +27,7 @@ from app.api.kiosk.schemas import (
     VerifyBody,
 )
 from app.core.auth.dependencies import ClubAuth
+from app.core.net import client_address
 from app.db.core import SessionDep
 
 admin_router = APIRouter(prefix="/events/{event_id}/kiosks")
@@ -134,8 +135,8 @@ async def kiosk_self_printed(session: SessionDep, device: KioskAuth, body: Print
 
 
 @self_router.post("/start", summary="A scanned kiosk QR becomes a session on this phone")
-async def self_start(session: SessionDep, body: TokenBody) -> dict:
-    return await self_service.start(session, body.token)
+async def self_start(request: Request, session: SessionDep, body: TokenBody) -> dict:
+    return await self_service.start(session, body.token, address=client_address(request))
 
 
 @self_router.post("/lookup", summary="Their name, matched whole against the guest list")

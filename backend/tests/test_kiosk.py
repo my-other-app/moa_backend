@@ -1,6 +1,8 @@
 """Kiosks: paired from the dashboard, a ticket read at the screen, "this
 isn't me", staff mode, and a guest checking themselves in from a phone."""
+import asyncio
 import re
+import threading
 import uuid
 from datetime import datetime, timezone
 
@@ -168,3 +170,79 @@ async def test_a_guest_checks_themselves_in_from_a_phone(client, world, outbox):
     already = await client.post("/api/v1/self/lookup", json={"session": sid3, "name": "Ananya Iyer"})
     assert already.json()["outcome"] == "ALREADY_IN" and already.json()["door"] == "Lobby kiosk"
     assert (await client.post("/api/v1/self/start", json={"token": "bad.token"})).status_code == 410
+
+
+async def _email_session(client, world):
+    """Self check-in by email code switched on, and a fresh phone session."""
+    on = await client.patch(_url(world, "/settings"), json={"self_check_in_enabled": True, "self_check_in_verify": "email"}, headers=world["club"])
+    assert on.status_code == 200, on.text
+    qr = await client.get("/api/v1/kiosk/self-qr", headers=world["kiosk"])
+    token = qr.json()["url"].rsplit("/s/", 1)[1]
+
+    async def start():
+        return await client.post("/api/v1/self/start", json={"token": token})
+
+    return start
+
+
+async def test_the_code_mail_goes_on_the_mail_threads_after_the_count_is_kept(client, world, session, monkeypatch):
+    from app.api.kiosk.models import SelfCheckInSessions
+
+    seen = []
+
+    def send_email(**kw):
+        try:
+            asyncio.get_running_loop()
+            on_loop = True
+        except RuntimeError:
+            on_loop = False
+        seen.append({"thread": threading.current_thread().name, "on_loop": on_loop, "to": kw["recipients"]})
+        return {"MessageId": "ses-1"}
+
+    monkeypatch.setattr(email_mod, "send_email", send_email)
+    start = await _email_session(client, world)
+    sid = (await start()).json()["session"]
+    sent = await client.post("/api/v1/self/lookup", json={"session": sid, "name": "Ananya Iyer"})
+    assert sent.json()["outcome"] == "CODE_SENT", sent.text
+    assert seen == [{"thread": seen[0]["thread"], "on_loop": False, "to": ["ananya-k@example.com"]}]
+    assert seen[0]["thread"].startswith("mail")
+    row = await session.get(SelfCheckInSessions, sid, populate_existing=True)
+    assert row.lookups == 1 and row.code_hash and row.registration_id == world["a"].id
+
+
+async def test_code_mails_to_one_guest_are_capped_across_sessions(client, world, outbox, monkeypatch):
+    from app.api.kiosk import self_service
+
+    monkeypatch.setattr(self_service, "CODE_MAILS_PER_GUEST", "2/10 minutes")
+    start = await _email_session(client, world)
+    sid = (await start()).json()["session"]
+    assert (await client.post("/api/v1/self/lookup", json={"session": sid, "name": "Ananya Iyer"})).json()["outcome"] == "CODE_SENT"
+    assert (await client.post("/api/v1/self/resend", json={"session": sid})).json()["outcome"] == "CODE_SENT"
+    other = (await start()).json()["session"]
+    capped = await client.post("/api/v1/self/lookup", json={"session": other, "name": "Ananya Iyer"})
+    assert capped.status_code == 429 and "desk" in capped.json()["message"]
+    assert len(outbox) == 2
+    # Another guest's codes are their own.
+    assert (await client.post("/api/v1/self/lookup", json={"session": other, "name": "Bala Krishnan"})).json()["outcome"] == "CODE_SENT"
+    assert len(outbox) == 3
+
+
+async def test_one_kiosk_qr_opens_only_so_many_sessions_a_minute(client, world, monkeypatch):
+    from app.api.kiosk import self_service
+
+    monkeypatch.setattr(self_service, "START_PER_KIOSK", "2/minute")
+    start = await _email_session(client, world)
+    assert (await start()).status_code == 200
+    assert (await start()).status_code == 200
+    third = await start()
+    assert third.status_code == 429 and third.json()["error_code"] == "RATE_LIMITED"
+
+
+async def test_sessions_from_one_address_stop_at_a_hall_sized_ceiling(client, world, monkeypatch):
+    from app.api.kiosk import self_service
+
+    assert self_service.START_PER_ADDRESS == "600/minute"
+    monkeypatch.setattr(self_service, "START_PER_ADDRESS", "1/minute")
+    start = await _email_session(client, world)
+    assert (await start()).status_code == 200
+    assert (await start()).status_code == 429
