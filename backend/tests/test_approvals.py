@@ -661,3 +661,56 @@ async def test_the_queue_and_the_confirmation_read_the_new_index(session, make_c
     assert "ix_registration_requests_queue" in decided and "Sort" not in decided
     assert "ix_registration_requests_queue" in counts
     assert "Seq Scan" not in lock and ("ix_registration_requests_pending" in lock or "registration_requests_pkey" in lock)
+
+
+async def _push_job_ids(session) -> list[int]:
+    from app.api.approvals import notify
+
+    return list((await session.scalars(select(jobs.Jobs.id).where(jobs.Jobs.name == notify.PUSH_JOB))).all())
+
+
+async def test_a_push_that_times_out_is_tried_again_without_the_email(client, session, shop, make_user, mint_token, monkeypatch):
+    """FCM hangs past the push's limit: the push job fails and is tried again
+    on its own. The decline email went once, and is not sent again with it
+    (it used to be: one job sent the email and then the push, and its retry
+    started again from the email)."""
+    import asyncio
+    import dataclasses
+
+    from app.api.approvals import notify
+    from app.core.notifications import service as push
+
+    user = await make_user(email="slow-push@example.com", username="slowpush")
+    await session.commit()
+    a = (await ask(client, shop.event, 90, email="slow-push@example.com", headers=auth_header(await mint_token(user)))).json()["approval"]
+    shop.mail.clear()
+    tries = []
+
+    async def slow_then_fine(session_, user_id, title, body, data=None):
+        tries.append(data["type"])
+        if len(tries) == 1:
+            await asyncio.sleep(2.0)  # past the push job's limit, below
+        return True
+
+    monkeypatch.setattr(push, "send_notification_to_user", slow_then_fine)
+    monkeypatch.setitem(jobs._handlers, notify.PUSH_JOB, dataclasses.replace(jobs.handlers()[notify.PUSH_JOB], timeout=0.2))
+    assert (await decline(client, shop, ids=[a["id"]], note="Full")).json()["declined"] == [a["id"]]
+    assert [m["recipients"] for m in shop.mail] == [["slow-push@example.com"]] and tries == ["request_declined"]
+    [job_id] = await _push_job_ids(session)
+    row = await session.get(jobs.Jobs, job_id, populate_existing=True)
+    assert row.finished_at is None and "did not finish" in (row.last_error or "")
+    # The retry comes due: the push goes, and nothing else does.
+    await session.execute(update(jobs.Jobs).where(jobs.Jobs.id == job_id).values(run_at=func.now()))
+    await session.commit()
+    assert await jobs.run_due(ids=[job_id]) == 1
+    assert tries == ["request_declined", "request_declined"] and len(shop.mail) == 1
+    notify_rows = (await session.scalars(select(jobs.Jobs).where(jobs.Jobs.name == approvals.NOTIFY_JOB))).all()
+    assert notify_rows and all(r.finished_at is not None and r.attempts == 1 for r in notify_rows)
+
+
+async def test_a_guest_gets_the_email_and_no_push_job(client, session, shop):
+    """No app account, no device: the email alone, and no push job written."""
+    a = (await ask(client, shop.event, 91)).json()["approval"]
+    shop.mail.clear()
+    assert (await decline(client, shop, ids=[a["id"]])).json()["declined"] == [a["id"]]
+    assert len(shop.mail) == 1 and await _push_job_ids(session) == []

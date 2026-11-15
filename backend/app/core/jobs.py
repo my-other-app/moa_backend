@@ -41,6 +41,15 @@ loop from the requests. Now each is a row in `jobs`:
   nobody watches), and a caller may say otherwise for one job. When a runner
   has room, the most urgent due job of any name goes first, so a ticket is
   not queued behind a hall's survey mails or a close-out report.
+- Priority only orders claims; it frees no slot. So the short jobs someone
+  is waiting on -- an approval or review mail, a receipt, a waiting-list
+  offer, a check-in push, the Network's save notice, one guest's ticket --
+  are registered `urgent=True`, and each runner keeps JOBS_URGENT_SLOTS of
+  its slots (at most all but one) for them alone: every other job together
+  holds at most the rest. However many different long sends run at once, an
+  urgent job finds a free slot within a claim, and an urgent backlog may
+  still use every slot. An urgent handler must be short (a minute or two at
+  most): it is what the kept slots are for.
 - On SIGTERM a runner stops claiming, gives the jobs in hand a while to
   finish, and hands back the rest with the attempt not counted.
 - Finished rows are kept JOBS_KEEP_DAYS, dead ones JOBS_DEAD_KEEP_DAYS, then
@@ -127,6 +136,8 @@ PRIORITIES = (2, 1, 0, -1, -2)
 #: a sheet of registrations imported. 2 and -2 are left for a one-off job
 #: that must go before, or after, all of these.
 HIGH, NORMAL, LOW = 1, 0, -1
+#: The longest an urgent handler may be given: the kept slots are for short work.
+URGENT_MAX_TIMEOUT = 300.0
 
 UNFINISHED = "finished_at IS NULL AND NOT dead"
 DEDUPE_WHERE = f"dedupe_key IS NOT NULL AND {UNFINISHED}"
@@ -213,6 +224,8 @@ class Handler:
     concurrency: Optional[int]
     alert_dead: bool
     priority: int = NORMAL
+    #: A short job someone is waiting on: may use the slots kept for these.
+    urgent: bool = False
 
 
 _handlers: dict[str, Handler] = {}
@@ -224,7 +237,7 @@ def _qualname(fn) -> str:
 
 def handler(
     name: str, *, max_attempts: int = DEFAULT_MAX_ATTEMPTS, timeout: float = DEFAULT_TIMEOUT,
-    concurrency: Optional[int] = None, alert_dead: bool = True, priority: int = NORMAL,
+    concurrency: Optional[int] = None, alert_dead: bool = True, priority: int = NORMAL, urgent: bool = False,
 ):
     """Register `async def fn(payload: dict) -> None` as the job `name`.
 
@@ -233,15 +246,20 @@ def handler(
     overrides it). `priority`: what its jobs are enqueued with unless the
     caller says (HIGH, NORMAL or LOW). `alert_dead=False` only logs a dead
     job -- for the job that delivers admin alerts itself, which must not
-    alert about itself."""
+    alert about itself. `urgent`: a short job someone is waiting on, which
+    may take the slots no other job may (JOBS_URGENT_SLOTS)."""
 
     def register(fn):
         if not asyncio.iscoroutinefunction(fn):
             raise TypeError(f"job {name}: the handler must be an async function")
+        if urgent and float(timeout) > URGENT_MAX_TIMEOUT:
+            raise ValueError(f"job {name}: an urgent job must be short (timeout {timeout:g} s > {URGENT_MAX_TIMEOUT:g} s)")
         known = _handlers.get(name)
         if known is not None and _qualname(known.fn) != _qualname(fn):
             raise ValueError(f"job {name} has two handlers: {_qualname(known.fn)} and {_qualname(fn)}")
-        _handlers[name] = Handler(name, fn, max(1, int(max_attempts)), float(timeout), concurrency, alert_dead, clamp_priority(priority))
+        _handlers[name] = Handler(
+            name, fn, max(1, int(max_attempts)), float(timeout), concurrency, alert_dead, clamp_priority(priority), bool(urgent),
+        )
         return fn
 
     return register
@@ -263,6 +281,18 @@ def _limits_setting() -> dict[str, int]:
 def lease_for(h: Handler) -> float:
     """Seconds a claim of this name holds before it must be renewed."""
     return min(LEASE, h.timeout + LEASE_GRACE)
+
+
+def kept_for_urgent(total: int) -> int:
+    """Of a runner's `total` slots, how many only urgent jobs may take:
+    JOBS_URGENT_SLOTS, but never every slot (one is always left for the
+    rest, or nothing else would ever run)."""
+    return max(0, min(int(settings.JOBS_URGENT_SLOTS or 0), total - 1))
+
+
+def is_urgent(name: str) -> bool:
+    h = _handlers.get(name)
+    return bool(h is not None and h.urgent)
 
 
 def limit_for(h: Handler, total: int) -> int:
@@ -713,17 +743,33 @@ class Runner:
         if self._wake is not None and not self._stopping:
             self._wake.set()
 
-    def _want(self) -> tuple[list[tuple[str, int, float]], int]:
+    def _want(self) -> tuple[list[tuple[str, int, float]], list[tuple[str, int, float]], int, int]:
+        """What to claim now: (urgent names, every other name, the free
+        slots, how many of them the other names may take). Each entry is
+        (name, slots, lease). The other names together never hold more than
+        all but the slots kept for urgent jobs; urgent ones may take any."""
         free = self.concurrency - len(self._running)
         if free <= 0:
-            return [], 0
+            return [], [], 0, 0
         busy = Counter(c.name for c in self._running.values())
-        want = []
+        others_running = sum(n for name, n in busy.items() if not is_urgent(name))
+        others_room = max(0, min(free, self.concurrency - kept_for_urgent(self.concurrency) - others_running))
+        urgent, others = [], []
         for h in _handlers.values():
-            room = min(free, limit_for(h, self.concurrency) - busy[h.name])
+            room = min(free if h.urgent else others_room, limit_for(h, self.concurrency) - busy[h.name])
             if room > 0:
-                want.append((h.name, room, lease_for(h)))
-        return want, free
+                (urgent if h.urgent else others).append((h.name, room, lease_for(h)))
+        return urgent, others, free, others_room
+
+    async def _claim(self) -> list[Claimed]:
+        """The urgent jobs due first, into any free slot; then the rest, into
+        what is left of the slots they may hold."""
+        urgent, others, free, others_room = self._want()
+        got = await claim(self.id, urgent, free) if urgent else []
+        room = min(free - len(got), others_room)
+        if others and room > 0:
+            got += await claim(self.id, others, room)
+        return got
 
     async def _main(self) -> None:
         failures = 0
@@ -732,8 +778,7 @@ class Runner:
             # again, and the wait below returns at once.
             self._wake.clear()
             try:
-                want, free = self._want()
-                got = await claim(self.id, want, free) if want else []
+                got = await self._claim()
                 failures = 0
             except asyncio.CancelledError:
                 raise

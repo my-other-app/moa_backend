@@ -327,3 +327,13 @@ def test_account_mail_to_a_suppressed_address_goes_with_a_warning(wire, monkeypa
     monkeypatch.setattr(suppression, "lookup_sync", lambda addresses: looked.append(addresses) or {})
     email_mod.send_email(recipients=["b@example.com"], subject="x", text="x", html="x", check_suppression=False)
     assert looked == []
+
+
+def test_ses_makes_one_attempt_per_send():
+    """botocore would send again after a read timeout, though SES may have
+    taken the first: the guest's second copy. One attempt; the outbox and the
+    jobs retry, with the attempt recorded."""
+    from app.core.email import transport
+
+    client = transport._new_ses_client("ap-south-1", "AKIAEXAMPLEEXAMPLE", "not-a-real-secret")
+    assert client.meta.config.retries == {"total_max_attempts": 1, "mode": "standard"}

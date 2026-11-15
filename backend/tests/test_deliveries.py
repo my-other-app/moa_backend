@@ -190,13 +190,96 @@ async def test_another_club_cannot_send_or_read(client, world):
 
 
 async def test_one_guests_send_goes_before_a_send_to_everyone(client, session, world, outbox, background):
-    """The job for one guest's ticket is HIGH, so it is not queued behind a
-    hall's survey mails or a close-out; a send to the whole event is NORMAL."""
+    """One guest's ticket is a short urgent job of its own, HIGH, for just
+    their rows: not queued behind a hall's survey mails or a close-out, and
+    never a pump of the event's backlog. A send to the whole event is the
+    event's NORMAL job, deduped on the event and kind."""
     from sqlalchemy import select
 
     from app.core import jobs
 
     await _send(client, world)
     await client.post(f"/api/v1/events/{world['event'].id}/tickets/{world['a'].id}/send", headers=world["club"])
-    rows = (await session.execute(select(jobs.Jobs.payload, jobs.Jobs.priority).where(jobs.Jobs.name == "deliveries.send").order_by(jobs.Jobs.id))).all()
-    assert [(p["kind"], prio) for p, prio in rows] == [("ticket", jobs.NORMAL), ("ticket", jobs.HIGH)]
+    rows = (await session.execute(
+        select(jobs.Jobs.name, jobs.Jobs.payload, jobs.Jobs.priority, jobs.Jobs.dedupe_key)
+        .where(jobs.Jobs.name.in_(["deliveries.send", service.SEND_IDS_JOB])).order_by(jobs.Jobs.id)
+    )).all()
+    assert [(name, prio) for name, _p, prio, _k in rows] == [("deliveries.send", jobs.NORMAL), (service.SEND_IDS_JOB, jobs.HIGH)]
+    assert rows[0].dedupe_key == f"deliveries:{world['event'].id}:ticket"
+    assert jobs.handlers()[service.SEND_IDS_JOB].urgent
+    mine = {d.id for d in await _rows_of(session, world["a"].id)}
+    assert set(map(str, mine)) == set(rows[1].payload["ids"])
+
+
+async def _rows_of(session, registration_id):
+    from sqlalchemy import select
+
+    from app.api.deliveries.models import Deliveries
+
+    return list((await session.scalars(select(Deliveries).where(Deliveries.registration_id == registration_id))).all())
+
+
+async def test_one_guests_job_sends_only_their_ticket(client, session, world, outbox, background):
+    """With the rest of the event's tickets waiting, the guest's own job
+    mails the guest and nobody else."""
+    from app.api.deliveries import pipeline
+    from app.api.deliveries.models import DeliveryKind, DeliveryStatus
+    from app.core import jobs
+
+    # The others' rows, waiting for the event's own send (no job yet).
+    await service.queue(session, world["event"], DeliveryKind.ticket, registration_ids=[world["a"].id, world["c"].id])
+    await service.queue(session, world["event"], DeliveryKind.ticket, registration_ids=[world["b"].id], send=True)
+    await jobs.settle()
+    await pipeline.drain()
+    assert len(outbox["sent"]) == 1
+    assert {d.status for d in await _rows_of(session, world["b"].id)} == {DeliveryStatus.sent}
+    assert {d.status for d in await _rows_of(session, world["a"].id)} == {DeliveryStatus.pending}
+
+
+async def test_the_resumer_adds_no_twin_beside_a_send_to_everyone(client, session, world, outbox, background):
+    """A send to the whole event left its rows untouched for over two minutes
+    (the job is still running them, or waits for a slot): the minute resumer
+    sees them as abandoned, but its job for them is the same one, so there
+    is still one job for the event's tickets, not two pumping it at once."""
+    from datetime import timedelta
+
+    from sqlalchemy import func, select, update
+
+    from app.api.deliveries.models import Deliveries, DeliveryKind
+    from app.core import jobs
+
+    await service.queue(session, world["event"], DeliveryKind.ticket, send=True)
+    unfinished = select(func.count()).select_from(jobs.Jobs).where(
+        jobs.Jobs.name == "deliveries.send", jobs.Jobs.finished_at.is_(None), jobs.Jobs.dead == False,  # noqa: E712
+    )
+    assert await session.scalar(unfinished) == 1
+    await session.execute(
+        update(Deliveries).where(Deliveries.event_id == world["event"].id)
+        .values(updated_at=func.now() - timedelta(minutes=3))
+    )
+    await session.commit()
+    for _ in range(3):
+        resumed = await service.resume(session)
+        assert resumed["started"] == 1
+    assert await session.scalar(unfinished) == 1
+
+
+async def test_sends_are_claimed_oldest_queued_first(client, session, world, outbox, background):
+    from datetime import timedelta
+
+    from sqlalchemy import update
+
+    from app.api.deliveries import pipeline
+    from app.api.deliveries.models import Deliveries, DeliveryKind
+
+    await service.queue(session, world["event"], DeliveryKind.ticket)
+    now = pipeline.now()
+    for reg, age in ((world["a"], 1), (world["b"], 30)):
+        await session.execute(update(Deliveries).where(Deliveries.registration_id == reg.id).values(queued_at=now - timedelta(minutes=age)))
+    await session.commit()
+    db = service._db(session)
+    # One row a claim of one, however the planner joins the pick.
+    [first] = await service._claim(db, [Deliveries.event_id == world["event"].id], 1)
+    [second] = await service._claim(db, [Deliveries.event_id == world["event"].id], 1)
+    assert first.id in {d.id for d in await _rows_of(session, world["b"].id)}
+    assert second.id in {d.id for d in await _rows_of(session, world["a"].id)}

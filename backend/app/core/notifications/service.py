@@ -64,6 +64,11 @@ logger = logging.getLogger(__name__)
 
 #: The most tokens firebase-admin takes in one multicast.
 FCM_BATCH = 500
+#: Tokens per firebase-admin call: the SDK starts a thread per message for
+#: each call (and its HTTP pool keeps 10 connections), so a call of 500 was
+#: 500 threads and ~490 TLS connections thrown away. Batches of FCM_BATCH
+#: go out as calls of this many, one after another.
+FCM_SEND_BATCH = 50
 #: User ids per token lookup: one array bind each, so this only bounds how
 #: much one round trip carries.
 LOOKUP_BATCH = 5000
@@ -501,8 +506,8 @@ async def _send_to_tokens(
     dead: Optional[list] = None,
     badges: Optional[Mapping[str, int]] = None,
 ) -> int:
-    """Send to any number of tokens, FCM_BATCH at a time, each batch on a
-    worker thread. Returns how many devices took it. Tokens FCM says are dead
+    """Send to any number of tokens, FCM_SEND_BATCH at a time (at most
+    FCM_BATCH), each call on a worker thread. Returns how many devices took it. Tokens FCM says are dead
     are added to `dead`, for the caller to remove.
 
     `badges`: each token's badge, its person's unread count; a token not in
@@ -518,7 +523,7 @@ async def _send_to_tokens(
         return 0
 
     sent = 0
-    for batch in _chunks(list(tokens), FCM_BATCH):
+    for batch in _chunks(list(tokens), max(1, min(FCM_SEND_BATCH, FCM_BATCH))):
         counts = {badges.get(token) for token in batch} if badges else {None}
         try:
             if len(counts) == 1:

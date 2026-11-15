@@ -108,7 +108,7 @@ async def send(session, notice_id: int) -> bool:
         return False
 
 
-@jobs.handler(NOTICE_JOB, max_attempts=5, timeout=60.0, priority=jobs.HIGH)
+@jobs.handler(NOTICE_JOB, max_attempts=5, timeout=60.0, priority=jobs.HIGH, urgent=True)
 async def _notice_job(p: dict) -> None:
     async with jobs.scope() as s:
         await send(s, int(p["notice_id"]))

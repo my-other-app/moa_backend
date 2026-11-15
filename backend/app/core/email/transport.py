@@ -23,7 +23,11 @@ One SES client serves the process (`_ses`), built once under a lock: a
 client per mail meant a fresh TLS handshake to ap-south-1 each time -- some
 three round trips from us-east-1, ~0.6 s -- and boto3's default session is
 not safe to build clients from on many threads at once. A built client is.
-Resend's HTTP client is shared the same way.
+Resend's HTTP client is shared the same way. It makes one attempt per send:
+botocore's own retry treats a read timeout as transient and sends again,
+though SES may have taken the first -- the guest's second copy, and a send
+stretched to a minute. The outbox and the jobs retry instead, with backoff
+and the attempt recorded (`MailDeferred`).
 
 Errors: `MailThrottled` (slow down and try again), `MailDeferred` (try
 again later; the mail may or may not have gone), anything else is the
@@ -307,7 +311,8 @@ def _new_ses_client(region: str, key: str, secret: str):
         "ses",
         config=Config(
             region_name=region,
-            retries={"max_attempts": 3, "mode": "standard"},
+            # One attempt: a retry after a read timeout can deliver the mail twice.
+            retries={"total_max_attempts": 1, "mode": "standard"},
             connect_timeout=5,
             read_timeout=20,
             max_pool_connections=max(10, 2 * int(settings.MAIL_CONCURRENCY)),

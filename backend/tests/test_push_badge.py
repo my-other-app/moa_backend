@@ -242,3 +242,13 @@ async def test_a_topic_send_carries_no_badge(fcm):
     assert await push.send_to_topic(topic="club_12", title="New event", body="Hack Night", data={"push_id": "new_event:1"})
     assert fcm.badge("club_12") == "none"
     assert fcm.aps["club_12"]["sound"] == "default"
+
+
+async def test_a_batch_goes_to_firebase_fifty_devices_a_call(fcm):
+    """firebase-admin starts a thread per message for each call: 120 devices
+    are three calls of at most FCM_SEND_BATCH, never one of 120 threads."""
+    tokens = [f"tok-fifty-{i}" for i in range(120)]
+    assert push.FCM_SEND_BATCH == 50
+    assert await push._send_to_tokens(tokens, "Doors at 6", "Lab 3B") == 120
+    assert fcm.calls == [("multicast", 50), ("multicast", 50), ("multicast", 20)]
+    assert set(fcm.aps) == set(tokens)
