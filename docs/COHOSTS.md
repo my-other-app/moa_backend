@@ -82,6 +82,7 @@ Access ends at the next request when the row stops being `accepted`.
 | Running retention now (irreversibly scrubs attendees' data) | `POST /events/{id}/closeout/retention/run` |
 | Changing retention (keep or delete, how long after the end), whether contacts are kept, and who gets the closeout report | `PATCH /events/{id}/closeout/settings` with any of `retention_mode`, `retention_hours`, `keep_contacts`, `report_recipients` changed |
 | Inviting, cancelling and removing co-hosts, and looking for clubs | `POST /events/{id}/cohosts`, `DELETE /events/{id}/cohosts/{invite_id}`, `GET /events/{id}/cohosts/search` |
+| The event's store: making, changing, photographing or taking off an item (the host club's catalogue, shared by its events), choosing what the event offers, switching the store on | `POST /events/{id}/store`, `POST /events/{id}/store/photo`, `PATCH`/`DELETE /events/{id}/store/{item_id}`, `PUT /events/{id}/store/offers`, `PATCH /events/{id}/store/settings` (handing orders over stays open) |
 
 The closeout settings are one route for two kinds of change: the status
 and its clock are the event's (a co-host and an editor may publish or close

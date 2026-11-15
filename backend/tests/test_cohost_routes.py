@@ -118,16 +118,18 @@ ROUTES = {
     # ai
     "GET /api/v1/events/{event_id}/ai/feedback-summary": ALLOW,
     "POST /api/v1/events/{event_id}/ai/feedback-summary/refresh": ALLOW,
-    # store
+    # store: its items are the host club's catalogue, shared by its events,
+    # so changing them or what the event offers is the host's; handing
+    # orders over at the door is everyone's
     "GET /api/v1/events/{event_id}/store": ALLOW,
     "GET /api/v1/events/{event_id}/store/offers": ALLOW,
-    "PUT /api/v1/events/{event_id}/store/offers": ALLOW,
+    "PUT /api/v1/events/{event_id}/store/offers": HOST_ONLY,
     "GET /api/v1/events/{event_id}/store/summary": ALLOW,
-    "PATCH /api/v1/events/{event_id}/store/settings": ALLOW,
-    "POST /api/v1/events/{event_id}/store": ALLOW,
-    "POST /api/v1/events/{event_id}/store/photo": ALLOW,
-    "PATCH /api/v1/events/{event_id}/store/{item_id}": ALLOW,
-    "DELETE /api/v1/events/{event_id}/store/{item_id}": ALLOW,
+    "PATCH /api/v1/events/{event_id}/store/settings": HOST_ONLY,
+    "POST /api/v1/events/{event_id}/store": HOST_ONLY,
+    "POST /api/v1/events/{event_id}/store/photo": HOST_ONLY,
+    "PATCH /api/v1/events/{event_id}/store/{item_id}": HOST_ONLY,
+    "DELETE /api/v1/events/{event_id}/store/{item_id}": HOST_ONLY,
     "GET /api/v1/events/{event_id}/store/orders": ALLOW,
     "POST /api/v1/events/{event_id}/store/orders/{order_id}/handover": ALLOW,
     "POST /api/v1/events/{event_id}/store/orders/{order_id}/fulfil": ALLOW,

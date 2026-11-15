@@ -32,6 +32,12 @@ _HOST_ONLY_WRITES = _rx(
     # Who else co-hosts: inviting, cancelling an invite, removing a co-host.
     r"^/api/v1/events/\d+/cohosts/?$",
     r"^/api/v1/events/\d+/cohosts/\d+$",
+    # The store: its items are the host club's catalogue, shared by every
+    # event that offers them, so making, pricing, restocking, photographing
+    # or taking one off, choosing what the event offers and switching the
+    # store on are the host's (docs/COHOSTS.md: a co-host only ever reaches
+    # its own catalogue). Handing orders over at the door stays open.
+    r"^/api/v1/events/\d+/store(?:/(?!orders(?:/|$))[^/]+)?$",
 )
 # Not here, because the path alone cannot say: changing an event's retention
 # or the closeout report's recipients (PATCH .../closeout/settings, whose
