@@ -746,6 +746,7 @@ async def list_event_registrations(
     missing: str | None = None,
     sort: str = "name",
     order: str | None = None,
+    whole_codes: bool = False,
 ):
     """A page of the event's guest list. `sort`: name (the default, A to Z),
     email, registered (newest first) or checked_in (latest first, the not
@@ -776,7 +777,18 @@ async def list_event_registrations(
         conditions.append(EventRegistrationsLink.is_paid == is_paid)
     if role is not None:
         conditions.append(EventRegistrationsLink.role == role)
-    if search:
+    if search and whole_codes:
+        # Door staff read the list masked (club_access.door): a name, or an
+        # email, number or ticket id typed whole, never a part of one.
+        term = search.strip()
+        conditions.append(
+            (EventRegistrationsLink.full_name.ilike(f"%{term}%"))
+            | (func.lower(EventRegistrationsLink.email) == term.lower())
+            | (EventRegistrationsLink.phone == term)
+            | (EventRegistrationsLink.ticket_id == term.upper())
+            | (EventRegistrationsLink.ticket_id == term)
+        )
+    elif search:
         search_pattern = f"%{search}%"
         conditions.append(
             (EventRegistrationsLink.full_name.ilike(search_pattern))

@@ -285,6 +285,11 @@ webhooks_wiring.install()
 from app.api.subscriptions.gates import RequestScope as PlanGateScope  # noqa: E402
 
 application.add_middleware(PlanGateScope)
+# Door staff read the guest data routes with contacts and ticket ids masked
+# (app/api/club_access/door.py). Inside the tags, so a tag is of what is sent.
+from app.api.club_access.door import DoorMasks  # noqa: E402
+
+application.add_middleware(DoorMasks)
 # A weak ETag on the API's JSON, and a 304 when the caller already has it
 # (APP_ETAGS; app/core/middlewares/etag_middleware.py). Inside CORS, so a
 # 304 to another origin carries the CORS headers too.

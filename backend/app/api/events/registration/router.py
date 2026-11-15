@@ -20,6 +20,7 @@ from app.api.events.registration.schemas import (
     SetWinnerRequest,
 )
 from app.core.auth.dependencies import AdminAuth, ClubAuth, OptionalUserAuth
+from app.api.club_access import door
 from app.core.auth.permissions import EXPORT_DATA, ContentAuth, ensure_admin_can
 from app.db.core import SessionDep
 from app.api.users.models import UserTypes
@@ -279,6 +280,7 @@ async def list_event_registration(
         missing=missing,
         sort=sort,
         order=order,
+        whole_codes=door.viewer(request),
     )
     return paginated_response(result, request, EventRegistrationPublicMin, total=total)
 
@@ -307,6 +309,7 @@ async def list_event_attendees(
         as_admin=is_admin_user(user),
         sort=sort,
         order=order,
+        whole_codes=door.viewer(request),
     )
     return paginated_response(result, request, EventRegistrationPublicMin, total=total)
 
