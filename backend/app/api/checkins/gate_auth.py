@@ -100,29 +100,28 @@ async def actor_for(session, event: Events, user: Optional[Users], gate_key: Opt
     )
 
 
+def actor_key(actor: GateActor) -> str:
+    """Who is asking, for the gate's own limits: the door of a gate link, else the account."""
+    if actor.door is not None:
+        return f"gate:door:{actor.door.id}"
+    return f"gate:user:{actor.user_id}"
+
+
 async def gate_actor(request: Request, session: SessionDep, event_id: int, user: AnyUser) -> GateActor:
     """The key from the X-Gate-Key header only: a key in the query string
-    lands in every access log between the phone and here."""
+    lands in every access log between the phone and here. A gate link or a
+    volunteer reads the guests masked (club_access.door): `door_view`."""
     event = await load_event(session, event_id)
     actor = await actor_for(session, event, user, request.headers.get(GATE_KEY_HEADER), request.method)
     request.state.gate_event = event
-    return actor
-
-
-async def gate_actor_for_frame(request: Request, session: SessionDep, event_id: int, user: AnyUser) -> GateActor:
-    """For a PDF the console loads into a frame, which cannot send a header:
-    the header, else `?key=` -- deprecated, kept only while the deployed
-    console prints cards that way (moa_web idcards cardPdfUrl). Fetching the
-    PDF with the header and framing the blob ends it."""
-    key = request.headers.get(GATE_KEY_HEADER)
-    if not key and request.query_params.get("key"):
-        key = request.query_params.get("key")
-        logger.info("gate key read from the query string (deprecated) for %s", request.url.path)
-    event = await load_event(session, event_id)
-    actor = await actor_for(session, event, user, key, request.method)
-    request.state.gate_event = event
+    request.state.gate_actor_key = actor_key(actor)
+    request.state.door_view = not actor.full
     return actor
 
 
 GateAuth = Annotated[GateActor, Depends(gate_actor)]
-GateFrameAuth = Annotated[GateActor, Depends(gate_actor_for_frame)]
+#: For a PDF the console prints: the header too, as everywhere. It also read
+#: `?key=`, for consoles deployed before they fetched the PDF with the header
+#: and framed the blob (moa_web idcards PrintFrame); a key in a link could
+#: record a print from anywhere, and landed in the access logs.
+GateFrameAuth = GateAuth

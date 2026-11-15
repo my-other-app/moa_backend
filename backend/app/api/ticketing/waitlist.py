@@ -604,10 +604,10 @@ def _entry_order(sort: Optional[str], order: Optional[str]) -> tuple:
 
 async def entries(
     session, event_id: int, *, status: Optional[str] = None, limit: int = 200, offset: int = 0,
-    q: Optional[str] = None, sort: Optional[str] = None, order: Optional[str] = None,
+    q: Optional[str] = None, sort: Optional[str] = None, order: Optional[str] = None, whole_codes: bool = False,
 ):
     """The event's waiting list for the club. `q`: name, email or phone
-    contains. `sort`: line (the default: those still in line first, in the
+    contains (`whole_codes`, door staff: an email or a phone only typed whole). `sort`: line (the default: those still in line first, in the
     line's order), name, email or joined (newest first); `order` turns it."""
     W = WaitlistEntries
     # The line itself: never the holds a club's confirmations gave (app/api/approvals).
@@ -617,9 +617,12 @@ async def entries(
     text_ = (q or "").strip()[:100]
     if text_:
         pattern = "%" + text_.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-        stmt = stmt.where(
-            W.full_name.ilike(pattern, escape="\\") | W.email.ilike(pattern, escape="\\") | W.phone.ilike(pattern, escape="\\")
-        )
+        if whole_codes:
+            stmt = stmt.where(W.full_name.ilike(pattern, escape="\\") | (func.lower(W.email) == text_.lower()) | (W.phone == text_))
+        else:
+            stmt = stmt.where(
+                W.full_name.ilike(pattern, escape="\\") | W.email.ilike(pattern, escape="\\") | W.phone.ilike(pattern, escape="\\")
+            )
     total = int(await session.scalar(select(func.count()).select_from(stmt.subquery())) or 0)
     rows = list((await session.scalars(stmt.order_by(*_entry_order(sort, order)).limit(limit).offset(offset))).all())
     return rows, total

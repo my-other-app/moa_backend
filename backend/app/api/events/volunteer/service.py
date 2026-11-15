@@ -240,6 +240,15 @@ def _photo_link(pic) -> str | None:
     return pic if isinstance(pic, str) and pic else None
 
 
+CHECK_IN_OFF = "CHECK_IN_NOT_ALLOWED"
+
+
+def refuse_without_check_in(volunteer) -> None:
+    """403 for a volunteer whose "can check in" switch is off: the gate's rule, on the app's old scanner too."""
+    if volunteer is None or not volunteer.can_check_in:
+        raise CustomHTTPException(403, "You may not check guests in at this event.", error_code=CHECK_IN_OFF)
+
+
 async def checkin_user(
     session: AsyncSession, event_id: int, ticker_id: str, volunteer_id: int, background=None
 ) -> None:
@@ -258,8 +267,11 @@ async def checkin_user(
     if event is None:
         raise CustomHTTPException(404, "Event not found", error_code="EVENT_NOT_FOUND")
     volunteer = await session.scalar(select(Volunteer).where(Volunteer.id == volunteer_id))
+    refuse_without_check_in(volunteer)
     user = await session.scalar(select(Users).where(Users.id == volunteer.user_id)) if volunteer and volunteer.user_id else None
-    actor = GateActor(kind="user", name=(user.full_name if user else None) or "Volunteer", user=user, volunteer=volunteer, can_check_in=True)
+    # The volunteer's own switch, as at the gate (checkins.gate_auth): it was
+    # set on here whatever the club had chosen.
+    actor = GateActor(kind="user", name=(user.full_name if user else None) or "Volunteer", user=user, volunteer=volunteer, can_check_in=bool(volunteer.can_check_in))
     result = await checkins.scan(
         session, event, code=ticker_id.strip(), door_label=None, client_ref=None, scanned_at=None, actor=actor, via=CheckInVia.app, background=background
     )

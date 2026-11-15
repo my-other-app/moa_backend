@@ -60,7 +60,7 @@ def _actor(request: Request, user):
 
 @router.get("/events/registration/{event_id}/requests", summary="The event's registration requests, a page at a time")
 async def list_requests(
-    session: SessionDep, user: ClubAuth, event_id: int,
+    request: Request, session: SessionDep, user: ClubAuth, event_id: int,
     status: str = Query("pending", pattern="^(" + "|".join((*STATUSES, "all")) + ")$"),
     q: str | None = Query(None, max_length=100, description="Name, email or phone contains"),
     after: str | None = Query(None, max_length=200, description="The `next` of the page before"),
@@ -72,11 +72,15 @@ async def list_requests(
     """By when they asked (the default): pending -- the queue -- oldest first,
     any other status newest first. By name or email, A to Z; `order` turns
     any of them round. Keyset pages (`next`, valid for the same sort and
-    order), the counts by status, and the places left."""
+    order), the counts by status, and the places left. Door staff read it
+    with contacts masked (club_access.door), and find by name or by a whole
+    email or number."""
+    from app.api.club_access import door
+
     event = await deliveries.event_for_club(session, user, event_id)
     return await service.club_list(
         session, event, status=None if status == "all" else status, q=q, after=after, limit=limit, missing=missing,
-        sort=sort, order=order,
+        sort=sort, order=order, whole_codes=door.viewer(request),
     )
 
 

@@ -521,8 +521,18 @@ async def list_club_followers_endpoint(
     """List followers of a club, newest first, with how many there are in
     all. `next` carries `after=` (a keyset cursor), so a deep page is a range
     of the club's follower index rather than a walk past every follower
-    before it."""
+    before it.
+
+    The club's own (its account, or its team), or a platform admin: any
+    signed-in account -- a guest token from a public registration included --
+    could page through any club's followers by name and photo."""
     from urllib.parse import urlencode
+
+    from app.api.events.access import is_admin_user
+
+    own = getattr(user, "club", None)
+    if not is_admin_user(user) and (own is None or own.id != club_id):
+        raise CustomHTTPException(status_code=403, message="Not your club")
 
     limit = pagination.limit - 1  # PaginationParams asks for one more than the page
     rows, _ = await service.list_club_followers(session=session, club_id=club_id, limit=limit + 1, offset=pagination.offset, after=after)

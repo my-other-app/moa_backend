@@ -71,7 +71,7 @@ async def test_the_card_design_is_edited_like_a_ticket_and_the_custom_card_is_th
 
 async def test_a_card_prints_for_a_guest_and_the_rule_decides_a_second_one(client, world):
     h = world["club"]
-    first = await client.get(_url(world, f"/{world['a'].id}.pdf"), params={"source": "manual"}, headers=h)
+    first = await client.get(_url(world, f"/{world['a'].id}.pdf"), params={"record": "true", "source": "manual"}, headers=h)
     assert first.status_code == 200, first.text
     assert first.headers["content-type"].startswith("application/pdf") and first.content[:4] == b"%PDF"
     summary = await client.get(_url(world, "/summary"), headers=h)
@@ -79,22 +79,22 @@ async def test_a_card_prints_for_a_guest_and_the_rule_decides_a_second_one(clien
     assert [r["role"] for r in summary.json()["by_role"]] == ["attendee", "speaker"]
 
     # Anyone may print again by default; a preview never counts.
-    assert (await client.get(_url(world, f"/{world['a'].id}.pdf"), headers=world["vol"])).status_code == 200
+    assert (await client.get(_url(world, f"/{world['a'].id}.pdf"), params={"record": "true"}, headers=world["vol"])).status_code == 200
     assert (await client.get(_url(world, f"/{world['s'].id}.pdf"), params={"record": "false"}, headers=world["vol"])).status_code == 200
     summary = await client.get(_url(world, "/summary"), headers=h)
     assert summary.json()["printed"] == 1 and summary.json()["jobs"] == 2
 
     # The organiser only: a volunteer's door prints a first card, not a second.
     assert (await client.patch(_url(world, "/settings"), json={"reprint_policy": "organiser"}, headers=h)).json()["reprint_policy"] == "organiser"
-    refused = await client.get(_url(world, f"/{world['a'].id}.pdf"), headers=world["vol"])
+    refused = await client.get(_url(world, f"/{world['a'].id}.pdf"), params={"record": "true"}, headers=world["vol"])
     assert refused.status_code == 403 and "running it" in refused.json()["message"]
-    assert (await client.get(_url(world, f"/{world['s'].id}.pdf"), headers=world["vol"])).status_code == 200
-    assert (await client.get(_url(world, f"/{world['a'].id}.pdf"), headers=h)).status_code == 200
+    assert (await client.get(_url(world, f"/{world['s'].id}.pdf"), params={"record": "true"}, headers=world["vol"])).status_code == 200
+    assert (await client.get(_url(world, f"/{world['a'].id}.pdf"), params={"record": "true"}, headers=h)).status_code == 200
 
     # Never: even the organiser needs to say so.
     assert (await client.patch(_url(world, "/settings"), json={"reprint_policy": "never"}, headers=h)).status_code == 200
-    assert (await client.get(_url(world, f"/{world['a'].id}.pdf"), headers=h)).status_code == 403
-    overrode = await client.get(_url(world, f"/{world['a'].id}.pdf"), params={"override": "true"}, headers=h)
+    assert (await client.get(_url(world, f"/{world['a'].id}.pdf"), params={"record": "true"}, headers=h)).status_code == 403
+    overrode = await client.get(_url(world, f"/{world['a'].id}.pdf"), params={"record": "true", "override": "true"}, headers=h)
     assert overrode.status_code == 200
     jobs = await client.get(_url(world, "/jobs"), headers=h)
     assert jobs.json()[0]["overrode"] is True and jobs.json()[0]["guest"] == "Ananya Iyer"
@@ -104,7 +104,7 @@ async def test_a_card_prints_for_a_guest_and_the_rule_decides_a_second_one(clien
 
 async def test_a_batch_prints_every_card_or_only_the_ones_not_yet_printed(client, world):
     h = world["club"]
-    assert (await client.get(_url(world, f"/{world['a'].id}.pdf"), headers=h)).status_code == 200
+    assert (await client.get(_url(world, f"/{world['a'].id}.pdf"), params={"record": "true"}, headers=h)).status_code == 200
     unprinted = await client.get(_url(world, "/batch.pdf"), params={"scope": "not_printed", "record": "true"}, headers=h)
     assert unprinted.status_code == 200, unprinted.text
     assert unprinted.headers["x-cards"] == "1" and unprinted.content[:4] == b"%PDF"
@@ -129,7 +129,7 @@ async def test_a_check_in_says_whether_to_print(client, world):
     assert (await client.delete(f"/api/v1/events/{world['event'].id}/gate/check-in/{world['a'].id}", headers=h)).status_code == 200
     again = await scan()
     assert again.json()["badge"]["auto"] is True
-    assert (await client.get(_url(world, f"/{world['a'].id}.pdf"), params={"source": "checkin", "door": "Gate A"}, headers=h)).status_code == 200
+    assert (await client.get(_url(world, f"/{world['a'].id}.pdf"), params={"record": "true", "source": "checkin", "door": "Gate A"}, headers=h)).status_code == 200
     resweep = await scan()
     assert resweep.json()["outcome"] == "ALREADY_CHECKED_IN" and resweep.json()["badge"]["auto"] is False
     assert resweep.json()["attendee"]["badge_printed_at"] is not None

@@ -87,13 +87,15 @@ async def validate_ticket(
     Validate a ticket to check if it's valid for entry.
     Does NOT mark the user as attended - use checkin endpoint for that.
     """
-    if not await service.is_volunteer(session, user.id, event_id):
+    volunteer = await service.is_volunteer(session, user.id, event_id)
+    if not volunteer:
         raise CustomHTTPException(
             401,
             "User is not a volunteer for this event",
             error_code="NOT_A_VOLUNTEER",
         )
-    
+    # It answers with the holder's name and email: checking in, as at the gate.
+    service.refuse_without_check_in(volunteer)
     return await service.validate_ticket(session, event_id, ticket_id=request.ticket_id)
 
 

@@ -633,11 +633,16 @@ def decode_cursor(value: Optional[str], sort: str = "submitted") -> Optional[tup
         raise bad from None
 
 
-def _search(q: Optional[str]):
+def _search(q: Optional[str], *, whole_codes: bool = False):
+    """Name, email or phone contains `q`. `whole_codes` (door staff, who read
+    the list masked: club_access.door): an email or a phone only typed whole,
+    so the search cannot spell out what the mask hides a character at a time."""
     q = (q or "").strip()[:100]
     if not q:
         return None
     pattern = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+    if whole_codes:
+        return or_(R.full_name.ilike(pattern, escape="\\"), func.lower(R.email) == q.lower(), R.phone == q)
     return or_(R.full_name.ilike(pattern, escape="\\"), R.email.ilike(pattern, escape="\\"), R.phone.ilike(pattern, escape="\\"))
 
 
@@ -649,7 +654,7 @@ def descending_by_default(sort: str, status: Optional[str]) -> bool:
 
 def list_query(
     event_id: int, *, status: Optional[str], q: Optional[str], after=None, limit: int = 50, only_ids=None,
-    sort: str = "submitted", descending: Optional[bool] = None,
+    sort: str = "submitted", descending: Optional[bool] = None, whole_codes: bool = False,
 ):
     """A page of the event's requests from the cursor. By when they asked
     (the default): the queue (pending) oldest first, walking
@@ -664,7 +669,7 @@ def list_query(
         descending = descending_by_default(sort, status)
     if status in STATUSES:
         stmt = stmt.where(R.status == status)
-    match = _search(q)
+    match = _search(q, whole_codes=whole_codes)
     if match is not None:
         stmt = stmt.where(match)
     column = func.lower(R.full_name) if sort == "name" else func.lower(R.email) if sort == "email" else R.submitted_at
@@ -783,7 +788,7 @@ def _club_item(r: RegistrationRequests, ctx: dict, form, now: datetime) -> dict:
 
 async def club_list(
     session, event, *, status: Optional[str], q: Optional[str], after: Optional[str], limit: int, missing: Optional[str] = None,
-    sort: str = "submitted", order: Optional[str] = None,
+    sort: str = "submitted", order: Optional[str] = None, whole_codes: bool = False,
 ) -> dict:
     """A page of the club's list. `sort`: submitted (the default), name or
     email; `order`: asc or desc (None: the sort's own, descending_by_default)."""
@@ -798,6 +803,7 @@ async def club_list(
     cursor = decode_cursor(after, sort)
     rows = list((await session.scalars(list_query(
         event.id, status=status, q=q, after=cursor, limit=limit, only_ids=only, sort=sort, descending=descending,
+        whole_codes=whole_codes,
     ))).all())
     more = len(rows) > limit
     rows = rows[:limit]

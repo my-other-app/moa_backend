@@ -14,6 +14,7 @@ from app.api.clubs.models import Clubs
 from app.api.deliveries import service as deliveries
 from app.api.events.models import Events
 from app.api.ticketing import codes as codes_mod
+from app.api.ticketing import prices
 from app.api.ticketing import types as types_mod
 from app.api.ticketing import views, waitlist
 from app.api.ticketing.models import OFFERED, REMOVED, WaitlistEntries
@@ -43,6 +44,7 @@ from app.api.ticketing.schemas import (
     WaitlistSettingsOut,
 )
 from app.core.auth.dependencies import ClubAuth, OptionalUserAuth
+from app.core.auth.permissions import EXPORT_DATA, ensure_admin_can
 from app.core.rate_limit import limiter
 from app.core.utils import spreadsheet
 from app.core.utils.spreadsheet import FormatQuery
@@ -78,14 +80,25 @@ async def list_types(session: SessionDep, user: ClubAuth, event_id: int) -> Tick
     return await views.club_types(session, event)
 
 
+async def _live_unless_may_set(session, request, event) -> list | None:
+    """The event's types now, for a caller who may not set prices; None for one who may."""
+    if prices.may_set(request):
+        return None
+    return await types_mod.live(session, event.id, fresh=True)
+
+
 @router.put("/events/{event_id}/ticketing/types", summary="Save the event's ticket types as a list")
-async def save_types(session: SessionDep, user: ClubAuth, event_id: int, body: TicketTypesSave) -> TicketTypesOut:
+async def save_types(request: Request, session: SessionDep, user: ClubAuth, event_id: int, body: TicketTypesSave) -> TicketTypesOut:
     """The event form's editor: a type with an `id` is changed, one without
     is made, one left out is removed (409 TICKET_TYPE_HAS_REGISTRATIONS when
     people hold it: hide it instead). `event_capacity`, when sent, is the
-    event's total across its types."""
+    event's total across its types. An editor's list may change no price and
+    hide nothing (403 ROLE_FORBIDDEN; ticketing.prices)."""
     event = await deliveries.event_for_club(session, user, event_id)
     items = [_fields(i) for i in body.types]
+    types = await _live_unless_may_set(session, request, event)
+    if types is not None and prices.list_changes(event, types, items):
+        raise prices.refuse()
     capacity = body.event_capacity if "event_capacity" in body.model_fields_set else "unchanged"
     await types_mod.save_all(session, event, items, event_capacity=capacity, actor=user)
     event = await deliveries.event_for_club(session, user, event_id)
@@ -93,25 +106,35 @@ async def save_types(session: SessionDep, user: ClubAuth, event_id: int, body: T
 
 
 @router.post("/events/{event_id}/ticketing/types", summary="Add a ticket type", status_code=201)
-async def create_type(session: SessionDep, user: ClubAuth, event_id: int, body: TicketTypeIn) -> TicketTypeOut:
+async def create_type(request: Request, session: SessionDep, user: ClubAuth, event_id: int, body: TicketTypeIn) -> TicketTypeOut:
+    """An editor adds only a free, shown type to a free event (ticketing.prices)."""
     event = await deliveries.event_for_club(session, user, event_id)
+    types = await _live_unless_may_set(session, request, event)
+    if types is not None and prices.new_type_changes(event, types, _fields(body)):
+        raise prices.refuse()
     row = await types_mod.create(session, event, _fields(body), actor=user)
     return await _type_out(session, user, event_id, row.id)
 
 
 @router.patch("/events/{event_id}/ticketing/types/{type_id}", summary="Change a ticket type")
-async def update_type(session: SessionDep, user: ClubAuth, event_id: int, type_id: int, body: TicketTypePatch) -> TicketTypeOut:
+async def update_type(request: Request, session: SessionDep, user: ClubAuth, event_id: int, type_id: int, body: TicketTypePatch) -> TicketTypeOut:
+    """An editor changes neither its price nor whether it is hidden (ticketing.prices)."""
     event = await deliveries.event_for_club(session, user, event_id)
     ttype = await types_mod.get_type(session, event.id, type_id)
     data = {k: getattr(body, k) for k in body.model_fields_set}
+    if not prices.may_set(request) and prices.change_changes(ttype, data):
+        raise prices.refuse()
     await types_mod.update_type(session, event, ttype, data, actor=user)
     return await _type_out(session, user, event_id, type_id)
 
 
 @router.delete("/events/{event_id}/ticketing/types/{type_id}", summary="Remove a ticket type nobody holds")
-async def delete_type(session: SessionDep, user: ClubAuth, event_id: int, type_id: int) -> dict:
+async def delete_type(request: Request, session: SessionDep, user: ClubAuth, event_id: int, type_id: int) -> dict:
+    """An editor removes no priced type (ticketing.prices)."""
     event = await deliveries.event_for_club(session, user, event_id)
     ttype = await types_mod.get_type(session, event.id, type_id)
+    if not prices.may_set(request) and prices.removal_changes(ttype):
+        raise prices.refuse()
     await types_mod.delete_type(session, event, ttype)
     return {"deleted": True}
 
@@ -242,16 +265,20 @@ async def _settings_out(session, event) -> dict:
 
 @router.get("/events/{event_id}/ticketing/waitlist", summary="The event's waiting list")
 async def club_waitlist(
-    session: SessionDep, user: ClubAuth, event_id: int,
+    request: Request, session: SessionDep, user: ClubAuth, event_id: int,
     status: str | None = Query(None, pattern="^(waiting|offered|claimed|expired|removed|left)$"),
     limit: int = Query(200, ge=1, le=1000), offset: int = Query(0, ge=0),
     q: str | None = Query(None, max_length=100, description="Name, email or phone contains"),
     sort: str = Query("line", pattern="^(line|name|email|joined)$", description="line, name, email or joined"),
     order: str | None = Query(None, pattern="^(asc|desc)$", description="asc or desc; unset: the line's order, names A-Z, joined newest first"),
 ) -> WaitlistClubOut:
+    """Door staff read it with contacts masked and no claim links (club_access.door)."""
+    from app.api.club_access import door
+
     event = await deliveries.event_for_club(session, user, event_id)
     rows, total = await waitlist.entries(
         session, event.id, status=status, limit=limit, offset=offset, q=q, sort=sort, order=order,
+        whole_codes=door.viewer(request),
     )
     names = await types_mod.names(session, [r.ticket_type_id for r in rows])
     positions = {r.id: await waitlist.position(session, r) for r in rows if r.status == "waiting"}
@@ -320,6 +347,8 @@ async def remove_entry(session: SessionDep, user: ClubAuth, event_id: int, entry
 
 @router.get("/events/{event_id}/ticketing/waitlist/export", summary="The waiting list as a CSV or Excel file")
 async def export_waitlist(session: SessionDep, user: ClubAuth, event_id: int, fmt: FormatQuery = "csv") -> Response:
+    """Everyone in line, with their contacts: for an admin, a data export (EXPORT_DATA)."""
+    ensure_admin_can(user, EXPORT_DATA)
     event = await deliveries.event_for_club(session, user, event_id)
     stem = f"event_{event.id}_waitlist"
     if fmt == "xlsx":

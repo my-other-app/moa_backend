@@ -3,6 +3,7 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Query, Request
+from slowapi.util import get_remote_address
 
 from app.api.checkins import doors as doors_mod
 from app.api.checkins import service
@@ -33,6 +34,7 @@ from app.api.checkins.schemas import (
 )
 from app.api.deliveries import service as deliveries
 from app.core.auth.dependencies import ClubAuth
+from app.core.rate_limit import limiter
 from app.db.core import SessionDep
 from app.response import CustomHTTPException
 
@@ -134,11 +136,29 @@ async def gate_scan_batch(request: Request, session: SessionDep, actor: GateAuth
     return ScanBatchResult(results=await service.scan_batch(session, _event(request), [s.model_dump() for s in body.scans], actor, background=background_tasks))
 
 
+def _gate_caller(request: Request) -> str:
+    """The gate's limits are per door link or per account (gate_auth.actor_key)."""
+    return getattr(request.state, "gate_actor_key", None) or get_remote_address(request)
+
+
+#: Searches a door link or an account may make: plenty for a busy door, few
+#: for walking the list a name at a time.
+GATE_SEARCH_LIMIT = "90/minute"
+
+
 @router.get("/gate/search", summary="Find a guest by name, email or ticket")
+@limiter.limit(GATE_SEARCH_LIMIT, key_func=_gate_caller)
 async def gate_search(request: Request, session: SessionDep, actor: GateAuth, event_id: int, q: str = Query("", max_length=100)) -> list[GateSearchRow]:
+    """Three characters at least (an admission number typed whole: any).
+    Door staff -- a gate link, a volunteer, a member with the Door role --
+    get the rows with contacts and ticket ids masked (club_access.door), and
+    an email or ticket id matches for them only typed whole."""
+    from app.api.club_access import door
+
     if not actor.permissions["check_in"]:
         raise CustomHTTPException(403, message="You may not check guests in at this door.")
-    return [GateSearchRow(**r) for r in await service.search(session, _event(request), q)]
+    rows = await service.search(session, _event(request), q, whole_codes=door.viewing(request.scope.get("state")))
+    return [GateSearchRow(**r) for r in rows]
 
 
 @router.post("/gate/check-in/{registration_id}", summary="Check a guest in by hand")
@@ -167,6 +187,10 @@ async def gate_walkup(request: Request, session: SessionDep, actor: GateAuth, ev
 
 @router.post("/gate/capture/{registration_id}", summary="A phone number asked for at the door")
 async def gate_capture(request: Request, session: SessionDep, actor: GateAuth, event_id: int, registration_id: UUID, body: CaptureBody) -> CaptureResult:
+    """Part of checking a guest in: a door that may not check guests in may
+    not write their number either."""
+    if not actor.permissions["check_in"]:
+        raise CustomHTTPException(403, message="You may not check guests in at this door.")
     return CaptureResult(**await service.capture_contact(session, _event(request), registration_id, body.phone))
 
 
