@@ -73,7 +73,9 @@ class CheckIns(AbstractSQLModel, TimestampsMixin):
     __tablename__ = "check_ins"
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()"), default=uuid.uuid4)
-    event_id = Column(Integer, ForeignKey("events.id"), nullable=False, index=True)
+    # By event through ix_check_ins_event_checked_in_at (below): a second
+    # index on event_id alone would only cost a write per check-in.
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=False)
     registration_id = Column(UUID(as_uuid=True), ForeignKey("event_registrations_link.id"), nullable=False, unique=True)
     door_id = Column(UUID(as_uuid=True), ForeignKey("doors.id", ondelete="SET NULL"), nullable=True, index=True)
     door_label = Column(String(40), nullable=True)
@@ -90,3 +92,8 @@ class CheckIns(AbstractSQLModel, TimestampsMixin):
     registration = relationship("EventRegistrationsLink")
     door = relationship("Doors")
     by = relationship("Users")
+
+    __table_args__ = (
+        # An event's check-ins, in time order (made by add_doors_check_ins).
+        sa.Index("ix_check_ins_event_checked_in_at", "event_id", "checked_in_at"),
+    )

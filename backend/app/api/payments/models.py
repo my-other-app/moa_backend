@@ -65,6 +65,12 @@ class PaymentOrders(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         ),
         # The repair sweep's walk: orders paid lately.
         sa.Index("ix_payment_orders_paid_updated", "updated_at", postgresql_where=sa.text("status = 'paid'")),
+        # A payer's orders, newest first: the support desk's requester panel
+        # and the admin payments list's payer filter.
+        sa.Index(
+            "ix_payment_orders_user_created", "user_id", sa.text("created_at DESC"),
+            postgresql_where=sa.text("user_id IS NOT NULL"),
+        ),
     )
 
 

@@ -656,7 +656,11 @@ class EventRatingsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     event = relationship("Events", back_populates="ratings")
     user = relationship("Users")
 
-    __table_args__ = (UniqueConstraint("event_id", "user_id", "is_deleted"),)
+    __table_args__ = (
+        UniqueConstraint("event_id", "user_id", "is_deleted"),
+        # A person's ratings (badges read them after each check-in).
+        sa.Index("ix_event_ratings_user", "user_id", postgresql_where=sa.text("NOT is_deleted")),
+    )
 
 
 # ─── events.going_count, kept by the database ─────────────────────────────

@@ -127,6 +127,10 @@ class RegistrationRequests(AbstractSQLModel, TimestampsMixin):
             "ix_registration_requests_registration", "registration_id",
             postgresql_where=sa.text("registration_id IS NOT NULL"),
         ),
+        # The Review list sorted by name or by email (case ignored) within a
+        # status tab: walked in order from the cursor, with no sort of the event's requests.
+        sa.Index("ix_registration_requests_event_name", "event_id", "status", sa.func.lower(full_name), "id"),
+        sa.Index("ix_registration_requests_event_email", "event_id", "status", sa.func.lower(email), "id"),
         CheckConstraint(
             "status IN ('pending', 'approved', 'declined', 'withdrawn', 'lapsed', 'closed')",
             name="ck_registration_requests_status",
