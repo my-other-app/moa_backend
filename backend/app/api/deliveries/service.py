@@ -1287,7 +1287,15 @@ async def log(
 ) -> dict:
     """Every send to every guest, newest first (`order=asc`: oldest first): tickets, certificates and
     messages together. The tally is always the whole event's, so narrowing
-    to the failures never makes the number look smaller than it is."""
+    to the failures never makes the number look smaller than it is.
+
+    The page polls this every 3 s while anything is still sending, and the
+    total and the tally each walk the event's whole send history: both are
+    kept 3 s (app/api/hot_reads), per event and filters, and shared by every
+    tab. The rows of the page are always read afresh; a first page shorter
+    than a page is its own total."""
+    from app.api import hot_reads
+
     s = _sends(event.id)
     problems = [o.value for o in PROBLEM_OUTCOMES]
     base = select(s, EventRegistrationsLink).join(EventRegistrationsLink, EventRegistrationsLink.id == s.c.registration_id)
@@ -1304,7 +1312,6 @@ async def log(
             | EventRegistrationsLink.email.ilike(pat)
             | EventRegistrationsLink.ticket_id.ilike(pat)
         )
-    total = await session.scalar(select(func.count()).select_from(base.subquery())) or 0
     page = max(1, page)
     page_size = max(1, min(page_size, 200))
     rows = (
@@ -1317,6 +1324,16 @@ async def log(
             .offset((page - 1) * page_size)
         )
     ).all()
+    if page == 1 and len(rows) < page_size:
+        total = len(rows)
+    else:
+        async def count() -> int:
+            return int(await session.scalar(select(func.count()).select_from(base.subquery())) or 0)
+
+        total = await hot_reads.kept(
+            ("deliveries-total", event.id, kind, getattr(channel, "value", channel), bool(problem), search or None),
+            hot_reads.DELIVERIES_SECONDS, count,
+        )
     items = []
     for row in rows:
         reg = row.EventRegistrationsLink
@@ -1341,10 +1358,18 @@ async def log(
             "fallback_reason": row.fallback_reason,
         })
 
+    return {"items": items, "total": total, "page": page, "page_size": page_size, "tally": await hot_reads.kept(
+        ("deliveries-tally", event.id, kind), hot_reads.DELIVERIES_SECONDS, lambda: _tally(session, event.id, kind),
+    )}
+
+
+async def _tally(session, event_id: int, kind: Optional[str]) -> dict:
+    """The event's sends by what became of them (of one kind, when given)."""
+    s = _sends(event_id)
     tally_q = select(s.c.status, s.c.outcome, func.count())
     if kind is not None:
         tally_q = tally_q.where(s.c.kind == kind)
-    counts = (await session.execute(tally_q.group_by(s.c.status, s.c.outcome))).all()
+    counts = [tuple(r) for r in (await session.execute(tally_q.group_by(s.c.status, s.c.outcome))).all()]
     n = lambda f: sum(c for st, o, c in counts if f(st, o))  # noqa: E731
     sent, failed, skipped, pending = (x.value for x in (DeliveryStatus.sent, DeliveryStatus.failed, DeliveryStatus.skipped, DeliveryStatus.pending))
     tally = {
@@ -1358,7 +1383,7 @@ async def log(
         "skipped": n(lambda st, o: st == skipped),
         "pending": n(lambda st, o: st == pending),
     }
-    return {"items": items, "total": total, "page": page, "page_size": page_size, "tally": tally}
+    return tally
 
 
 async def by_registration(session, event_id: int, kind: DeliveryKind, registration_ids: list) -> dict:

@@ -5,14 +5,24 @@ or a live update from the room. Each says who it went to, how many opened
 it and how fast. Above the list: how much the club sends, how far it
 reaches, how much of it is opened, when it lands best, and how many of the
 people registered for what is coming can be reached at all.
+
+Pushes are stored one row per person, so a live update to 1,500 people is
+1,500 rows. They are grouped back into sends in SQL (`_grouped`); before,
+every row the club had ever pushed was read into Python and grouped there,
+twice for each open of the page (the list and its figures), and the cost
+grew with every update sent. The list is paged in SQL; the figures read
+every send, kept 30 s (app/api/hot_reads) and forgotten when the club
+pushes something new.
 """
 import hashlib
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, or_, select
+from sqlalchemy.dialects.postgresql import aggregate_order_by, array_agg
 
+from app.api import hot_reads
 from app.api.checkins.models import CheckIns
 from app.api.events.models import EventRegistrationsLink, Events
 from app.api.notifications.models import NotificationStatus, Notifications
@@ -38,83 +48,122 @@ def _slot(dt: datetime) -> str:
     return "night"
 
 
-async def _events(session, club_id: int) -> dict[int, Events]:
-    return {e.id: e for e in (await session.scalars(select(Events).where(Events.club_id == club_id, Events.is_deleted == False))).all()}  # noqa: E712
+def _grouped(club_id: int):
+    """One row per send, grouped from the per-person rows of the club's
+    events: one kind, one title, one body, one event, one minute. Its time is
+    the latest of its rows and its audience that row's, as when Python
+    grouped them newest first."""
+    N = Notifications
+    minute = func.date_trunc("minute", N.created_at)
+    read = N.status == NotificationStatus.read
+    return (
+        select(
+            N.type.label("type"),
+            N.title.label("title"),
+            N.description.label("body"),
+            N.event_id.label("event_id"),
+            func.max(N.created_at).label("created_at"),
+            func.count().label("sent"),
+            func.count().filter(read).label("read"),
+            func.count().filter(read, N.updated_at - N.created_at <= QUICK).label("read_quickly"),
+            array_agg(aggregate_order_by(N.data["audience"].as_string(), N.created_at.desc()))[1].label("audience"),
+        )
+        .join(Events, Events.id == N.event_id)
+        .where(Events.club_id == club_id, Events.is_deleted == False, N.type.in_(list(KINDS)), N.is_deleted == False)  # noqa: E712
+        .group_by(N.type, N.title, N.description, N.event_id, minute)
+    )
+
+
+def _newest_first(g) -> tuple:
+    # Then what tells two sends of one moment apart, so a send is on one page only.
+    return (g.c.created_at.desc(), g.c.event_id.desc(), g.c.type, g.c.title, g.c.body)
+
+
+def _with_event(g):
+    return select(g, Events.name.label("event_name"), Events.event_datetime.label("event_starts_at")).join(Events, Events.id == g.c.event_id)
+
+
+def _send(row) -> dict:
+    """A grouped row, as the page shows a send."""
+    minute = row.created_at.replace(second=0, microsecond=0)
+    sent, read = int(row.sent), int(row.read)
+    return dict(
+        id=hashlib.sha1(f"{row.type}|{row.title}|{row.event_id}|{minute.isoformat()}".encode()).hexdigest()[:16],
+        kind=KINDS[row.type], title=row.title, body=row.body, event_id=row.event_id, created_at=row.created_at,
+        audience=row.audience, sent=sent, read=read, read_quickly=int(row.read_quickly),
+        event=dict(id=row.event_id, name=row.event_name, starts_at=row.event_starts_at),
+        read_pct=round(100 * read / sent) if sent else 0, slot=_slot(row.created_at),
+    )
+
+
+async def _every_send(session, club_id: int) -> list[dict]:
+    g = _grouped(club_id).subquery("sends")
+    return [_send(r) for r in (await session.execute(_with_event(g).order_by(*_newest_first(g)))).all()]
 
 
 async def _sends(session, club_id: int) -> list[dict]:
-    """Every push, grouped from the per-person rows: one send is one title, one body, one event, one minute."""
-    events = await _events(session, club_id)
-    if not events:
-        return []
-    rows = (await session.scalars(
-        select(Notifications).where(Notifications.event_id.in_(list(events)), Notifications.type.in_(list(KINDS)), Notifications.is_deleted == False).order_by(Notifications.created_at.desc())  # noqa: E712
-    )).all()
-    groups: dict = {}
-    for n in rows:
-        minute = n.created_at.replace(second=0, microsecond=0)
-        key = (n.type, n.title, n.description, n.event_id, minute)
-        g = groups.get(key)
-        if g is None:
-            g = groups[key] = dict(
-                id=hashlib.sha1(f"{n.type}|{n.title}|{n.event_id}|{minute.isoformat()}".encode()).hexdigest()[:16],
-                kind=KINDS[n.type], title=n.title, body=n.description, event_id=n.event_id, created_at=n.created_at,
-                audience=(n.data or {}).get("audience") if isinstance(n.data, dict) else None, sent=0, read=0, read_quickly=0,
-            )
-        g["sent"] += 1
-        if n.status == NotificationStatus.read:
-            g["read"] += 1
-            if n.updated_at and n.updated_at - n.created_at <= QUICK:
-                g["read_quickly"] += 1
-    out = []
-    for g in groups.values():
-        e = events.get(g["event_id"])
-        g["event"] = dict(id=e.id, name=e.name, starts_at=e.event_datetime) if e else None
-        g["read_pct"] = round(100 * g["read"] / g["sent"]) if g["sent"] else 0
-        g["slot"] = _slot(g["created_at"])
-        out.append(g)
-    out.sort(key=lambda g: g["created_at"], reverse=True)
-    return out
+    """Every send of the club, newest first, kept 30 s: the figures above the
+    page read all of them. A new send forgets it (`forget`)."""
+    return await hot_reads.kept(("announcements", club_id), hot_reads.ANNOUNCEMENTS_SECONDS, lambda: _every_send(session, club_id))
 
 
-def _matches(g: dict, term: str) -> bool:
-    t = term.lower()
-    return t in (g["title"] or "").lower() or t in (g["body"] or "").lower() or t in ((g["event"] or {}).get("name") or "").lower()
+def forget(*club_ids: Optional[int]) -> None:
+    """These clubs just pushed something: their figures are worked out again."""
+    for club_id in {c for c in club_ids if c is not None}:
+        hot_reads.forget(("announcements", club_id))
 
 
 async def history(session, club_id: int, *, scope: str = "all", search: Optional[str] = None, limit: int = 20, offset: int = 0) -> dict:
-    sends = await _sends(session, club_id)
-    counts = dict(all=len(sends), announcements=sum(1 for g in sends if g["kind"] == "announcement"), live_updates=sum(1 for g in sends if g["kind"] == "live_update"))
+    """A page of the sends, scoped and searched (title, body or event name),
+    and how many of each kind there are in all."""
+    g = _grouped(club_id).subquery("sends")
+    counts = dict(all=0, announcements=0, live_updates=0)
+    for kind, n in (await session.execute(select(g.c.type, func.count()).group_by(g.c.type))).all():
+        counts["announcements" if KINDS.get(kind) == "announcement" else "live_updates"] += int(n)
+        counts["all"] += int(n)
+    where = []
     if scope == "announcements":
-        sends = [g for g in sends if g["kind"] == "announcement"]
+        where.append(g.c.type == "club_announcement")
     elif scope == "live_updates":
-        sends = [g for g in sends if g["kind"] == "live_update"]
-    if search and search.strip():
-        sends = [g for g in sends if _matches(g, search.strip())]
-    return dict(items=sends[offset : offset + limit], total=len(sends), limit=limit, offset=offset, counts=counts)
+        where.append(g.c.type == "event_live_update")
+    term = (search or "").strip().lower()
+    if term:
+        where.append(or_(*(func.strpos(func.lower(func.coalesce(col, "")), term) > 0 for col in (g.c.title, g.c.body, Events.name))))
+    page = _with_event(g).add_columns(func.count().over().label("total")).where(*where).order_by(*_newest_first(g)).limit(limit).offset(offset)
+    rows = (await session.execute(page)).all()
+    if rows:
+        total = int(rows[0].total)
+    elif offset:  # past the end: the page says nothing of how many there are
+        total = int(await session.scalar(select(func.count()).select_from(_with_event(g).where(*where).subquery())) or 0)
+    else:
+        total = 0
+    return dict(items=[_send(r) for r in rows], total=total, limit=limit, offset=offset, counts=counts)
 
 
 async def _reachable(session, event_ids: list[int]) -> dict[int, dict]:
-    """Per event: registered, checked in, and how many of each hold a phone the app can reach."""
+    """Per event: registered, checked in, and how many of each hold a phone
+    the app can reach. Each registration asks about its own check-in and its
+    own person's devices (both indexed), rather than every check-in and
+    device on the platform being read for the comparison."""
     out = {i: dict(registered=0, checked_in=0, reachable=0, reachable_checked_in=0) for i in event_ids}
     if not event_ids:
         return out
     Reg = EventRegistrationsLink
-    tokened = select(UserDeviceTokens.user_id).where(UserDeviceTokens.is_deleted == False).distinct().subquery()  # noqa: E712
-    checked = select(CheckIns.registration_id).subquery()
+    came = exists().where(CheckIns.registration_id == Reg.id)
+    tokened = exists().where(UserDeviceTokens.user_id == Reg.user_id, UserDeviceTokens.is_deleted == False)  # noqa: E712
     q = (
         select(
             Reg.event_id,
             func.count(),
-            func.count().filter(Reg.id.in_(select(checked.c.registration_id))),
-            func.count().filter(Reg.user_id.in_(select(tokened.c.user_id))),
-            func.count().filter(Reg.user_id.in_(select(tokened.c.user_id)) & Reg.id.in_(select(checked.c.registration_id))),
+            func.count().filter(came),
+            func.count().filter(tokened),
+            func.count().filter(tokened & came),
         )
         .where(Reg.event_id.in_(event_ids), Reg.is_deleted == False)  # noqa: E712
         .group_by(Reg.event_id)
     )
-    for eid, regs, came, reach, reach_came in (await session.execute(q)).all():
-        out[eid].update(registered=regs, checked_in=came, reachable=reach, reachable_checked_in=reach_came)
+    for eid, regs, checked, reach, reach_came in (await session.execute(q)).all():
+        out[eid].update(registered=regs, checked_in=checked, reachable=reach, reachable_checked_in=reach_came)
     return out
 
 

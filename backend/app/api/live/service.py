@@ -1545,6 +1545,10 @@ async def push_update(session, event: Events, kind: str, text_: str, audience: s
         row.pushed = len(told)
     await session.commit()
     room.room_changed(event.id)
+    if user_ids:
+        from app.api.clubs import announcements_page
+
+        announcements_page.forget(event.club_id)
     return update_out(row)
 
 

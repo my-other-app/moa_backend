@@ -35,10 +35,14 @@ def type_status(event, ttype, left: Optional[int], now: datetime) -> str:
 async def public(session, event, *, include_hidden: Optional[int] = None, viewer=None) -> dict:
     """The event page's tickets. Hidden types are left out, but for the one
     a link names (`include_hidden`). Makes the event's default type when it
-    has none (the caller commits)."""
+    has none (the caller commits).
+
+    `event` is as its caller read it in this request (both pages read it just
+    before): its counts are not read again, and the types are read once, as
+    the database holds them now. They were read three times (to make sure of
+    the default, then the event's counts and the types again)."""
     now = _now()
-    await types_mod.ensure(session, event)
-    types = await places.fresh(session, event)
+    types = await types_mod.ensure(session, event, fresh=True)
     room = places.compute(event, types, await places.lines(session, event.id, now=now))
     wl_on = await waitlist.enabled(session, event)
     settings_row = await waitlist.settings_for(session, event.id) if wl_on else None

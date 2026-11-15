@@ -7,7 +7,13 @@ the product that reaches a user's device and cannot be recalled.
 Notifications are stored one row per recipient, so they are grouped back into
 the send they came from, the same way the club-facing endpoint does: by title,
 event and hour.
+
+The platform's largest table: one row per person per push. So the page looks
+back `days` (90 by default) rather than over everything ever sent, and the
+groups are made once, with the page's total counted alongside (a window
+count), rather than once to count them and again for the page.
 """
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,12 +28,14 @@ async def list_sent_announcements(
     club_id: int | None = None,
     limit: int = 20,
     offset: int = 0,
+    days: int = 90,
 ) -> tuple[list[dict], int]:
     hour = func.date_trunc("hour", Notifications.created_at).label("hour")
 
     filters = [
         Notifications.type == "club_announcement",
         Notifications.is_deleted == False,
+        Notifications.created_at >= datetime.now(timezone.utc) - timedelta(days=days),
     ]
     if club_id is not None:
         filters.append(Notifications.from_club_id == club_id)
@@ -46,6 +54,7 @@ async def list_sent_announcements(
             .filter(Notifications.status == NotificationStatus.read)
             .label("read_count"),
             func.min(Notifications.created_at).label("created_at"),
+            func.count().over().label("total"),
         )
         .where(*filters)
         .group_by(
@@ -58,11 +67,13 @@ async def list_sent_announcements(
         .order_by(func.min(Notifications.created_at).desc())
     )
 
-    total = await session.scalar(
-        select(func.count()).select_from(grouped.subquery())
-    )
-
     rows = (await session.execute(grouped.limit(limit).offset(offset))).all()
+    if rows:
+        total = int(rows[0].total)
+    elif offset:  # past the last page, no row carries it
+        total = int(await session.scalar(select(func.count()).select_from(grouped.subquery())) or 0)
+    else:
+        total = 0
 
     event_ids = {r.event_id for r in rows if r.event_id}
     club_ids = {r.from_club_id for r in rows if r.from_club_id}
@@ -100,4 +111,4 @@ async def list_sent_announcements(
             "created_at": row.created_at,
         }
         for row in rows
-    ], (total or 0)
+    ], total

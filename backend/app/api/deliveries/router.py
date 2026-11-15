@@ -93,8 +93,14 @@ async def bundle(session: SessionDep, user: ClubAuth, event_id: int) -> Response
 async def deliveries_summary(
     session: SessionDep, user: ClubAuth, event_id: int, kind: DeliveryKind = Query(DeliveryKind.ticket)
 ) -> DeliverySummary:
+    """Polled every 3 s while anything is still sending: kept 3 s per event
+    and kind, and shared by every tab (app/api/hot_reads)."""
+    from app.api import hot_reads
+
     event = await service.event_for_club(session, user, event_id)
-    return DeliverySummary(**await service.summary(session, event, kind))
+    return DeliverySummary(**await hot_reads.kept(
+        ("deliveries-summary", event.id, kind.value), hot_reads.DELIVERIES_SECONDS, lambda: service.summary(session, event, kind),
+    ))
 
 
 @router.get("/deliveries", summary="Every send to every guest, newest first")

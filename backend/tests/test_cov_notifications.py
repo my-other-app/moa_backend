@@ -509,9 +509,9 @@ async def test_the_whole_team_reads_one_bell(client, session, bell, invites):
 
 
 async def test_the_old_push_history_is_one_row_per_send_newest_first(client, session, hall):
-    """Pinned as it is: every announcement row of the club's events is read
-    into Python and grouped by (title, event, clock hour) there, before
-    paging. The answer is right; the work grows with every push ever sent."""
+    """One row per (title, event, clock hour in India), newest first, grouped
+    and paged in SQL: the answer the Python grouping gave, without reading
+    every recipient's row."""
     e1, e2 = hall.event, hall.other
     users = [hall.asha, hall.bala, hall.chitra, hall.dev]
     base = datetime(2026, 10, 20, 10, 35, tzinfo=timezone.utc)  # 16:05 in India: inside one clock hour either way

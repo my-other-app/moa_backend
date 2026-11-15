@@ -426,7 +426,11 @@ async def notify_event_participants(
         data={"audience": audience, "has_image": image_url is not None},
         line_key=key,
     )
-    
+    # The Announcements page's figures show it at once, not when they next expire.
+    from app.api.clubs import announcements_page
+
+    announcements_page.forget(club_id)
+
     # Send push notification
     sent_count = await send_notification_to_users(
         session=session,
