@@ -11,6 +11,7 @@ from app.api.idcards.models import PrintSource
 from app.api.idcards.schemas import CardSettings, CardSettingsUpdate, CardSummary, PrintJobOut
 from app.api.subscriptions import gates
 from app.core.auth.dependencies import ClubAuth
+from app.core.auth.permissions import EXPORT_DATA, ensure_admin_can
 from app.db.core import SessionDep
 
 router = APIRouter(prefix="/events/{event_id}/idcards")
@@ -41,9 +42,11 @@ async def batch(
     scope: str = Query("all", pattern="^(all|not_printed)$"), role: Optional[str] = Query(None, pattern="^(attendee|speaker|staff)$"), record: bool = Query(False),
 ) -> Response:
     """`record` marks every card in it as printed, which is what the reprint
-    rule and the "not yet printed" scope read."""
+    rule and the "not yet printed" scope read. Every guest's card, with the
+    QR the door scans: for an admin, a data export (EXPORT_DATA)."""
     from app.api.checkins.gate_auth import GateActor
 
+    ensure_admin_can(user, EXPORT_DATA)
     event = await deliveries.event_for_club(session, user, event_id)
     actor = GateActor(kind="user", name=user.full_name or user.email, user=user, full=True)
     pdf, n = await service.batch_pdf(session, event, scope=scope, role=role, record=record, actor=actor)
@@ -54,10 +57,13 @@ async def batch(
 @router.get("/{registration_id}.pdf", summary="One guest's card")
 async def card(
     request: Request, session: SessionDep, actor: GateFrameAuth, event_id: int, registration_id: UUID,
-    source: str = Query("manual", pattern="^(checkin|manual|walkup|kiosk|test)$"), record: bool = Query(True), override: bool = Query(False), door: Optional[str] = Query(None, max_length=40),
+    source: str = Query("manual", pattern="^(checkin|manual|walkup|kiosk|test)$"), record: bool = Query(False), override: bool = Query(False), door: Optional[str] = Query(None, max_length=40),
 ) -> Response:
-    """From the console or the attendees page. Recording it (the default)
-    is what the reprint rule turns on; `record=false` is a preview."""
+    """From the console or the attendees page. `record=true` records the
+    print, which is what the reprint rule turns on; without it, a preview.
+    It recorded by default, so any link to a card -- opened by staff signed
+    in, from anywhere -- marked it printed and the door's reprint was then
+    refused. The door key comes in the X-Gate-Key header only."""
     event = request.state.gate_event
     pdf = await service.card_pdf(session, event, registration_id, actor=actor, source=PrintSource(source), record=record, override=override and actor.full, door=door)
     return Response(content=pdf, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="idcard-{registration_id}.pdf"', "Cache-Control": "no-store"})

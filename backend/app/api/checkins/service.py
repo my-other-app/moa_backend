@@ -484,20 +484,36 @@ async def walkup(session, event: Events, body, actor: GateActor, background_task
 # --- around the gate ----------------------------------------------------------------
 
 
-async def search(session, event: Events, q: str) -> list[dict]:
+#: The fewest characters a search looks with. A shorter one finds only an
+#: admission number typed whole: two letters matched most of a hall.
+SEARCH_MIN = 3
+
+
+async def search(session, event: Events, q: str, *, whole_codes: bool = False) -> list[dict]:
     """Staff looking someone up: by name, email, ticket or admission number.
     An admission number typed whole comes first, off its own index
-    (uq_registrations_event_admission); a person then admits them by hand."""
+    (uq_registrations_event_admission); a person then admits them by hand.
+
+    `whole_codes` (door staff, who read the rows masked): an email or a
+    ticket id matches only typed whole, so the search cannot be walked a
+    character at a time to spell out what the mask hides."""
     q = (q or "").strip()
-    if len(q) < 2:
+    if not q:
         return []
     exact = await by_admission_no(session, event.id, q)
+    if len(q) < SEARCH_MIN:
+        return [summary(exact, exact.attended_on if exact.is_attended else None)] if exact is not None else []
     pat = f"%{q}%"
+    R = EventRegistrationsLink
+    if whole_codes:
+        found = or_(R.full_name.ilike(pat), R.admission_no.ilike(pat), func.lower(R.email) == q.lower(), *_code_filters(q))
+    else:
+        found = or_(R.full_name.ilike(pat), R.email.ilike(pat), R.ticket_id.ilike(pat), R.admission_no.ilike(pat))
     regs = list(
         await session.scalars(
-            select(EventRegistrationsLink).options(*_loaded())
-            .where(EventRegistrationsLink.event_id == event.id, EventRegistrationsLink.is_deleted == False, or_(EventRegistrationsLink.full_name.ilike(pat), EventRegistrationsLink.email.ilike(pat), EventRegistrationsLink.ticket_id.ilike(pat), EventRegistrationsLink.admission_no.ilike(pat)))
-            .order_by(EventRegistrationsLink.full_name).limit(8)
+            select(R).options(*_loaded())
+            .where(R.event_id == event.id, R.is_deleted == False, found)  # noqa: E712
+            .order_by(R.full_name).limit(8)
         )
     )
     if exact is not None:
