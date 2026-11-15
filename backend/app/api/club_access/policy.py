@@ -14,8 +14,8 @@ import re
 ROLE_INFO = {
     "owner": ("Owner", "The club's own account. Everything, including who can sign in."),
     "admin": ("Admin", "Everything except changing who can sign in."),
-    "editor": ("Editor", "Events, attendees, messages, designs and the website. No money, discount codes or club profile."),
-    "door": ("Door", "Check-ins, the gate and hand-overs on the day. Sees events and attendees; changes nothing else and downloads no lists."),
+    "editor": ("Editor", "Events, attendees, messages, designs and the website. No money (ticket prices included), discount codes or club profile."),
+    "door": ("Door", "Check-ins, the gate and hand-overs on the day. Sees events and attendees, their contacts masked; changes nothing else and downloads no lists."),
 }
 
 WRITES = frozenset({"POST", "PUT", "PATCH", "DELETE"})
@@ -259,6 +259,9 @@ def can(role: str) -> dict:
         "exports": editor,
         # Discount codes give tickets away: money (`_DISCOUNT_CODES`).
         "discount_codes": admin,
+        # What tickets cost and hiding a type: money (`allows_ticket_prices`).
+        # Editors still name, describe, cap, schedule and order the types.
+        "ticket_prices": admin,
         # An event's retention (keep or delete its guests' data, and when),
         # whether contacts are kept, and who gets the closeout report: the
         # host's owner and admins only, never a co-host (closeout.router).
@@ -379,6 +382,14 @@ def allows_scope(role: str, scope: str) -> bool:
 
 def allows_event_money(role: str) -> bool:
     return role == "owner" or allows(role, *EVENT_MONEY)
+
+
+def allows_ticket_prices(role: str) -> bool:
+    """Setting what a ticket costs, or hiding a type (a hidden free type is a
+    free ticket for whoever has its link): money, as the event's finance.
+    The path cannot say (the event form saves every type on each save), so
+    app/api/ticketing/prices.py decides from the body, by this rule."""
+    return allows_event_money(role)
 
 
 def allows_action(role: str, kind: str) -> bool:

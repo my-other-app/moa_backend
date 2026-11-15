@@ -243,6 +243,18 @@ async def update_event(
     from app.api.club_access import service as club_access
 
     member = club_access.current_member(request)
+    # What the event charges, with one ticket type following it, is money (app/api/ticketing/prices).
+    from app.api.ticketing import prices
+    from app.api.ticketing import types as ticket_types
+
+    if not prices.may_set(request):
+        from app.api.events.models import Events
+
+        current = await session.get(Events, event_id)
+        if current is not None and not current.is_deleted:
+            types = await ticket_types.live(session, current.id)
+            if prices.fee_changes(current, types, event.has_fee, event.reg_fee):
+                raise prices.refuse()
     updated = await service.update_event(
         session,
         event,
@@ -255,8 +267,6 @@ async def update_event(
     )
     # A single ticket type shows the event's price and cap again; with
     # several, the event's fee is what they charge (app/api/ticketing).
-    from app.api.ticketing import types as ticket_types
-
     await ticket_types.follow_event_edit(session, updated)
     _follow_map_link(background_tasks, updated)
     await _form_meta_on(session, updated)
