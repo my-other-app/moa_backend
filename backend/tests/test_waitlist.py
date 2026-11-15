@@ -376,3 +376,50 @@ async def test_an_offer_reaches_the_app_and_whatsapp_too(client, session, line, 
 
     usage = await session.scalar(select(MessageUsage).where(MessageUsage.club_id == line.club.id, MessageUsage.channel == "email"))
     assert usage is not None and usage.used == 1 and (usage.kinds or {}).get("ticket") == 1
+
+
+async def test_an_offers_push_retried_never_sends_its_email_again(client, session, line, mail, monkeypatch, make_user, mint_token):
+    """The push hangs past its job's limit: that job is tried again on its
+    own; the offer email went once and the offer job is done."""
+    import asyncio
+    import dataclasses
+
+    from sqlalchemy import func
+
+    from app.core.notifications import service as push
+
+    tries = []
+
+    async def slow_then_fine(session_, user_id, title, body, data=None):
+        tries.append(data["type"])
+        if len(tries) == 1:
+            await asyncio.sleep(2.0)
+        return True
+
+    monkeypatch.setattr(push, "send_notification_to_user", slow_then_fine)
+    monkeypatch.setitem(jobs._handlers, waitlist.FOLLOW_UP_JOB, dataclasses.replace(jobs.handlers()[waitlist.FOLLOW_UP_JOB], timeout=0.2))
+    await enable(client, line)
+    taken = (await register(client, line.event, ticket_type_id=line.seat)).json()
+    user = await make_user(email="slow-offer@example.com")
+    await session.commit()
+    joined = await client.post(
+        f"{API}/events/{line.event.id}/waitlist",
+        json={"full_name": "Slow Offer", "ticket_type_id": line.seat, "email": "slow-offer@example.com"},
+        headers=auth_header(await mint_token(user)),
+    )
+    assert joined.status_code == 200, joined.text
+    mail.clear()
+    await remove_registration(client, line, taken["event_registration_id"])
+    await sweep.run_sweep(session)
+    await jobs.settle()
+    offers = [m for m in mail if m.get("recipients") == ["slow-offer@example.com"]]
+    assert len(offers) == 1 and tries == ["waitlist_offer"]
+    [follow_up] = (await session.scalars(select(jobs.Jobs).where(jobs.Jobs.name == waitlist.FOLLOW_UP_JOB))).all()
+    assert follow_up.finished_at is None and "did not finish" in (follow_up.last_error or "")
+    await session.execute(update(jobs.Jobs).where(jobs.Jobs.id == follow_up.id).values(run_at=func.now()))
+    await session.commit()
+    assert await jobs.run_due(ids=[follow_up.id]) == 1
+    assert tries == ["waitlist_offer", "waitlist_offer"]
+    assert len([m for m in mail if m.get("recipients") == ["slow-offer@example.com"]]) == 1
+    [offer_job] = (await session.scalars(select(jobs.Jobs).where(jobs.Jobs.name == "waitlist.offer"))).all()
+    assert offer_job.finished_at is not None and offer_job.attempts == 1

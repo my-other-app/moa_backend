@@ -292,8 +292,12 @@ def test_the_platforms_jobs_have_the_priorities_and_limits_chosen(monkeypatch):
         "club_ops.refund_notice": (H, 4),
         # A place on a waiting list offered to the next in line, and the offer told (app/api/ticketing).
         "waitlist.fill": (H, 4), "waitlist.offer": (H, 4),
+        # The offer's push and WhatsApp message, after its email, as a job of their own.
+        "waitlist.offer_follow_up": (H, 4),
         # A registration request's email or push: received, confirmed, declined, lapsed (app/api/approvals).
         "approvals.notify": (H, 4),
+        # Its push, after the email, as a job of its own: a retry never sends the email again.
+        "approvals.push": (H, 4),
         # The room told the quiz is starting: it is starting now, for a hall at most.
         "live.join_push": (H, 2),
         # An update pushed to the room, and the event going live told to everyone registered.
@@ -784,11 +788,11 @@ def test_the_urgent_jobs_are_the_short_ones_someone_waits_for():
 
     urgent = {n for n, h in jobs.handlers().items() if h.urgent and not n.startswith("test.")}
     assert urgent == {
-        # A registration request's email (received, confirmed, declined...).
-        "approvals.notify",
+        # A registration request's email (received, confirmed, declined...), and its push.
+        "approvals.notify", "approvals.push",
         "payments.receipt",
-        # A place offered from the waiting list.
-        "waitlist.offer",
+        # A place offered from the waiting list: its email, then its push and WhatsApp message.
+        "waitlist.offer", "waitlist.offer_follow_up",
         # The welcome push after a scan at the door.
         "checkins.after",
         # "X saved your profile" (app/api/profiles).

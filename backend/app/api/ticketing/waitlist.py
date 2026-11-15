@@ -715,24 +715,37 @@ def offer_template(*, name: str, event: str, ticket: str, until: str, token: str
 #: then the club's credits, and, like a ticket, never held back when both
 #: are used up (a place nobody hears about would go to waste).
 MESSAGE_KIND = "ticket"
+#: An offer's push and WhatsApp message, after its email: a job of its own,
+#: so a slow push (or a worker stopped mid-push) never sends the email again.
+FOLLOW_UP_JOB = "waitlist.offer_follow_up"
+
+
+async def _offer_in_hand(session, p: dict):
+    """(entry, event, ticket type) while the offer `p` names still stands, else None."""
+    import uuid
+
+    entry = await session.get(WaitlistEntries, uuid.UUID(str(p["entry_id"])), populate_existing=True)
+    if entry is None or entry.status != OFFERED or int(entry.offers_made or 0) != int(p.get("n") or 0):
+        return None
+    event = await session.get(Events, entry.event_id)
+    ttype = await session.get(TicketTypes, entry.ticket_type_id)
+    if event is None or ttype is None:
+        return None
+    return entry, event, ttype
 
 
 @jobs.handler("waitlist.offer", max_attempts=4, timeout=120.0, priority=jobs.HIGH, urgent=True)
 async def _offer_job(p: dict) -> None:
-    """One offer, told: email (retried until it goes), then a push and a
-    WhatsApp message, each once and best effort. The email and the WhatsApp
-    message are counted as the club's messages (MESSAGE_KIND), so its plan's
-    allowance and its prepaid credits pay for them as for a ticket."""
-    import uuid
-
+    """One offer, told: the email (retried until it goes), then the push and
+    the WhatsApp message as a job of their own (FOLLOW_UP_JOB), written once
+    the email has gone. The email and the WhatsApp message are counted as the
+    club's messages (MESSAGE_KIND), so its plan's allowance and its prepaid
+    credits pay for them as for a ticket."""
     async with jobs.scope() as session:
-        entry = await session.get(WaitlistEntries, uuid.UUID(str(p["entry_id"])))
-        if entry is None or entry.status != OFFERED or int(entry.offers_made or 0) != int(p.get("n") or 0):
+        found = await _offer_in_hand(session, p)
+        if found is None:
             return
-        event = await session.get(Events, entry.event_id)
-        ttype = await session.get(TicketTypes, entry.ticket_type_id)
-        if event is None or ttype is None:
-            return
+        entry, event, ttype = found
         link = offer_url(entry.offer_token)
         until = _when(entry.offer_expires_at)
         subject = f"A place opened up at {event.name}"
@@ -762,6 +775,27 @@ async def _offer_job(p: dict) -> None:
                 await session.commit()
             except Exception:  # noqa: BLE001
                 await session.rollback()
+        if entry.user_id is not None or (entry.whatsapp_opt_in and entry.phone):
+            n = int(entry.offers_made or 0)
+            await jobs.enqueue(
+                session, FOLLOW_UP_JOB, {"entry_id": str(entry.id), "n": n}, dedupe_key=f"waitlist:follow-up:{entry.id}:{n}",
+            )
+            await session.commit()
+
+
+@jobs.handler(FOLLOW_UP_JOB, max_attempts=2, timeout=60.0, priority=jobs.HIGH, urgent=True)
+async def _offer_follow_up_job(p: dict) -> None:
+    """The offer's push and WhatsApp message, each best effort, while the
+    offer still stands."""
+    async with jobs.scope() as session:
+        found = await _offer_in_hand(session, p)
+        if found is None:
+            return
+        entry, event, ttype = found
+        link = offer_url(entry.offer_token)
+        until = _when(entry.offer_expires_at)
+        subject = f"A place opened up at {event.name}"
+        ref = f"waitlist:{entry.id}:{entry.offers_made}"
         if entry.user_id is not None:
             try:
                 from app.core.notifications.service import send_notification_to_user

@@ -24,6 +24,10 @@ Pushes, to an app account only (a guest has no device): `request_approved`
 (opens the ticket), `request_approved_pay` (opens the claim, to pay) and
 `request_declined` (an inbox item too), each with the request's `token` and
 `event_id`, as `waitlist_offer` pushes carry theirs. WhatsApp: later.
+
+A push that follows an email is a job of its own (PUSH_JOB), written once
+the email has gone: a slow or failed push, or a worker stopped mid-push, is
+retried on its own and never sends the email again.
 """
 from __future__ import annotations
 
@@ -48,6 +52,8 @@ IST = timezone(timedelta(hours=5, minutes=30))
 #: What these count as against the club's messages (app/api/message_quota): a
 #: message about the person's own ticket, as a waiting-list offer's.
 MESSAGE_KIND = "ticket"
+#: The push after a request's email: a job of its own, so its retry is not the email's.
+PUSH_JOB = "approvals.push"
 
 #: The library email each message is (its key: the stage in lower case).
 STAGE_OF = {
@@ -258,19 +264,12 @@ async def tell(session, request_id, kind: str, stamp: str) -> None:
         if entry is None or entry.status != "offered" or (entry.offer_expires_at and entry.offer_expires_at <= now):
             return
         await _email(session, event, req, kind, key, _values(event, req, names.get(req.ticket_type_id), entry=entry))
-        await _push(
-            session, event, req, "request_approved_pay", title=f"{org} confirmed your registration",
-            body=f"Pay {_rupees(req.amount)} by {_when(entry.offer_expires_at)} to get your ticket for {event.name}.",
-            extra={"claim_token": entry.offer_token, "claim_url": public_urls.site_url(f"/claim/{entry.offer_token}")},
-        )
+        await _push_after(session, req, kind, stamp)
     elif kind == service.DECLINED_NOTE:
         if req.status != DECLINED:
             return
         await _email(session, event, req, kind, key, values)
-        await _push(
-            session, event, req, "request_declined", title=f"Your registration for {event.name}",
-            body=f"{org} couldn't confirm your registration this time.", inbox=True,
-        )
+        await _push_after(session, req, kind, stamp)
     elif kind == service.LAPSED_NOTE:
         if req.status != LAPSED:
             return
@@ -287,6 +286,55 @@ async def tell(session, request_id, kind: str, stamp: str) -> None:
 
         c = await cancellation_of(session, event.id)
         await _email(session, event, req, kind, key, values, reason=c.reason if c is not None else None)
+
+
+async def _push_after(session, req, kind: str, stamp: str) -> None:
+    """The email has gone: its push is written as a job of its own and
+    committed, so from here a retry is the push's alone. None for a guest:
+    a push goes to an app account only."""
+    if await _app_user(session, req.user_id) is None:
+        return
+    await jobs.enqueue(
+        session, PUSH_JOB, {"request_id": str(req.id), "kind": kind, "stamp": stamp},
+        dedupe_key=f"approvals:push:{kind}:{req.id}:{stamp}"[:200],
+    )
+    await session.commit()
+
+
+async def push(session, request_id, kind: str) -> None:
+    """The push that follows a request's email, if what it says is still true."""
+    from app.api.ticketing.models import WaitlistEntries
+
+    req = await session.scalar(
+        select(RegistrationRequests).where(RegistrationRequests.id == request_id).execution_options(populate_existing=True)
+    )
+    if req is None:
+        return
+    event = await session.scalar(
+        select(Events).options(joinedload(Events.club)).where(Events.id == req.event_id).execution_options(include_deleted=True)
+    )
+    if event is None:
+        return
+    org = getattr(event.club, "name", None) or "The organisers"
+    if kind == service.APPROVED_PAY:
+        if req.status != APPROVED or req.waitlist_entry_id is None:
+            return
+        entry = await session.get(WaitlistEntries, req.waitlist_entry_id)
+        if entry is None or entry.status != "offered" or (entry.offer_expires_at and entry.offer_expires_at <= datetime.now(timezone.utc)):
+            return
+        await _push(
+            session, event, req, "request_approved_pay", title=f"{org} confirmed your registration",
+            body=f"Pay {_rupees(req.amount)} by {_when(entry.offer_expires_at)} to get your ticket for {event.name}.",
+            extra={"claim_token": entry.offer_token, "claim_url": public_urls.site_url(f"/claim/{entry.offer_token}")},
+        )
+    elif kind == service.DECLINED_NOTE:
+        if req.status != DECLINED:
+            return
+        await _push(
+            session, event, req, "request_declined", title=f"Your registration for {event.name}",
+            body=f"{org} couldn't confirm your registration this time.", inbox=True,
+        )
+        await session.commit()
 
 
 async def _ticket_id(session, registration_id) -> Optional[str]:
@@ -322,3 +370,9 @@ async def _after_registered(session, req) -> None:
 async def _notify_job(p: dict) -> None:
     async with jobs.scope() as session:
         await tell(session, uuid.UUID(str(p["request_id"])), str(p["kind"]), str(p.get("stamp") or ""))
+
+
+@jobs.handler(PUSH_JOB, max_attempts=3, timeout=60.0, priority=jobs.HIGH, urgent=True)
+async def _push_job(p: dict) -> None:
+    async with jobs.scope() as session:
+        await push(session, uuid.UUID(str(p["request_id"])), str(p["kind"]))
