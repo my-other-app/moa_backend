@@ -318,3 +318,128 @@ def test_what_the_dashboard_offers_matches_the_rules():
         assert can["social_approve"] == policy.allows(role, "POST", "/api/v1/clubs/social/posts/1/approve")
         assert can["social_posts"] == policy.allows(role, "POST", "/api/v1/clubs/social/events/1/posts")
         assert can["integrations"] == policy.allows(role, "POST", "/api/v1/clubs/integrations/keys")
+
+
+# ─── What door staff read of the guests (app/api/club_access/door.py) ─────
+
+#: Door-readable routes whose answer carries an email, a phone or a ticket id
+#: as text and goes out as it is, with why. Every other such route must be
+#: masked for door staff (door.MASKED).
+DOOR_SEES_AS_IS = {
+    "/api/v1/auth/me": "the signed-in account's own",
+    "/api/v1/clubs/access/me": "the member's own",
+    "/api/v1/clubs/access/invite/{token}": "the invited address, to whoever holds the invite (public)",
+    "/api/v1/clubs/info": "the club's own profile",
+    "/api/v1/clubs/info/{club_id}": "a club's public profile",
+    "/api/v1/clubs/messages/credits/purchases/{purchase_id}/receipt": "the club's own receipt",
+    "/api/v1/clubs/whatsapp/conversations": "the club's WhatsApp inbox: the member's WhatsApp permission decides, and replies need the number",
+    "/api/v1/clubs/whatsapp/conversations/{conversation_id}/messages": "the club's WhatsApp inbox, as above",
+    "/api/v1/discover/events/{ref}": "the event's published contact",
+    "/api/v1/events/info/{event_id}": "the caller's own ticket",
+    "/api/v1/events/list": "the caller's own tickets",
+    "/api/v1/events/for-you": "the caller's own tickets",
+    "/api/v1/events/tickets/{ticket_id}": "its holder's own ticket",
+    "/api/v1/events/volunteer/list/{event_id}": "the event's own team, not its guests",
+    "/api/v1/events/{event_id}/team": "the event's own team, not its guests",
+    "/api/v1/orgs/list": "organisations' public contacts (public)",
+    "/api/v1/profiles/{handle}": "a person's profile as they chose to show it to anyone",
+    "/api/v1/profiles/by-code/{code}": "a person's profile as they chose to show it to anyone",
+    "/api/v1/registration-requests/{token}": "the request's own, to whoever holds its link (public)",
+    "/api/v1/waitlist/offers/{token}": "the offer's own, to whoever holds its link (public)",
+}
+_CONTACTS = {"email", "phone", "ticket_id"}
+
+
+def _leaves(annotation):
+    import typing
+
+    args = typing.get_args(annotation)
+    if not args:
+        return [annotation]
+    return [leaf for a in args for leaf in _leaves(a)]
+
+
+def _text_contacts(model, seen=None) -> set:
+    """The fields named email, phone or ticket_id that hold text, anywhere in a response model."""
+    from pydantic import BaseModel
+
+    seen = set() if seen is None else seen
+    if model in seen:
+        return set()
+    seen.add(model)
+    found = set()
+    for name, field in model.model_fields.items():
+        for leaf in _leaves(field.annotation):
+            if not isinstance(leaf, type):
+                continue
+            if name in _CONTACTS and (issubclass(leaf, str) or leaf.__name__ == "EmailStr"):
+                found.add(name)
+            if issubclass(leaf, BaseModel):
+                found |= _text_contacts(leaf, seen)
+    return found
+
+
+def _get_routes():
+    """(full path, route) for every GET the API serves, through its included routers."""
+    from fastapi.routing import APIRoute
+
+    from doth import application
+    from tests.test_cohost_routes import _walk
+
+    for ctx in _walk(application.routes):
+        route = getattr(ctx, "original_route", ctx)
+        if isinstance(route, APIRoute) and "GET" in (getattr(ctx, "methods", None) or route.methods):
+            yield getattr(ctx, "path", route.path), route
+
+
+def _door_readable_with_contacts() -> dict:
+    from pydantic import BaseModel
+
+    from tests.test_cohost_routes import _roles
+
+    out = {}
+    for path, route in _get_routes():
+        concrete = re.sub(r"\{[^}]+\}", "7", path)
+        if not policy.allows("door", "GET", concrete):
+            continue
+        roles = _roles(route.dependant, set())
+        if roles and "club" not in roles:
+            continue  # a club's session (a member's included) is refused there anyway
+        model = route.response_model
+        models = [m for m in _leaves(model) if isinstance(m, type) and issubclass(m, BaseModel)] if model is not None else []
+        found = set().union(*(_text_contacts(m) for m in models)) if models else set()
+        if found:
+            out[path] = (concrete, found)
+    return out
+
+
+def test_no_door_readable_answer_carries_a_guests_contacts_or_ticket_id_unmasked():
+    from app.api.club_access import door
+
+    routes = _door_readable_with_contacts()
+    unmasked = sorted(path for path, (concrete, _) in routes.items() if not door.MASKED.search(concrete) and path not in DOOR_SEES_AS_IS)
+    assert unmasked == [], "masked for door staff (club_access.door.MASKED), or listed in DOOR_SEES_AS_IS with why"
+    # Each guest-list route the door reads is among them, and masked.
+    for path in (
+        "/api/v1/events/registration/{event_id}/list", "/api/v1/events/registration/{event_id}/attendees",
+        "/api/v1/events/registration/{event_id}/requests", "/api/v1/events/{event_id}/ticketing/waitlist",
+        "/api/v1/events/{event_id}/gate/search",
+    ):
+        assert path in routes and door.MASKED.search(routes[path][0]), path
+    # Nothing listed as seen as it is is masked anyway, or gone.
+    assert not [p for p in DOOR_SEES_AS_IS if p in routes and door.MASKED.search(routes[p][0])]
+
+
+def test_every_masked_shape_names_a_route():
+    from app.api.club_access import door
+
+    paths = [re.sub(r"\{[^}]+\}", "7", path) for path, _ in _get_routes()]
+    for shape in door.MASKED_SHAPES:
+        assert any(re.search(shape, p) for p in paths), shape
+
+
+@pytest.mark.parametrize("role,allowed", [("owner", True), ("admin", True), ("editor", False), ("door", False)])
+def test_what_a_ticket_costs_is_money(role, allowed):
+    assert policy.allows_ticket_prices(role) is allowed
+    if role != "owner":
+        assert policy.can(role)["ticket_prices"] is allowed
