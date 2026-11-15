@@ -418,6 +418,8 @@ def _warnings(settings) -> list[Problem]:
     short = [t for t in _text(_get(settings, "SITE_TOKENS")).split(",") if t.strip() and len(t.strip()) < 32]
     if short:
         out.append(Problem("SITE_TOKENS", "has a token shorter than 32 characters, which is ignored", fatal=False))
+    if 0 < len(_text(_get(settings, "HEALTH_TOKEN"))) < 32:
+        out.append(Problem("HEALTH_TOKEN", "is shorter than 32 characters, so it is ignored: /readyz shows its details to no outside caller", fatal=False))
     origins = _get(settings, "CORS_ORIGINS")
     listed = origins.split(",") if isinstance(origins, str) else (origins or [])
     if any(_text(o) == "*" for o in listed):

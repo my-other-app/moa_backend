@@ -10,11 +10,15 @@
   database), so a slow database never gets a healthy process restarted.
 - GET /readyz: readiness. The database answers, its schema is at the code's
   migration head (code deployed ahead of its migration is not ready), and
-  Redis answers when APP_REDIS_URL is set. 503 when any of those fails. It
-  also says who is running the job queue -- the runners heard from in the
-  last minute (app.core.jobs.alive) -- as a warning rather than a failure:
-  with APP_JOBS_WORKER set and no worker alive, jobs pile up, but every
-  request is still served.
+  Redis answers when APP_REDIS_URL is set. 503 when any of those fails. The
+  public answer is only that: `{"ok": true}` or `{"ok": false}`. The
+  details -- each check, the migration heads, who is running the job queue
+  (the runners heard from in the last minute, app.core.jobs.alive, a
+  warning rather than a failure: with APP_JOBS_WORKER set and no worker
+  alive, jobs pile up, but every request is still served) -- go only to a
+  request made inside the API's own container (127.0.0.1, through no
+  proxy: deploy.sh and a shell on the box), or one carrying
+  `X-Health-Token: <APP_HEALTH_TOKEN>`.
 - All four: GET or HEAD, no sign-in, never rate limited (exempt by name, so a
   default limit added later leaves them alone), `Cache-Control: no-store`.
 - GET /api/v1/admin/jobs: the queue per job name (due, scheduled, running,
@@ -24,6 +28,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import logging
 from functools import lru_cache
 from pathlib import Path
@@ -52,6 +58,13 @@ DB_TIMEOUT = 3.0
 READY_TIMEOUT = 1.0
 #: No probe's answer is ever kept by a cache in front.
 NO_STORE = {"Cache-Control": "no-store"}
+#: What lets a caller from outside the box see /readyz's details.
+HEALTH_TOKEN_HEADER = "x-health-token"
+#: A shorter APP_HEALTH_TOKEN is ignored: a guessable one would open the details to anyone.
+MIN_HEALTH_TOKEN = 32
+_LOOPBACK = frozenset({"127.0.0.1", "::1"})
+#: Headers a proxy adds: a request with any of them came through one, so it is not from inside the container.
+_FORWARDED = frozenset({b"x-forwarded-for", b"x-real-ip", b"forwarded"})
 
 _heads: Optional[set[str]] = None
 
@@ -170,6 +183,31 @@ async def healthz(request: Request) -> Response:
     return _answer(request, {"ok": True})
 
 
+def _from_inside(request: Request) -> bool:
+    """Made inside the API's own container: from loopback, through no proxy.
+    Caddy, the Next servers and every other caller reach the API over the
+    network (another address), and a proxy always adds its forwarding
+    header, so neither can pass for this."""
+    client = request.client
+    if client is None or client.host not in _LOOPBACK:
+        return False
+    return not any(name in _FORWARDED for name, _ in request.scope.get("headers") or ())
+
+
+def _has_health_token(request: Request) -> bool:
+    """`X-Health-Token` is APP_HEALTH_TOKEN, compared in constant time on
+    digests (so not even the length of a guess shows)."""
+    expected = (settings.HEALTH_TOKEN or "").strip()
+    given = request.headers.get(HEALTH_TOKEN_HEADER)
+    if len(expected) < MIN_HEALTH_TOKEN or not given:
+        return False
+    return hmac.compare_digest(hashlib.sha256(given.strip().encode()).digest(), hashlib.sha256(expected.encode()).digest())
+
+
+def may_see_details(request: Request) -> bool:
+    return _from_inside(request) or _has_health_token(request)
+
+
 @public_router.api_route("/readyz", methods=["GET", "HEAD"], summary="Readiness: database, migrations, Redis", include_in_schema=False)
 @limiter.exempt
 async def readyz(request: Request) -> Response:
@@ -179,7 +217,8 @@ async def readyz(request: Request) -> Response:
         checks["redis"] = {"ok": bool(await redis.ping())}
     checks["jobs"] = jobs_status(alive)
     ok = all(c.get("ok", True) for name, c in checks.items() if name != "jobs")
-    return _answer(request, {"ok": ok, "checks": checks}, 200 if ok else 503)
+    body = {"ok": ok, "checks": checks} if may_see_details(request) else {"ok": ok}
+    return _answer(request, body, 200 if ok else 503)
 
 
 @admin_router.get("", summary="The job queue per name, and the runners")
