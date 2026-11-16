@@ -51,6 +51,9 @@ class Config:
     error_min_lines: int = 3
     error_ignore_services: frozenset[str] = frozenset()
     mem_low_pct: int = 10
+    #: Alert when the newest backup-*.dump in backup_dir is older than this
+    #: (the nightly one runs at 03:00 IST); 0 turns the alert off.
+    backup_max_age_hours: int = 26
 
     def __repr__(self) -> str:  # the token never appears, even in a traceback's locals
         return f"Config(chat_id={self.chat_id}, host={self.host_label!r})"
@@ -147,6 +150,7 @@ def load(path: str | os.PathLike[str] | None = None, *, check_mode: bool = True)
         error_min_lines=_int(values, "OPS_ERROR_MIN_LINES", 3, 1, 10000),
         error_ignore_services=frozenset(s.strip() for s in values.get("OPS_ERROR_IGNORE_SERVICES", "").split(",") if s.strip()),
         mem_low_pct=_int(values, "OPS_MEM_LOW_PCT", 10, 1, 90),
+        backup_max_age_hours=_int(values, "OPS_BACKUP_MAX_AGE_HOURS", 26, 0, 24 * 30),
     )
 
 

@@ -1,6 +1,9 @@
 """Alerts: one when something goes wrong, one when it recovers, never a
 stream; bursts at most once per 10 minutes with a count."""
 
+import os
+from dataclasses import replace
+
 from conftest import container
 
 from opsbot.alerts import Bursts, Conditions
@@ -286,3 +289,46 @@ def test_journal_and_docker_commands_are_argument_lists():
     ]
     assert host.journal(["-k"], cursor="c0") == [{"MESSAGE": "x", "__CURSOR": "c"}]
     assert runner.calls[-1][-2:] == ["--after-cursor", "c0"]
+
+
+# ─── No backup for too long ──────────────────────────────────────────────────
+
+
+def _dump(cfg, name, age_hours, now):
+    cfg.backup_dir.mkdir(exist_ok=True)
+    path = cfg.backup_dir / name
+    path.write_bytes(b"PGDMP")
+    os.utime(path, (now - age_hours * 3600, now - age_hours * 3600))
+    return path
+
+
+def test_no_backup_for_26_hours_alerts_once_and_a_new_one_clears_it(cfg, host, tmp_path):
+    cfg = replace(cfg, backup_max_age_hours=26)
+    w, clock = make(cfg, host, tmp_path)
+    _dump(cfg, "backup-20261114-213000.dump", 20, clock.now + 60)
+    # Hand-made dumps under other names do not count.
+    _dump(cfg, "pre-migrate-37b04f8-20261116-050000.dump", 1, clock.now + 60)
+    assert ticks(w, clock, 1) == [None]
+    clock.now += 7 * 3600  # the 03:00 run never came: 27 h
+    out = ticks(w, clock, 3)
+    assert "[ALERT] no database backup in 26 h" in out[0] and "backup-20261114-213000.dump" in out[0]
+    assert out[1:] == [None, None]
+    _dump(cfg, "backup-20261116-213000.dump", 0, clock.now)
+    out = ticks(w, clock, 2)
+    assert "[OK] database backup again" in out[0] and "backup-20261116-213000.dump" in out[0] and out[1] is None
+
+
+def test_an_empty_or_missing_backups_folder_alerts(cfg, host, tmp_path):
+    cfg = replace(cfg, backup_max_age_hours=26)
+    w, clock = make(cfg, host, tmp_path)
+    [out] = ticks(w, clock, 1)
+    assert "[ALERT] no database backup in 26 h" in out and "cannot be read" in out
+    cfg.backup_dir.mkdir()
+    w2, clock2 = make(cfg, host, tmp_path / "other")
+    [out] = ticks(w2, clock2, 1)
+    assert "there is none in" in out
+
+
+def test_the_backup_alert_can_be_turned_off(cfg, host, tmp_path):
+    w, clock = make(cfg, host, tmp_path)  # backup_max_age_hours=0
+    assert ticks(w, clock, 2) == [None, None]
