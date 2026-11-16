@@ -34,7 +34,7 @@ pandas==2.2.3
 # dtype -- touch nothing here.
 pillow==13.0.0
 psycopg2-binary==2.9.10
-pyasn1==0.6.4
+pyasn1==0.6.5
 pyasn1_modules==0.4.1
 # 2.12.5+ for google-genai (requirements.txt), the Gemini SDK behind AI assist;
 # 2.12+ for mcp, the MCP SDK (app/api/mcp).
