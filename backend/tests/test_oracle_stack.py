@@ -305,10 +305,10 @@ def test_build_sh_says_all_done_with_what_failed_and_retries_the_backend_once(bu
 
 
 def test_build_sh_reads_versions_without_running_it(build_box):
-    (build_box.src / "VERSIONS").write_text("backend=$(touch pwned) web=43ec75a events=2c3e7de\n")
+    (build_box.src / "VERSIONS").write_text("backend=$(touch executed) web=43ec75a events=2c3e7de\n")
     r = build_box("backend")
     assert r.returncode == 1 and "no sha for backend" in r.stderr
-    assert not (build_box.src.parent / "pwned").exists() and r.calls == []
+    assert not (build_box.src.parent / "executed").exists() and r.calls == []
 
 
 # ─── Settings that change only when .env says so ─────────────────────────────
