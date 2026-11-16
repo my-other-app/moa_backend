@@ -113,12 +113,15 @@ def app_role(_engine):
     if _psql() is None:
         pytest.skip("needs psql")
     with _cursor() as cur:
-        cur.execute(
-            "CREATE TABLE IF NOT EXISTS alembic_version (version_num varchar(32) PRIMARY KEY)"
-        )
-        cur.execute(
-            "INSERT INTO alembic_version VALUES ('stability_indexes') ON CONFLICT DO NOTHING"
-        )
+        # The suite's schema has no migration head; one for these tests only,
+        # dropped after (other tests read it as "never migrated").
+        cur.execute("SELECT to_regclass('public.alembic_version') IS NOT NULL")
+        (had_head,) = cur.fetchone()
+        if not had_head:
+            cur.execute(
+                "CREATE TABLE alembic_version (version_num varchar(32) PRIMARY KEY)"
+            )
+            cur.execute("INSERT INTO alembic_version VALUES ('stability_indexes')")
         cur.execute(
             "CREATE TABLE IF NOT EXISTS app_role_items (id serial PRIMARY KEY, name text)"
         )
@@ -126,6 +129,8 @@ def app_role(_engine):
     with _cursor() as cur:
         for table in ("app_role_items", "app_role_later", "app_role_made_by_app"):
             cur.execute(f"DROP TABLE IF EXISTS {table}")
+        if not had_head:
+            cur.execute("DROP TABLE IF EXISTS alembic_version")
         cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (ROLE,))
         if cur.fetchone():
             cur.execute(f"DROP OWNED BY {ROLE}")
