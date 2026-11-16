@@ -25,6 +25,7 @@ from typing import Optional
 
 from sqlalchemy import and_, or_, select
 
+from app.api.club_access.policy import routed_path
 from app.api.cohosts import policy
 from app.api.cohosts.models import ACCEPTED, EventCohosts
 
@@ -258,7 +259,7 @@ async def gate(session, request, user) -> None:
         return
     if not await is_cohost(session, event_id, club.id):
         return
-    if policy.host_only(request.method, request.url.path):
+    if policy.host_only(request.method, routed_path(request)):
         raise _refuse(host.name)
     note(user.id, event_id, host.club_id)
     try:

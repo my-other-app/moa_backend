@@ -10,6 +10,10 @@ from app.api.security import service as security
 from app.core.email import email as email_mod
 from app.core.rate_limit import limiter
 from tests.conftest import auth_header
+from starlette.requests import Request
+
+from app.api.club_access import policy as access_policy
+from app.api.cohosts import policy as cohost_policy
 
 
 @pytest.fixture
@@ -443,3 +447,29 @@ def test_what_a_ticket_costs_is_money(role, allowed):
     assert policy.allows_ticket_prices(role) is allowed
     if role != "owner":
         assert policy.can(role)["ticket_prices"] is allowed
+
+
+# ─── The rules judge the path the router serves, whole ─────────────────────
+
+
+def _request(path: str, raw: bytes) -> Request:
+    return Request({"type": "http", "method": "POST", "scheme": "https", "server": ("api", 443), "root_path": "",
+                    "path": path, "raw_path": raw, "query_string": b"", "headers": []})
+
+
+async def test_an_encoded_question_mark_does_not_shorten_the_path_the_rules_read():
+    req = _request("/api/v1/events/7/store/orders/a?b/handover", b"/api/v1/events/7/store/orders/a%3Fb/handover")
+    assert req.url.path == "/api/v1/events/7/store/orders/a"  # what the old check read
+    assert access_policy.routed_path(req) == "/api/v1/events/7/store/orders/a?b/handover"
+
+
+async def test_door_staff_and_co_hosts_are_judged_on_the_whole_path():
+    whole = "/api/v1/clubs/finance/payouts?x/y"
+    req = _request(whole, b"/api/v1/clubs/finance/payouts%3Fx/y")
+    assert not access_policy.allows("door", "GET", access_policy.routed_path(req))
+    assert cohost_policy.host_only("GET", access_policy.routed_path(req)) == cohost_policy.host_only("GET", whole)
+
+
+async def test_an_ordinary_path_is_unchanged():
+    req = _request("/api/v1/clubs/events/figures", b"/api/v1/clubs/events/figures")
+    assert access_policy.routed_path(req) == req.url.path

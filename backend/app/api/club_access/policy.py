@@ -179,6 +179,16 @@ _DOOR_WRITES = _rx(
 )
 
 
+def routed_path(request) -> str:
+    """The path the router matched: the request's decoded path, whole.
+
+    Access rules must read this, never `request.url.path`: that one is the
+    path parsed again as an address, so a "?" or "#" sent encoded inside a
+    segment would end it early and the rules would judge a shorter path than
+    the route being served."""
+    return request.scope.get("path") or request.url.path
+
+
 def allows(role: str, method: str, path: str) -> bool:
     method = method.upper()
     if _SELF.search(path) or _BELL.search(path) or _HELP.search(path):
