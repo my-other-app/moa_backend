@@ -703,17 +703,18 @@ async def list_event_ratings(
     user: ClubAuth,
 ):
     """List detailed ratings for an event (Club Admin only)."""
+    limit = pagination.limit - 1  # PaginationParams asks for one more than the page
     ratings = await service.list_event_ratings(
         session=session,
         event_id=event_id,
         user_id=user.id,
-        limit=pagination.limit,
+        limit=limit,
         offset=pagination.offset,
         as_admin=is_admin_user(user),
     )
     # Return raw dict to avoid Pydantic schema mismatch
     return {
-        "limit": pagination.limit,
+        "limit": limit,
         "offset": pagination.offset,
         "total": None,
         "next": None,

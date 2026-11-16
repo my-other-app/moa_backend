@@ -487,8 +487,9 @@ async def list_followers_page(
 ) -> FollowersPage:
     if segment not in followers_insights.SEGMENTS or sort not in followers_insights.SORTS:
         raise CustomHTTPException(422, message="Unknown segment or sort.")
-    items, total, counts = await followers_insights.list_followers(session, user.club.id, segment=segment, search=search, sort=sort, limit=pagination.limit, offset=pagination.offset)
-    return FollowersPage(items=items, total=total, limit=pagination.limit, offset=pagination.offset, counts=counts)
+    limit = pagination.limit - 1  # PaginationParams asks for one more than the page
+    items, total, counts = await followers_insights.list_followers(session, user.club.id, segment=segment, search=search, sort=sort, limit=limit, offset=pagination.offset)
+    return FollowersPage(items=items, total=total, limit=limit, offset=pagination.offset, counts=counts)
 
 
 @router.get("/followers/insights", summary="The audience above the list: growth, who turns up, where from, what they care about")

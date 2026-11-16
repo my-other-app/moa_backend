@@ -81,6 +81,27 @@ async def test_a_guest_rates_a_held_event_once_and_the_clubs_rating_follows(clie
     assert (await client.get(f"{API}/ratings/{held.id}", headers=rated["rival_h"])).status_code == 403
 
 
+
+async def test_the_clubs_ratings_come_a_page_of_the_size_asked_with_none_twice(client, session, make_user, rated):
+    """limit=2 gives two ratings and says 2 (it gave three and said 3, so the
+    next page began with the last one again)."""
+    from app.api.events.models import EventRatingsLink
+
+    held = rated["held"]
+    people = [await make_user(email=f"cov-rate-page-{i}@example.com") for i in range(5)]
+    session.add_all([
+        EventRatingsLink(event_id=held.id, user_id=p.id, rating=float(i % 5), review=f"r{i}", created_at=NOW - timedelta(minutes=i))
+        for i, p in enumerate(people)
+    ])
+    await session.commit()
+    seen = []
+    for offset in (0, 2, 4):
+        page = (await client.get(f"{API}/ratings/{held.id}", params={"limit": 2, "offset": offset}, headers=rated["owner_h"])).json()
+        assert (page["limit"], page["offset"], page["total"], page["next"]) == (2, offset, None, None)
+        seen += [r["review"] for r in page["items"]]
+        assert len(page["items"]) == (2 if offset < 4 else 1)
+    assert seen == [f"r{i}" for i in range(5)]  # newest first, each once
+
 async def test_a_rating_needs_a_held_event_a_ticket_and_a_payment(client, rated):
     h = rated["h"]
     assert (await client.post(f"{API}/rate/{rated['soon'].id}", json={"rating": 4}, headers=h[0])).status_code == 400  # not over yet

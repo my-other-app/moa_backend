@@ -100,3 +100,16 @@ async def test_the_followers_export_as_a_workbook(client, world):
     assert (sneha["registrations"], sneha["came"]) == (1, 0)
     assert (await client.get("/api/v1/clubs/followers/export.csv", params={"format": "ods"}, headers=world["h"])).status_code == 422
     assert (await client.get("/api/v1/clubs/followers/export.csv", params={"segment": "vip", "format": "xlsx"}, headers=world["h"])).status_code == 422
+
+
+async def test_a_page_of_followers_is_the_size_asked_and_the_next_one_follows_on(client, world):
+    """limit=2 gives two followers and says 2 (it gave three and said 3, so
+    the next page began with the last one again)."""
+    seen = []
+    for offset in (0, 2):
+        page = (await client.get("/api/v1/clubs/followers/list", params={"limit": 2, "offset": offset}, headers=world["h"])).json()
+        assert (page["limit"], page["offset"], page["total"], len(page["items"])) == (2, offset, 4, 2)
+        seen += [r["user"]["full_name"] for r in page["items"]]
+    assert seen == ["Sneha J", "Rohan Patil", "Ananya Iyer", "Old Timer"]
+    last = (await client.get("/api/v1/clubs/followers/list", params={"limit": 2, "offset": 4}, headers=world["h"])).json()
+    assert last["items"] == [] and last["total"] == 4
