@@ -695,8 +695,10 @@ async def test_a_lost_answer_is_given_again_even_an_hour_later(client, session, 
     lost = await client.post(f"{API}/auth/refresh", data={"token": first["refresh_token"]})
     assert lost.status_code == 200
     sid = decode_jwt_token(first["refresh_token"])["sid"]
-    # Nothing depends on the clock: the rotation might as well be an hour old.
-    await session.execute(update(UserSessions).where(UserSessions.id == uuid.UUID(sid)).values(rotated_at=datetime.now(timezone.utc) - timedelta(hours=1)))
+    # The rotation is an hour old, and nobody has used the session since
+    # (the rotation is the last time it was seen).
+    hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+    await session.execute(update(UserSessions).where(UserSessions.id == uuid.UUID(sid)).values(rotated_at=hour_ago, last_seen_at=hour_ago))
     await session.commit()
     client.cookies.clear()
 
@@ -708,6 +710,51 @@ async def test_a_lost_answer_is_given_again_even_an_hour_later(client, session, 
     client.cookies.clear()
     onward = await client.post(f"{API}/auth/refresh", data={"token": again.json()["refresh_token"]})
     assert onward.status_code == 200 and decode_jwt_token(onward.json()["refresh_token"])["gen"] == 2
+
+
+async def _rotated_and_used(client, session, make_user, email, *, rotated_ago, seen_after):
+    """Signed in, refreshed once (the answer kept), the rotation moved
+    `rotated_ago` into the past and the session seen `seen_after` it."""
+    from app.core.auth.jwt import decode_jwt_token
+
+    first = await _signed_in(client, make_user, email)
+    new = await client.post(f"{API}/auth/refresh", data={"token": first["refresh_token"]})
+    assert new.status_code == 200
+    client.cookies.clear()
+    sid = uuid.UUID(decode_jwt_token(first["refresh_token"])["sid"])
+    rotated = datetime.now(timezone.utc) - rotated_ago
+    await session.execute(update(UserSessions).where(UserSessions.id == sid).values(rotated_at=rotated, last_seen_at=rotated + seen_after))
+    await session.commit()
+    return first, new.json(), sid
+
+
+async def test_two_refreshes_at_once_both_get_the_new_tokens(client, session, make_user):
+    """Two requests (or tabs) refreshing with the same token within the grace
+    window: both answered, whatever the session did in between."""
+    first, new, sid = await _rotated_and_used(client, session, make_user, "racing@example.com", rotated_ago=timedelta(seconds=5), seen_after=timedelta(seconds=1))
+    again = await client.post(f"{API}/auth/refresh", data={"token": first["refresh_token"]})
+    assert again.status_code == 200, again.text
+    assert again.json()["refresh_token"] == new["refresh_token"]
+
+
+async def test_the_old_token_after_the_new_ones_were_used_ends_the_session(client, session, make_user):
+    """Past the grace window, the token just replaced turns up again although
+    someone has been using the session with the new tokens since: two
+    parties hold it, and it ends."""
+    first, new, sid = await _rotated_and_used(client, session, make_user, "alongside@example.com", rotated_ago=timedelta(minutes=20), seen_after=timedelta(minutes=10))
+    late = await client.post(f"{API}/auth/refresh", data={"token": first["refresh_token"]})
+    assert late.status_code == 401 and late.json()["error_code"] == "SESSION_REUSED"
+    assert await session.scalar(select(UserSessions.revoked).where(UserSessions.id == sid).execution_options(populate_existing=True)) is True
+    assert (await client.get(f"{API}/auth/me", headers=auth_header(new["access_token"]))).status_code == 401
+
+
+async def test_with_no_grace_window_the_old_token_is_answered_again_as_before(client, session, make_user, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "REFRESH_RESEND_GRACE_SECONDS", 0)
+    first, new, sid = await _rotated_and_used(client, session, make_user, "nowindow@example.com", rotated_ago=timedelta(minutes=20), seen_after=timedelta(minutes=10))
+    again = await client.post(f"{API}/auth/refresh", data={"token": first["refresh_token"]})
+    assert again.status_code == 200 and again.json()["refresh_token"] == new["refresh_token"]
 
 
 async def test_once_the_new_token_is_used_the_old_one_ends_the_session(client, session, make_user):

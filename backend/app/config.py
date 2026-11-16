@@ -470,6 +470,13 @@ class AppConfig(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int
     REFRESH_TOKEN_EXPIRE_DAYS: int
 
+    # A refresh token just replaced (app/api/auth/sessions.py): within this
+    # many seconds of its rotation it is answered with its successor again
+    # (two requests or tabs refreshing at once); after that only while the
+    # session has not been used since (the answer was lost). Otherwise the
+    # session ends as reused. 0: answered again whenever, as before.
+    REFRESH_RESEND_GRACE_SECONDS: int = 300
+
     # A guest-list or organisation import (app/core/utils/excel.py): the most
     # an upload may be (MB), what a workbook may unpack to (MB), and the most
     # rows taken at once. Past any of them the import is refused with 413.
