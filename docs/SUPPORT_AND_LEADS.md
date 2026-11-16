@@ -63,7 +63,10 @@ skipping anyone away; nobody available leaves it Unassigned.
 -> resolved -> closed`. A reply from the person within 7 days of Resolved
 reopens the case; to a closed case, or later, it opens a new case with
 `parent_case_id` pointing at the old. The same person writing about the same
-subject within an hour joins the case they have. On Resolved the person gets
+subject within an hour joins the case they have: an account by the account,
+a guest (whose address nobody checked) only a guest's case with that address,
+never an account holder's. A guest's joined message is answered
+`{id: null, number: null, status: "new"}`: the case isn't named back. On Resolved the person gets
 "Did we solve it?" (yes/no links to `https://myotherapp.in/help/survey/{token}?solved=yes|no`;
 the website posts `POST /api/v1/support/survey/{token}`); "no" reopens it.
 
@@ -103,7 +106,13 @@ refunds and disputes, the clubs they run (their club account, and clubs where
 they are an active team member), and the requester's club -- each with the
 admin portal's path (`/users/{id}`, `/clubs/{id}`, `/events/{id}`,
 `/payments?q=...`). A guest is matched to an app account by address
-(`matched_by: email`).
+(`matched_by: email`, and the account's `matched` line says only the address
+matched, unchecked).
+
+**Receipts.** A case opened from the app, the website or the dashboard gets a
+receipt with its number. An account's echoes its subject; a guest's is in
+fixed words (`[#n] We have your request`, no name, no subject), and at most
+100 an hour go to guests altogether (past that the case opens without one).
 
 **Tabs.** `mine`, `unassigned`, `open`, `waiting`, `resolved`, `all`, and
 `spam` (mail SES called spam: closed, tagged `spam`, in no other tab; taking
@@ -123,6 +132,14 @@ are set: until then nothing is read for them.
   key), or the same sender's case on the same subject within the hour; else a
   new case, the sender matched to an app account or a club and flagged
   `unknown_sender` when neither. Mail from our own addresses is dropped.
+- Who wrote it is the `From` address, and only a mail whose From passed DMARC
+  (SES's verdict; on the Cloudflare path, Cloudflare's own
+  Authentication-Results) is matched to an account or a club. Any other mail
+  is a guest's, flagged `unknown_sender`, and reaches only a guest's case (its
+  `[#n]` and the same-subject join included; thread headers still join, as
+  only the person has our Message-IDs). Reply-To is never who wrote it: for a
+  mail that passed it is kept as `context.reply_to`, where our answers go
+  (the reply preview's `to` shows it); otherwise answers go to the From.
 - sales@ (often a BCC): an `email` line on each lead with a contact among the
   people on the mail (ours left out: the desk's addresses and admin accounts;
   `direction` out when an admin sent it), files on the lead; or a new lead

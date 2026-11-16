@@ -8,7 +8,9 @@ transaction of the change it is about, and run once that commits.
   Its files go with it. The provider's id is kept: a bounce notice names it
   (`provider_verdict`). An app account also gets a push (`support_reply`).
 - A receipt when a case is opened from the app, the website or the
-  dashboard, with the number to quote.
+  dashboard, with the number to quote. A guest's (an address nobody
+  checked) is in fixed words: nothing they typed -- not their name, not
+  their subject -- goes out from the desk's address.
 - "Did we solve it?" once a case is resolved: yes or no, by a link to the
   website with the case's survey token.
 - A reminder on the fifth day Waiting on them.
@@ -80,6 +82,17 @@ def admin_link(path: str) -> str:
 
 def site_link(path: str) -> str:
     return f"{settings.PUBLIC_SITE_URL.rstrip('/')}{path}"
+
+
+def reply_address(case: SupportCases) -> Optional[str]:
+    """Where our mail on the case goes: the address their mail asked answers
+    to go to (its Reply-To, kept only when its From passed the sender check:
+    inbound.py), else theirs."""
+    context = case.context if isinstance(case.context, dict) else {}
+    other = context.get("reply_to")
+    if isinstance(other, str) and "@" in other:
+        return other.strip().lower()[:254]
+    return case.requester_email
 
 
 def where_to_see(case: SupportCases) -> str:
@@ -185,7 +198,7 @@ async def _reply_job(p: dict) -> None:
             msg.delivery_status = None
             await s.commit()
             return
-        to = case.requester_email
+        to = reply_address(case)
         why = await _suppressed(s, to)
         if why:
             await _not_delivered(s, case, msg, f"Not sent: {why}")
@@ -258,7 +271,7 @@ async def _not_delivered(session, case: SupportCases, msg: SupportMessages, reas
     if case.status in (WAITING, RESOLVED):
         await cases_mod.set_status(session, case, OPEN)
     await cases_mod.system_line(
-        session, case, f"Our reply didn't reach {case.requester_email or 'them'}: {reason} "
+        session, case, f"Our reply didn't reach {reply_address(case) or 'them'}: {reason} "
         "Try another way to reach them -- their phone, or the app if they have it.",
     )
 
@@ -305,22 +318,38 @@ async def _push_job(p: dict) -> None:
 async def _receipt_job(p: dict) -> None:
     async with jobs.scope() as s:
         case = await s.get(SupportCases, int(p["case_id"]))
-        if case is None or not case.requester_email or await _suppressed(s, case.requester_email):
+        to = reply_address(case) if case is not None else None
+        if case is None or not to or await _suppressed(s, to):
             return
         await s.commit()
         see = where_to_see(case)
-        name = (case.requester_name or "").split(" ")[0] or "there"
-        paragraphs = [
-            f"Hi {name},",
-            f"We have your request #{case.number}: “{case.subject}”. Someone from the team will answer soon, "
-            "on working days between 09:30 and 18:30 India time.",
-            "To add anything, answer this mail. Please never send passwords, OTPs or card numbers.",
-        ]
+        subject, paragraphs = receipt_words(case)
         body_text, body_html = _wrap(paragraphs, button=("See your request", see) if see else None, footer=f"{DESK_NAME} · request #{case.number}")
         await asyncio.to_thread(
-            _deliver, case.requester_email, text.mail_subject(case.number, case.subject, reply=False), body_text, body_html,
+            _deliver, to, subject, body_text, body_html,
             key=f"support-receipt:{case.id}", headers={"Message-ID": new_message_id(case.number)},
         )
+
+
+#: A guest's receipt says only this: the subject line and the words are ours.
+GUEST_RECEIPT_SUBJECT = "We have your request"
+
+
+def receipt_words(case: SupportCases) -> tuple[str, list[str]]:
+    """(subject, paragraphs) of a case's receipt. An account's echoes its
+    subject; a guest's -- the address and the name typed by whoever filled
+    the form in -- echoes nothing they wrote."""
+    hours_line = "Someone from the team will answer soon, on working days between 09:30 and 18:30 India time."
+    never = "To add anything, answer this mail. Please never send passwords, OTPs or card numbers."
+    if case.requester_kind == "guest":
+        return text.mail_subject(case.number, GUEST_RECEIPT_SUBJECT, reply=False), [
+            "Hello,", f"We have your request #{case.number}. {hours_line}", never,
+            "If you didn't ask us for help, you can ignore this mail.",
+        ]
+    name = (case.requester_name or "").split(" ")[0] or "there"
+    return text.mail_subject(case.number, case.subject, reply=False), [
+        f"Hi {name},", f"We have your request #{case.number}: “{case.subject}”. {hours_line}", never,
+    ]
 
 
 @jobs.handler(SURVEY_JOB, max_attempts=4, timeout=60.0)
@@ -329,7 +358,8 @@ async def _survey_job(p: dict) -> None:
         case = await s.get(SupportCases, int(p["case_id"]))
         if case is None or case.status != RESOLVED or case.survey_sent_at is not None or not case.requester_email:
             return
-        if await _suppressed(s, case.requester_email):
+        to = reply_address(case)
+        if await _suppressed(s, to):
             return
         case.survey_token = case.survey_token or secrets.token_urlsafe(24)
         case.survey_sent_at = _now()
@@ -346,7 +376,7 @@ async def _survey_job(p: dict) -> None:
         ]
         body_text, body_html = _wrap(paragraphs, footer=f"{DESK_NAME} · request #{case.number}")
         await asyncio.to_thread(
-            _deliver, case.requester_email, text.mail_subject(case.number, f"Did we solve it? {case.subject}", reply=False),
+            _deliver, to, text.mail_subject(case.number, f"Did we solve it? {case.subject}", reply=False),
             body_text, body_html, key=f"support-survey:{case.id}", headers={"Message-ID": new_message_id(case.number)},
         )
 
@@ -355,7 +385,8 @@ async def _survey_job(p: dict) -> None:
 async def _reminder_job(p: dict) -> None:
     async with jobs.scope() as s:
         case = await s.get(SupportCases, int(p["case_id"]))
-        if case is None or case.status != WAITING or not case.requester_email or await _suppressed(s, case.requester_email):
+        to = reply_address(case) if case is not None else None
+        if case is None or case.status != WAITING or not to or await _suppressed(s, to):
             return
         in_reply_to, references = await _threading(s, case)
         await s.commit()
@@ -372,7 +403,7 @@ async def _reminder_job(p: dict) -> None:
         if references:
             headers["References"] = references
         await asyncio.to_thread(
-            _deliver, case.requester_email, text.mail_subject(case.number, case.subject), body_text, body_html,
+            _deliver, to, text.mail_subject(case.number, case.subject), body_text, body_html,
             key=f"support-reminder:{case.id}:{int(case.waiting_since.timestamp()) if case.waiting_since else 0}", headers=headers,
         )
 

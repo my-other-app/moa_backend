@@ -582,7 +582,7 @@ async def post_message(request: Request, case_id: int, body: CaseMessageIn, sess
     html = text.markdown_lite(words)
     if body.preview_only:
         return {
-            "preview": True, "kind": body.kind, "to": case.requester_email if body.kind == REPLY_OUT else None,
+            "preview": True, "kind": body.kind, "to": mail.reply_address(case) if body.kind == REPLY_OUT else None,
             "from": mail.from_address() if body.kind == REPLY_OUT else None,
             "subject": text.mail_subject(case.number, case.subject) if body.kind == REPLY_OUT else None,
             "text": text.plain(words), "html": html,
