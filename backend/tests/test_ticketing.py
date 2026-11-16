@@ -28,6 +28,12 @@ from app.config import settings
 from tests.conftest import auth_header
 from tests.test_money_integrity import FakeRazorpay, rzp_fake  # noqa: F401
 
+
+@pytest.fixture(autouse=True)
+def _hidden_types_need_the_key(monkeypatch):
+    """The setting defaults to off in production until links are re-sent; these tests check it on."""
+    monkeypatch.setattr(settings, "HIDDEN_TYPES_REQUIRE_TOKEN", True)
+
 API = "/api/v1"
 NOW = datetime.now(timezone.utc)
 _n = itertools.count(1)
