@@ -54,6 +54,7 @@ from app.api.ticketing.models import (
     WaitlistSettings,
 )
 from app.core import jobs, public_urls
+from app.db.binds import any_of
 from app.response import CustomHTTPException
 
 logger = logging.getLogger(__name__)
@@ -218,6 +219,32 @@ async def position(session, entry: WaitlistEntries) -> Optional[int]:
         )
     )
     return int(ahead or 0) + 1
+
+
+async def positions(session, entries) -> dict:
+    """`position` for each of `entries` still waiting, {id: place}, in one
+    statement: each person's number in their type's line, counted by a
+    window over the line (ix_waitlist_line) rather than a count of everyone
+    ahead of each one -- a page of a thousand was a thousand counts, each
+    reading the line up to that person."""
+    waiting = [e for e in entries if e.status == WAITING]
+    if not waiting:
+        return {}
+    W = WaitlistEntries
+    line = (
+        select(
+            W.id,
+            func.row_number().over(partition_by=(W.event_id, W.ticket_type_id), order_by=(W.created_at, W.id)).label("place"),
+        )
+        .where(
+            any_of(W.event_id, {e.event_id for e in waiting}),
+            any_of(W.ticket_type_id, {e.ticket_type_id for e in waiting}),
+            W.status == WAITING,
+        )
+        .subquery()
+    )
+    rows = await session.execute(select(line.c.id, line.c.place).where(any_of(line.c.id, [e.id for e in waiting])))
+    return {entry_id: int(place) for entry_id, place in rows.all()}
 
 
 async def join(

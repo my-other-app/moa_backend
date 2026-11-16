@@ -423,3 +423,59 @@ async def test_an_offers_push_retried_never_sends_its_email_again(client, sessio
     assert len([m for m in mail if m.get("recipients") == ["slow-offer@example.com"]]) == 1
     [offer_job] = (await session.scalars(select(jobs.Jobs).where(jobs.Jobs.name == "waitlist.offer"))).all()
     assert offer_job.finished_at is not None and offer_job.attempts == 1
+
+
+async def test_the_clubs_list_numbers_the_line_in_one_statement_as_each_persons_own_place(client, session, line):
+    """The list's places (waitlist.positions, one window over the line) are
+    the ones `position` counts for each person on their own: per type, by
+    when they joined and then id, only those still waiting -- the offered,
+    the removed and a confirmation's holds in between take no number."""
+    import uuid as uuid_mod
+
+    from tests.racing import statements
+
+    await enable(client, line)
+    rows = []
+    at = NOW - timedelta(hours=3)
+    for i in range(24):
+        type_id = line.seat if i % 3 else line.standing
+        status = "waiting"
+        if i % 7 == 3:
+            status = "offered"
+        elif i % 11 == 5:
+            status = "removed"
+        rows.append(WaitlistEntries(
+            id=uuid_mod.uuid4(), event_id=line.event.id, ticket_type_id=type_id, full_name=f"Line {i:02d}",
+            email=f"line{i}@example.com", status=status, via_request=(i == 9),
+            # Pairs who joined in the same instant: the id decides between them.
+            created_at=at + timedelta(minutes=i // 2), updated_at=at,
+        ))
+    session.add_all(rows)
+    await session.commit()
+
+    loaded = list((await session.scalars(select(WaitlistEntries).where(WaitlistEntries.event_id == line.event.id))).all())
+    each = {r.id: await waitlist.position(session, r) for r in loaded if r.status == "waiting"}
+    assert await waitlist.positions(session, loaded) == each
+    assert sorted(each.values()) != [] and min(each.values()) == 1
+    assert await waitlist.positions(session, [r for r in loaded if r.status != "waiting"]) == {}
+
+    listed = (await client.get(f"{API}/events/{line.event.id}/ticketing/waitlist", headers=line.h)).json()
+    shown = {e["id"]: e["position"] for e in listed["entries"]}
+    assert {k: v for k, v in shown.items() if v is not None} == {str(k): v for k, v in each.items() if str(k) in shown}
+
+    # The page's cost does not grow with the line.
+    def reads(seen):
+        return [s for s in seen if s.lstrip().upper().startswith("SELECT")]
+
+    with statements(session) as seen:
+        await client.get(f"{API}/events/{line.event.id}/ticketing/waitlist", headers=line.h)
+    few = len(reads(seen))
+    session.add_all([
+        WaitlistEntries(event_id=line.event.id, ticket_type_id=line.seat, full_name=f"More {i}", email=f"more{i}@example.com",
+                        created_at=NOW + timedelta(seconds=i), updated_at=NOW)
+        for i in range(40)
+    ])
+    await session.commit()
+    with statements(session) as seen:
+        await client.get(f"{API}/events/{line.event.id}/ticketing/waitlist", headers=line.h)
+    assert len(reads(seen)) == few
