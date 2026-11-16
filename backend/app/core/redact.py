@@ -23,6 +23,8 @@
   parameters of emailed links (`s`, `k`, `t`, `sig`), the secret segment of
   a link's path (an invite, a request, an offer, a cancel link...), and a
   ticket id, wherever it appears in a logged path.
+- A hidden ticket type's link carries the key that sells it
+  (`ticket_key`, app/api/ticketing/hidden.py): filtered the same way.
 """
 import logging
 import re
@@ -36,7 +38,7 @@ _SENSITIVE_BODIES = re.compile(r"^/api/v1/(?:clubs/(?:payments/gateway|ai/key|wh
 #: certificate file), `k` (the missing-answers and feedback pages), `t` (the
 #: recap unsubscribe and developer docs links) and `sig` (a partner's QR
 #: image).
-SECRET_QUERY = re.compile(r"(?i)([?&;](?:key|player|last_event_id|s|k|t|sig|\w*token\w*)=)[^&;#\s\"']*")
+SECRET_QUERY = re.compile(r"(?i)([?&;](?:key|ticket_key|player|last_event_id|s|k|t|sig|\w*token\w*)=)[^&;#\s\"']*")
 FILTERED = "[Filtered]"
 #: The routes whose next path segment is the link's own secret: a club
 #: invite, an assistant's pending action, a registration request, a speaker

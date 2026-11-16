@@ -222,12 +222,13 @@ async def position(session, entry: WaitlistEntries) -> Optional[int]:
 
 async def join(
     session, event, *, ticket_type_id: Optional[int], full_name: str, email: Optional[str], phone: Optional[str],
-    user=None, whatsapp_opt_in: bool = False,
+    user=None, whatsapp_opt_in: bool = False, ticket_key: Optional[str] = None,
 ) -> tuple[WaitlistEntries, bool]:
     """Their place in line, and whether it is new (joining twice is the one
     place). The place under the email or number sent is handed back only to
     its own holder (`own_entry`); anyone else is refused with
-    `already_on_waitlist`, which says nothing of it."""
+    `already_on_waitlist`, which says nothing of it. A hidden type's line
+    takes the key its link carries (`ticket_key`, ticketing.hidden)."""
     if getattr(event, "requires_approval", False):
         raise off_on_approval()
     email = (email or "").strip() or None
@@ -265,8 +266,11 @@ async def join(
                 errors={"ticket_type_id": "Choose a ticket type.", "ticket_types": [t.id for t in visible]},
             )
     else:
+        from app.api.ticketing import hidden
+
         ttype = next((t for t in types if t.id == int(ticket_type_id)), None)
-        if ttype is None:
+        # A hidden type's line, as its tickets: only with the key its link carries.
+        if ttype is None or (len(types) > 1 and not hidden.may_sell(ttype, ticket_key)):
             raise CustomHTTPException(
                 422, message="That ticket type is not this event's.", error_code="TICKET_TYPE_NOT_FOUND",
                 errors={"ticket_type_id": "Not a ticket type of this event."},
