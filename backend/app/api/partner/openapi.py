@@ -60,7 +60,9 @@ TAGS = [
     {"name": "registrations", "description": "Registrations: adding, correcting, cancelling."},
     {"name": "checkins", "description": "Check-ins at the door."},
     {"name": "certificates", "description": "Issuing and verifying certificates."},
-    {"name": "webhooks", "description": "Webhook endpoints: being told of changes."},
+    {"name": "webhooks", "description": "Webhook endpoints: being told of changes. A credential sees and manages its own "
+                                         "endpoints, in its own mode (a key also those the club linked to it in the dashboard); "
+                                         "revoking a key turns off the endpoints it added."},
 ]
 
 _HEADERS = {

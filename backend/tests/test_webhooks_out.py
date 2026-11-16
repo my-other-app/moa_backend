@@ -643,8 +643,9 @@ async def test_partner_routes_keep_each_client_to_its_own(session, club, hub):
         assert r.status_code == 422
     key = Caller(c.id, "key_live_1", "api_key", {"webhooks:manage"}, livemode=False)
     async with await run(key) as k:
+        # The dashboard's endpoint is the club's, not the key's: not listed.
         listed = (await k.get("/partner/v1/webhook-endpoints")).json()["data"]
-        assert [e["url"] for e in listed] == ["https://dash.example.com/x"]
+        assert listed == []
         r = await k.post("/partner/v1/webhook-endpoints", json={"url": "https://erp.example.com/x"})
         assert r.status_code == 201 and r.json()["livemode"] is False and r.json()["owner"]["client_id"] == "key_live_1"
         r = await k.post("/partner/v1/webhook-endpoints", json={"url": "https://erp.example.com/y", "livemode": True})

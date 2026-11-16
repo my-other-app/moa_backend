@@ -5,7 +5,8 @@ digest, so the key itself exists in one answer (create, rotate) and nowhere
 else. Each has its scopes, an optional expiry and an optional IP allowlist;
 its last use is recorded (at most once a minute). Rotating gives the same
 key -- its id, its client_id, its scopes -- a new secret and ends the old
-one at once; revoking ends it for good.
+one at once; revoking ends it for good, and turns off the webhook endpoints
+it added (an expired key's are turned off at their next send).
 
 Made by the club's owner or an admin (club_access.policy keeps the rest of
 the team out of /clubs/integrations), only while the club is allocated, and
@@ -177,9 +178,13 @@ async def key_of(session, club_id: Optional[int], key_id) -> PartnerApiKeys:
 
 
 async def revoke(session, row: PartnerApiKeys, *, by_user_id: Optional[int] = None) -> PartnerApiKeys:
+    """Ends the key for good, and turns off the webhook endpoints it added."""
+    from app.api.webhooks_out import service as webhooks
+
     if row.revoked_at is None:
         row.revoked_at = _now()
         row.revoked_by_user_id = by_user_id
+    await webhooks.disable_for_key(session, row.club_id, row.client_id)
     await session.flush()
     return row
 

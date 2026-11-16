@@ -16,10 +16,13 @@ from doth); tests swap some with `configure(...)` and `reset()` back.
 - `external_id(session, client_id, object_type, object_id) -> str | None`:
   the id the client gave the object (external IDs are per client), put in
   `data.object.external_id` for the endpoint that client owns.
+- `key_active(session, club_id, client_id) -> bool`: the club's API key with
+  this client_id is neither revoked nor expired. An endpoint a key added is
+  sent to only while it is; after that it is turned off.
 
 Until installed, each answers "no" (fail closed): no club is allocated, a
 partner's endpoints get nothing, a partner's disabled endpoint is told to the
-platform admins instead, and `external_id` stays null.
+platform admins instead, `external_id` stays null, and no key is active.
 """
 from __future__ import annotations
 
@@ -42,9 +45,13 @@ async def _no_external_id(session, client_id, object_type, object_id) -> Optiona
     return None
 
 
+async def _no_key(session, club_id: int, client_id) -> bool:
+    return False
+
+
 _DEFAULTS = {
     "club_allocated": _no_club, "partner_scopes": _no_scopes,
-    "partner_contact": _no_contact, "external_id": _no_external_id,
+    "partner_contact": _no_contact, "external_id": _no_external_id, "key_active": _no_key,
 }
 #: What install() put in (the partner API's real functions); the defaults until then.
 _base = dict(_DEFAULTS)
@@ -94,3 +101,7 @@ async def partner_contact(session, partner_app_id, client_id) -> Optional[tuple[
 
 async def external_id(session, client_id, object_type, object_id) -> Optional[str]:
     return await _wired["external_id"](session, client_id, object_type, object_id)
+
+
+async def key_active(session, club_id: int, client_id) -> bool:
+    return bool(await _wired["key_active"](session, club_id, client_id))
