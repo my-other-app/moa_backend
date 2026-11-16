@@ -490,6 +490,13 @@ async def test_the_dashboard_lists_each_types_link_and_a_hidden_types_carries_it
     assert {t["name"]: t["link"] for t in listed} == {n: t["link"] for n, t in comp.types.items()}
 
 
+def test_a_hidden_types_key_is_never_logged():
+    from app.core import redact
+
+    line = "GET /api/v1/events/7/ticket-types?ticket_type=14&ticket_key=3f9c0a1b2c3d4e5f60718293&x=1 HTTP/1.1"
+    assert redact.query(line) == "GET /api/v1/events/7/ticket-types?ticket_type=14&ticket_key=[Filtered]&x=1 HTTP/1.1"
+
+
 async def test_door_staff_get_no_links(client, session, shop, comp):
     from tests.test_door_privacy import _member_header
 

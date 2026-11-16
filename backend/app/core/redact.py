@@ -20,6 +20,8 @@
   `last_event_id` -- and any `...token...` parameter -- are written as
   [Filtered] wherever a URL is logged (the access line, JSON or not, and
   Sentry's events through observability.scrub_event).
+- A hidden ticket type's link carries the key that sells it
+  (`ticket_key`, app/api/ticketing/hidden.py): filtered the same way.
 """
 import logging
 import re
@@ -29,7 +31,7 @@ _CLUB_WEBHOOK = re.compile(r"(/payments/webhook/club/|/hooks/whatsapp/club/)([A-
 _SENSITIVE_BODIES = re.compile(r"^/api/v1/(?:clubs/(?:payments/gateway|ai/key|whatsapp|mailbox)|hooks/(?:whatsapp/club|mailbox)|admin/mail)(?:/|$)")
 #: A query parameter whose value must not be logged, and its value (up to
 #: the next parameter, fragment, space or quote).
-SECRET_QUERY = re.compile(r"(?i)([?&;](?:key|player|last_event_id|\w*token\w*)=)[^&;#\s\"']*")
+SECRET_QUERY = re.compile(r"(?i)([?&;](?:key|ticket_key|player|last_event_id|\w*token\w*)=)[^&;#\s\"']*")
 FILTERED = "[Filtered]"
 
 
