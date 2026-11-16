@@ -282,7 +282,7 @@ def _own_secrets() -> tuple[str, ...]:
             value = getattr(settings, name, None)
             if isinstance(value, str):
                 values += [value, *(v.strip() for v in value.split(","))]
-    for url in (settings.DATABASE_URL, settings.DATABASE_URL_SYNC):
+    for url in (settings.DATABASE_URL, settings.DATABASE_URL_SYNC, settings.REDIS_URL):
         try:
             password = urlsplit(url).password
         except ValueError:
