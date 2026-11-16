@@ -37,7 +37,9 @@ Tests: `backend/tests/test_mcp.py`.
 4. Sign in with the club dashboard's email and password: the club's own login, or your own team login.
 5. If two-step sign-in is on, enter the code.
 6. If the address opens more than one club, pick the club.
-7. Untick anything you don't want to allow, then choose **Allow**.
+7. Check the address at the top of the page is where you expect to go back to (for Claude, `claude.ai`).
+   Untick anything you don't want to allow; attendees' contact details and finances start unticked, so tick
+   them only if you want the assistant to have them. Then choose **Allow**.
 8. Claude now lists the MyOtherApp tools. You can turn individual tools off in its connector settings.
 
 On Claude Team and Enterprise, an organisation owner may need to add the
@@ -84,8 +86,10 @@ waiting for approval are rejected.
 ## 2. What it may do: scopes
 
 The consent page lists each scope the app asked for that **the person's role
-could use**. Each one is ticked by default and can be unticked. Scopes the
-role can't use are shown greyed out.
+could use**. Each one is ticked by default and can be unticked, except
+`attendees:read` and `finance:read`, which start unticked: they are granted
+only when the person ticks them (`scopes.UNTICKED`). Scopes the role can't
+use are shown greyed out.
 
 Which role may grant which scope is `policy.allows_scope`. Each scope stands
 for the dashboard request that does the same thing.
@@ -212,7 +216,7 @@ All of these answer 404 while `APP_MCP_ENABLED` is off.
 | `GET /.well-known/oauth-protected-resource/mcp` (and `/.well-known/oauth-protected-resource`) | RFC 9728. `resource` is `https://api.myotherapp.in/mcp`; `authorization_servers` is `["https://api.myotherapp.in"]`. |
 | `GET /.well-known/oauth-authorization-server` | RFC 8414. Includes `code_challenge_methods_supported: ["S256"]`, `client_id_metadata_document_supported: true` and `authorization_response_iss_parameter_supported: true`. |
 | `POST /oauth/register` | RFC 7591 dynamic client registration, limited to 20 an hour per address. A public client (`token_endpoint_auth_method: none`) gets no secret. Otherwise a secret is returned once and stored as its sha256. |
-| `GET /oauth/authorize` | Checks the request and shows the sign-in page. |
+| `GET /oauth/authorize` | Checks the request and shows the sign-in page. Limited to 30 a minute per address. |
 | `POST /oauth/authorize` | The steps: sign in, then two-step code, then club picker, then consent. Limited to 20 a minute per address. |
 | `POST /oauth/token` | `authorization_code` and `refresh_token`. |
 | `POST /oauth/revoke` | RFC 7009. Revoking a refresh token disconnects the app; revoking an access token ends only that token. |
@@ -222,9 +226,14 @@ All of these answer 404 while `APP_MCP_ENABLED` is off.
 Two kinds of client are accepted:
 
 - **Self-registered:** RFC 7591. The MCP spec now calls this deprecated, but Claude and ChatGPT use it.
+  - Its name and links are its own claim: the pages mark it **Unverified** and never show its `client_uri`.
 - **Client ID Metadata Documents:** the `client_id` is an https URL.
+  - The pages name it by that URL's host ("Identified by its address, ..."), not by anything inside the document.
   - The document is fetched on first use, then cached for its `max-age`, clamped to between 5 minutes and 24 hours.
   - The fetch uses https on port 443 only. Every resolved address must be public. Redirects are not followed. Limits: 16 KB and 5 seconds.
+  - Per process: at most 4 fetches at once, host names looked up on two threads of their own (not the pool password
+    checks use), and a document that could not be read is not fetched again for 5 minutes.
+- Either kind is refused when its name includes "MyOtherApp".
   - The document's `client_id` must equal its URL.
   - Turn this off with `APP_MCP_CLIENT_METADATA_DOCUMENTS=false`.
 
@@ -254,9 +263,12 @@ The sign-in page is server-rendered, with no script, and styled as the dashboard
 2. **Two-step.** When the club account has it on, an authenticator code or a recovery code.
 3. **Pick a club.** Only when the email and password open more than one club's dashboard.
 4. **Consent.** It shows:
-   - the app's name and host, and where it will be sent back;
+   - first, in a box of its own, where it will be sent back (the redirect URI's host, or a native app's scheme);
+   - the app's name, marked Unverified when it registered itself, or the host of its metadata document;
    - the club, who is signed in, and their role;
-   - the scopes.
+   - the scopes, with attendees:read and finance:read unticked.
+
+   The sign-in page shows the same return address and marking first.
 
    Before the code is issued, the plan (`mcp`) and the person's access are checked again.
 
@@ -301,7 +313,9 @@ Before any tool runs, each `/mcp` request reads these as they are **now**:
 - the member, if any: still an active member of that club.
 
 For an owner's grant it also checks the account's `token_version`, which a
-password change or "sign out everywhere" bumps.
+password change or "sign out everywhere" bumps. A team member's grants end
+when that member's password changes, by them (Account) or by a reset
+(`access.end_member_grants`, reason `password_changed`).
 
 If any check fails, the grant is ended and the request answers 401
 `invalid_token`. Refresh runs the same checks.
