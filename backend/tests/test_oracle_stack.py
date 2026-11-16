@@ -8,6 +8,7 @@ Reads the files only (no database, no app import), so it also runs with
 `pytest --noconftest tests/test_oracle_stack.py`.
 """
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -219,8 +220,91 @@ def test_the_site_gets_cloudflares_place_under_vercels_names():
             assert f"header_up X-Vercel-IP-{vercel} {{http.request.header.{cloudflare}}}" in text, (caddyfile, vercel)
 
 
-@pytest.mark.parametrize("script", ["deploy.sh", "deploy-gate.sh", "setup.sh", "cloudflare-ips.sh", "dc"])
+@pytest.mark.parametrize("script", ["deploy.sh", "deploy-gate.sh", "setup.sh", "cloudflare-ips.sh", "dc", "build/build.sh",
+                                    "db/app-role.sh"])
 def test_the_scripts_parse(script):
     path = SERVER / script
     assert path.read_text().startswith("#!/usr/bin/env bash")
     subprocess.run(["bash", "-n", str(path)], check=True)
+    if shutil.which("shellcheck"):
+        subprocess.run(["shellcheck", str(path)], check=True)
+
+
+# ─── build/build.sh: the images built on the box ─────────────────────────────
+
+SHAS = {"backend": "37b04f8", "web": "43ec75a", "events": "2c3e7de"}
+
+
+@pytest.fixture
+def build_box(tmp_path):
+    """/srv/moa-src and /srv/moa-build as build.sh expects them, a `docker`
+    that writes down every build and fails the ones FAIL_BUILDS names, and
+    a `flock` that lets it through."""
+    src, build, bindir = tmp_path / "src", tmp_path / "build", tmp_path / "bin"
+    build_box_dir = str(tmp_path)
+    for path in (src / "backend/backend/render", src / "web", src / "events", build, bindir):
+        path.mkdir(parents=True)
+    (src / "VERSIONS").write_text(" ".join(f"{k}={v}" for k, v in SHAS.items()) + "\n")
+    for dockerfile in ("backend/backend/Dockerfile", "backend/backend/render/Dockerfile", "web/Dockerfile", "events/Dockerfile"):
+        (src / dockerfile).write_text("FROM scratch\n")
+    for app in ("clubs", "admin", "website"):
+        (build / f"{app}.production.env").write_text("NEXT_PUBLIC_X=1\n")
+    (build / "api_site_token").write_text("not-a-real-token\n")
+    calls = tmp_path / "docker-calls"
+    (bindir / "docker").write_text(
+        "#!/bin/bash\n"
+        f'printf "%s\\n" "$*" >> {calls}\n'
+        'for word in "$@"; do case " $FAIL_BUILDS " in *" $word "*) exit 1 ;; esac; done\n'
+    )
+    (bindir / "flock").write_text("#!/bin/sh\nexit 0\n")
+    for f in bindir.iterdir():
+        f.chmod(0o755)
+
+    def run(*apps, **env):
+        environ = {"PATH": f"{bindir}:/usr/bin:/bin", "MOA_SRC": str(src), "MOA_BUILD_DIR": str(build), "HOME": str(tmp_path), **env}
+        r = subprocess.run(["bash", str(SERVER / "build/build.sh"), *apps], env=environ, cwd=build_box_dir, capture_output=True, text=True, timeout=60)
+        r.calls = calls.read_text().splitlines() if calls.exists() else []
+        r.summary = (build / "logs/summary.log").read_text() if (build / "logs/summary.log").exists() else ""
+        return r
+
+    run.src, run.build = src, build
+    return run
+
+
+def test_build_sh_tags_each_app_by_its_repositorys_sha_with_its_settings(build_box):
+    r = build_box("backend", "clubs", "website", "render")
+    assert r.returncode == 0, r.stderr
+    backend, clubs, website, render = r.calls
+    assert backend.startswith("build ") and f"-t ghcr.io/my-other-app/moa-backend:{SHAS['backend']} " in backend
+    assert backend.endswith(str(build_box.src / "backend/backend"))
+    assert (build_box.src / "backend/backend/REVISION").read_text().strip() == SHAS["backend"]
+    assert f"-t ghcr.io/my-other-app/moa-clubs:{SHAS['web']}" in clubs and "--build-arg APP=clubs" in clubs
+    assert f"--secret id=build_env,src={build_box.build}/clubs.production.env" in clubs
+    assert re.search(r"--build-arg NODE_IMAGE=node:22-alpine@sha256:[0-9a-f]{64}( |$)", clubs)
+    assert f"-t ghcr.io/my-other-app/moa-website:{SHAS['events']}" in website
+    assert f"--secret id=api_site_token,src={build_box.build}/api_site_token" in website
+    assert "sentry_auth_token" not in website  # only when the file is there
+    assert "-t moa-render:8.39.0-1" in render and "render/Dockerfile" in render
+    assert "--no-cache" not in " ".join(r.calls)
+    assert r.summary.splitlines()[-1].endswith("ALL DONE ok: backend clubs website render failed: none")
+
+
+def test_build_sh_checks_everything_before_building_anything(build_box):
+    (build_box.build / "admin.production.env").unlink()
+    r = build_box("backend", "admin")
+    assert r.returncode == 1 and "admin.production.env is missing" in r.stderr
+    assert r.calls == []
+
+
+def test_build_sh_says_all_done_with_what_failed_and_retries_the_backend_once(build_box):
+    r = build_box("backend", "admin", NO_CACHE_BUILD="1", FAIL_BUILDS=f"ghcr.io/my-other-app/moa-backend:{SHAS['backend']}")
+    assert r.returncode == 1
+    assert len(r.calls) == 3 and all("--no-cache" in c for c in r.calls)  # backend twice, then admin
+    assert r.summary.splitlines()[-1].endswith("ALL DONE ok: admin failed: backend")
+
+
+def test_build_sh_reads_versions_without_running_it(build_box):
+    (build_box.src / "VERSIONS").write_text("backend=$(touch pwned) web=43ec75a events=2c3e7de\n")
+    r = build_box("backend")
+    assert r.returncode == 1 and "no sha for backend" in r.stderr
+    assert not (build_box.src.parent / "pwned").exists() and r.calls == []
