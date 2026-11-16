@@ -41,6 +41,7 @@ from app.api.social.adapters import for_platform, x as x_adapter
 from app.api.social.adapters.base import Candidate
 from app.api.social.models import SocialOAuthStates
 from app.config import settings
+from app.core import cookies
 from app.response import CustomHTTPException
 
 logger = logging.getLogger(__name__)
@@ -91,18 +92,18 @@ def cookie_domain() -> Optional[str]:
     return ".".join(common) if len(common) >= 2 else None
 
 
-def set_browser_cookie(response, platform: str, state_id: uuid.UUID) -> None:
+def set_browser_cookie(response, platform: str, state_id: uuid.UUID, request=None) -> None:
     response.set_cookie(
         browser_cookie(platform), browser_mark(state_id), max_age=int(STATE_TTL.total_seconds()),
         path=f"/api/v1/social/oauth/{platform}/callback", domain=cookie_domain(),
-        secure=not settings.DEBUG, httponly=True, samesite="lax",
+        secure=cookies.secure(request), httponly=True, samesite="lax",
     )
 
 
-def clear_browser_cookie(response, platform: str) -> None:
+def clear_browser_cookie(response, platform: str, request=None) -> None:
     response.delete_cookie(
         browser_cookie(platform), path=f"/api/v1/social/oauth/{platform}/callback", domain=cookie_domain(),
-        secure=not settings.DEBUG, httponly=True, samesite="lax",
+        secure=cookies.secure(request), httponly=True, samesite="lax",
     )
 
 
@@ -172,7 +173,7 @@ async def start(session, who: Who, platform: str, return_to: Optional[str], requ
     ))
     await session.commit()
     if response is not None:
-        set_browser_cookie(response, platform, state_id)
+        set_browser_cookie(response, platform, state_id, request)
     return for_platform(platform).authorize_url(
         state=make_state(state_id, nonce, platform), redirect_uri=redirect_uri(platform),
         challenge=x_adapter.challenge(verifier) if verifier else None,

@@ -243,7 +243,7 @@ async def oauth_callback(request: Request, session: SessionDep, platform: Platfo
     params = {k: request.query_params.get(k) for k in ("code", "state", "error", "error_description")}
     to = await oauth.callback(session, platform, params, request.cookies.get(oauth.browser_cookie(platform)))
     back = RedirectResponse(to, status_code=302, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
-    oauth.clear_browser_cookie(back, platform)
+    oauth.clear_browser_cookie(back, platform, request)
     return back
 
 

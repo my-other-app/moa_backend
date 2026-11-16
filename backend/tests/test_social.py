@@ -143,7 +143,8 @@ async def test_the_sign_in_must_come_back_to_the_browser_that_started_it(client,
     [line] = [c for c in r.headers.get_list("set-cookie") if c.startswith("moa_social_facebook=")]
     attrs = {a.strip().split("=")[0].lower(): a.strip() for a in line.split(";")[1:]}
     assert attrs["domain"].lower() == "domain=myotherapp.in" and attrs["path"] == "Path=/api/v1/social/oauth/facebook/callback"
-    assert "httponly" in attrs and attrs["samesite"].lower() == "samesite=lax" and ("secure" in attrs) is (not settings.DEBUG)
+    # Secure as every cookie the API sets (app/core/cookies.py): here, a test server on http, not.
+    assert "httponly" in attrs and attrs["samesite"].lower() == "samesite=lax" and "secure" not in attrs
     state = state_of(r.json()["authorize_url"])
 
     # Another browser (no cookie, or one from its own Connect): refused, nothing exchanged, the state not spent.

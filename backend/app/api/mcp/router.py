@@ -47,6 +47,7 @@ from app.core.auth.payloads import sign_payload, verify_payload
 from app.core.rate_limit import account_or_address, limiter
 from app.db.core import SessionDep
 from app.core.auth.compare import same
+from app.core import cookies
 
 logger = logging.getLogger(__name__)
 
@@ -218,7 +219,7 @@ async def authorize_page(request: Request, session: SessionDep):
     sealed = _seal("signin", {"r": req.payload()}, nonce, REQUEST_SECONDS)
     response = pages.signin(request=sealed, **_app_bits(client, req))
     response.set_cookie(
-        COOKIE, nonce, max_age=REQUEST_SECONDS, httponly=True, secure=request.url.scheme == "https", samesite="lax", path="/oauth",
+        COOKIE, nonce, max_age=REQUEST_SECONDS, httponly=True, secure=cookies.secure(request), samesite="lax", path="/oauth",
     )
     return response
 
