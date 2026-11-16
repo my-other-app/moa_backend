@@ -50,6 +50,12 @@ ul.scopes small{display:block;color:var(--ink-3);font-size:13px}
 ul.scopes li.off{opacity:.55}
 .choice{display:flex;gap:10px;align-items:center;padding:12px;border:1px solid var(--line);border-radius:10px;margin-top:8px}
 .foot{margin-top:18px;font-size:12.5px;color:var(--ink-3)}
+.dest{border:2px solid var(--ink);border-radius:12px;padding:12px 14px;margin:0 0 18px;background:var(--surface)}
+.dest small{display:block;font-size:12.5px;color:var(--ink-2);margin-bottom:2px}
+.dest b{display:block;font-size:18px;line-height:1.3;word-break:break-all;color:var(--ink)}
+.badge{display:inline-block;font-size:12px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;border-radius:6px;
+padding:2px 7px;margin-right:6px;background:var(--caution-soft);color:var(--caution);vertical-align:1px}
+.ident{font-size:13.5px}
 a{color:var(--brand)}
 """
 
@@ -87,19 +93,40 @@ def _error(message: str | None) -> str:
     return f"<div class=error role=alert>{escape(message)}</div>" if message else ""
 
 
-def _return_note(app: str, target: str, native: bool) -> str:
-    note = f"<p class=foot>After this, {escape(app)} is sent back to <b>{escape(target)}</b>.</p>"
+def _destination(label: str, app: str, target: str, native: bool) -> str:
+    """Where the connection goes, first on the page and hard to miss: the
+    address the app is sent back to is the one thing on the page an app
+    cannot choose freely."""
+    block = f"<div class=dest><small>{escape(label)}</small><b>{escape(target)}</b></div>"
     if native:
-        note += (
-            f"<div class=warn>{escape(app)} will be reached on this device ({escape(target)}). "
+        block += (
+            f"<div class=warn style='margin:-6px 0 16px'>{escape(app)} will be reached on this device ({escape(target)}). "
             "Carry on only if you started this from that app.</div>"
         )
-    return note
+    return block
 
 
-def signin(*, app: str, target: str, native: bool, request: str, email: str = "", error: str | None = None, status: int = 200) -> HTMLResponse:
+def _identity(app: str, unverified: bool, identified_by: str | None) -> str:
+    """Who the app is, as far as MyOtherApp can tell."""
+    if unverified:
+        return (
+            "<p class=ident><span class=badge>Unverified</span>"
+            f"{escape(app)} registered itself: its name is its own, not checked by MyOtherApp. "
+            "Carry on only if you started this from the app, and the address above is the one you expect.</p>"
+        )
+    if identified_by:
+        return f"<p class=ident>Identified by its address, <b>{escape(identified_by)}</b>.</p>"
+    return ""
+
+
+def signin(
+    *, app: str, target: str, native: bool, request: str, unverified: bool = True, identified_by: str | None = None,
+    email: str = "", error: str | None = None, status: int = 200,
+) -> HTMLResponse:
     body = (
+        f"{_destination('When you are done, you go to', app, target, native)}"
         f"<h1>Connect {escape(app)} to your club</h1>"
+        f"{_identity(app, unverified, identified_by)}"
         "<p>Sign in with the email and password you use for the club dashboard.</p>"
         f"{_error(error)}"
         "<form method=post action='/oauth/authorize' autocomplete=on>"
@@ -111,7 +138,6 @@ def signin(*, app: str, target: str, native: bool, request: str, email: str = ""
         "<input id=password name=password type=password required autocomplete=current-password>"
         "<div class=actions><button class=primary type=submit>Sign in</button></div>"
         "</form>"
-        f"{_return_note(app, target, native)}"
     )
     return render("Sign in", body, status=status)
 
@@ -152,12 +178,22 @@ def pick_club(*, app: str, ticket: str, choices: list[tuple[int, str, str]], err
     return render("Pick a club", body)
 
 
+def _unticked_note(offered: list[str]) -> str:
+    if not any(s in catalogue.UNTICKED for s in offered):
+        return ""
+    return "<p class=foot style='margin-top:8px'>Contact details and finances start unticked: tick them only if the app needs them.</p>"
+
+
 def consent(
-    *, app: str, app_uri: str | None, target: str, native: bool, redirect_uri: str, ticket: str, club: str, who: str,
-    role: str, offered: list[str], unavailable: list[str], error: str | None = None,
+    *, app: str, target: str, native: bool, redirect_uri: str, ticket: str, club: str, who: str,
+    role: str, offered: list[str], unavailable: list[str], unverified: bool = True, identified_by: str | None = None,
+    error: str | None = None,
 ) -> HTMLResponse:
+    # People's contact details and the club's money are asked for by many
+    # apps that do not need them: the person ticks them, or they are not given.
     items = "".join(
-        f"<li><input type=checkbox name=scope value='{escape(s, quote=True)}' id='s-{escape(s, quote=True)}' checked>"
+        f"<li><input type=checkbox name=scope value='{escape(s, quote=True)}' id='s-{escape(s, quote=True)}'"
+        f"{'' if s in catalogue.UNTICKED else ' checked'}>"
         f"<label for='s-{escape(s, quote=True)}' style='margin:0;font-weight:500'>{escape(catalogue.SCOPES[s][0])}"
         f"<small>{escape(catalogue.SCOPES[s][1])}</small></label></li>"
         for s in offered
@@ -167,9 +203,10 @@ def consent(
         f"<small>Not available to your role ({escape(role)}).</small></span></li>"
         for s in unavailable
     )
-    from_where = f" ({escape(urlsplit(app_uri).netloc)})" if app_uri else ""
     body = (
-        f"<h1>{escape(app)}{from_where} wants to work with your club</h1>"
+        f"{_destination('After you allow, you go to', app, target, native)}"
+        f"<h1>{escape(app)} wants to work with your club</h1>"
+        f"{_identity(app, unverified, identified_by)}"
         f"<div class=who>Signed in as <b>{escape(who)}</b> · <b>{escape(club)}</b> · {escape(role)}</div>"
         f"{_error(error)}"
         "<form method=post action='/oauth/authorize'>"
@@ -177,12 +214,12 @@ def consent(
         f"<input type=hidden name=ticket value='{escape(ticket, quote=True)}'>"
         f"<p style='margin-bottom:4px'><b>{escape(app)}</b> will be able to:</p>"
         f"<ul class=scopes>{items}</ul>"
+        f"{_unticked_note(offered)}"
         "<p class=foot>Nothing is published, sent, refunded or deleted from an assistant: it can only draft, "
         "and ask you to approve in the dashboard. You can disconnect it any time from the dashboard's Security page.</p>"
         "<div class=actions><button type=submit name=decision value=deny>Cancel</button>"
         "<button class=primary type=submit name=decision value=allow>Allow</button></div>"
         "</form>"
-        f"{_return_note(app, target, native)}"
     )
     return render("Allow access", body, form_targets=(form_target(redirect_uri),))
 

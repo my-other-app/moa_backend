@@ -41,6 +41,10 @@ SCOPES: dict[str, tuple[str, str]] = {
 
 ALL = tuple(SCOPES)
 
+#: Offered on the consent page but not ticked: people's contact details and
+#: the club's money are given only when the person ticks them.
+UNTICKED = frozenset({"attendees:read", "finance:read"})
+
 
 def parse(value: str | None) -> list[str]:
     """The known scopes in a space-separated string, each once, in catalogue order."""
