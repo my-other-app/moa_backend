@@ -669,6 +669,63 @@ cmd_start() {
 
 doctor_line() { printf '  %-5s %s\n' "$1" "$2"; }
 
+# What .env turns on (README.md: "Networks", "Redis", "The API's database
+# role", "The API as a non-root user") against what is running. Names and
+# yes/no only, never a value.
+doctor_hardening() {
+  echo "== hardening switches in .env"
+  local want id s nets
+  want="$(env_value MOA_DATA_NETWORK default)"
+  if [ "$want" = "data" ]; then
+    for s in postgres redis meilisearch; do
+      id="$(container_of "$s")"
+      [ -n "$id" ] || continue
+      nets="$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$id" 2> /dev/null || true)"
+      case " $nets" in
+        *_data\ *) doctor_line ok "$s is on the data network" ;;
+        *) doctor_line WARN "$s still runs on the shared network: recreate it at a quiet hour (README.md, \"Networks\")" ;;
+      esac
+    done
+  else
+    doctor_line info "MOA_DATA_NETWORK unset: Postgres, Redis and Meilisearch share the edge network"
+  fi
+  local pw_env pw_run
+  pw_env=no
+  grep -qE '^REDIS_PASSWORD=.+' "$MOA_DIR/.env" 2> /dev/null && pw_env=yes
+  pw_run=unknown
+  id="$(container_of redis)"
+  if [ -n "$id" ]; then
+    pw_run=no
+    # shellcheck disable=SC2016 # expanded inside the redis container
+    dc exec -T redis sh -c '[ -n "${REDIS_PASSWORD:-}" ]' < /dev/null > /dev/null 2>&1 && pw_run=yes
+  fi
+  if [ "$pw_run" = "unknown" ] || [ "$pw_env" = "$pw_run" ]; then
+    if [ "$pw_env" = "yes" ]; then doctor_line ok "Redis password set, and redis asks for it"; else doctor_line info "REDIS_PASSWORD unset: Redis has no password"; fi
+  else
+    doctor_line WARN "REDIS_PASSWORD in .env: $pw_env; the running redis asks for one: $pw_run. Recreate redis, backend and worker together (README.md, \"Redis\")"
+  fi
+  local user
+  user="$(env_value MOA_APP_DB_USER "")"
+  if [ -n "$user" ]; then
+    grep -qE '^MOA_APP_DB_PASSWORD=.+' "$MOA_DIR/.env" || doctor_line FAIL "MOA_APP_DB_USER is set without MOA_APP_DB_PASSWORD"
+    doctor_line info "the API's database role: $user (db/app-role.sh check)"
+  else
+    doctor_line info "MOA_APP_DB_USER unset: the API uses the owner role"
+  fi
+  local run_as
+  run_as="$(env_value MOA_BACKEND_USER 0:0)"
+  if [ "$run_as" != "0:0" ]; then
+    local uid="${run_as%%:*}" dir
+    dir="$(readlink -f /var/backups/myotherapp 2> /dev/null || echo /var/backups/myotherapp)"
+    [ "$(stat -c '%u' "$dir" 2> /dev/null)" = "$uid" ] && doctor_line ok "the backups folder belongs to uid $uid" ||
+      doctor_line WARN "the backups folder does not belong to uid $uid: the nightly backup will fail (README.md, \"The API as a non-root user\")"
+    [ "$(stat -c '%g' "$MOA_DIR/secrets" 2> /dev/null)" = "$uid" ] && doctor_line ok "secrets/ is readable by gid $uid" ||
+      doctor_line WARN "secrets/ is not group $uid: wallet passes will fail"
+  else
+    doctor_line info "MOA_BACKEND_USER unset: the API and the worker run as root"
+  fi
+}
+
 cmd_doctor() {
   local fails=0 f
   echo "== files in $MOA_DIR"
@@ -713,6 +770,7 @@ cmd_doctor() {
   [ -d /var/backups/myotherapp ] && doctor_line ok "/var/backups/myotherapp" || doctor_line WARN "/var/backups/myotherapp missing"
   systemctl is-active --quiet myotherapp-backup.timer 2> /dev/null && doctor_line ok "backup timer active" || doctor_line WARN "backup timer not active (ops/backup; setup.sh installs it once the files are here)"
   systemctl is-active --quiet moa-ops-bot.service 2> /dev/null && doctor_line ok "ops bot running (Telegram)" || doctor_line WARN "ops bot not running (ops/server/ops-bot/README.md: install.sh, then the token and chat id)"
+  doctor_hardening
   if [ -n "$(container_of backend)" ]; then
     echo "== inside the API container"
     dc exec -T backend python -c '
