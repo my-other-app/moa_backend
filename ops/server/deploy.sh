@@ -3,13 +3,17 @@
 # previous one back if it is not healthy. It lives at /srv/moa/deploy.sh and
 # runs as root (by hand with sudo, or from CI through deploy-gate.sh).
 #
-#   deploy.sh <service> <tag> [--migrate] [--no-worker] [--timeout SECONDS]
+#   deploy.sh <service> <tag> [--local] [--migrate] [--no-worker] [--timeout SECONDS]
 #       service: backend | website | clubs | admin
 #       tag:     an image tag in ghcr.io/my-other-app (the git sha CI pushed,
 #                or staging-<sha>, or latest)
+#       --local: the image was built on this box (build/build.sh tags it
+#       ghcr.io/my-other-app/moa-<app>:<sha>): it is used as it is here and
+#       never pulled. The health wait and the rollback are the same.
 #       backend also moves the worker to the same image, once the API is
 #       healthy: the worker never runs older code than the API.
-#       --migrate (backend only): `alembic upgrade head` with the NEW image,
+#       --migrate (backend only): a dump of the database first, then
+#       `alembic upgrade head` with the NEW image (as the database's owner),
 #       before it takes traffic. Without it, an image whose migrations the
 #       database lacks is refused before anything changes.
 #       --no-worker (backend only): leave the worker stopped (a rehearsal on a
@@ -21,13 +25,17 @@
 #   deploy.sh caddy                  validate the Caddyfile, then reload it
 #   deploy.sh stack                  install ops/server (+ ops/backup) from a
 #                                    tar.gz on stdin (CI's "stack" deploy)
-#   deploy.sh start                  start everything, in order (first boot)
+#   deploy.sh start [--local]        start everything, in order (first boot);
+#                                    --local: pull nothing
 #   deploy.sh doctor                 check files, settings and mounts; names
 #                                    only, never a value
 #
-# Every image runs pinned by digest (images.env), so a rollback is exact even
-# when a tag such as `latest` has moved since. Prints MOA_DEPLOY_OK last when
-# everything it was asked to do worked (CI looks for it).
+# A pulled image runs pinned by digest (images.env), so a rollback is exact
+# even when a tag such as `latest` has moved since; a box-built one runs by
+# its tag (the git sha it was built from). images.env is copied to
+# state/images.env.before-<service>-<time> before each change. Prints
+# MOA_DEPLOY_OK last when everything it was asked to do worked (CI looks for
+# it).
 #
 # Never syncs, prints or rewrites .env: it is edited by hand on the server.
 # `a && say ok || say problem`: the middle only prints, so it cannot fail.
@@ -52,13 +60,17 @@ conf() {
 REGISTRY="$(conf MOA_REGISTRY ghcr.io/my-other-app)"
 HEALTH_TIMEOUT="$(conf HEALTH_TIMEOUT 180)"
 KEEP_IMAGES="$(conf KEEP_IMAGES 3)"
+# Where --migrate leaves its dump of the database (the nightly backups'
+# folder; its pre-migrate-*.dump files are kept PRE_MIGRATE_KEEP_DAYS days).
+BACKUPS="$(conf MOA_BACKUP_DIR /var/backups/myotherapp)"
+PRE_MIGRATE_KEEP_DAYS="$(conf PRE_MIGRATE_KEEP_DAYS 14)"
 
 log() { printf '%s %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 warn() { printf '%s WARNING: %s\n' "$(date -u +%H:%M:%S)" "$*" >&2; }
 die() { printf '%s ERROR: %s\n' "$(date -u +%H:%M:%S)" "$*" >&2; exit 1; }
 
 usage() {
-  sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'
   exit 64
 }
 
@@ -101,25 +113,43 @@ current_ref() {
   grep -E "^${var}=" "$IMAGES" | tail -n 1 | cut -d= -f2- || true
 }
 
+# Replaces one variable's line and keeps every other line as it is
+# (RENDER_IMAGE and anything else written by hand).
 set_ref() {
-  local var="$1" ref="$2" tmp
+  local var="$1" ref="$2" tmp line seen=no
   valid_ref "$ref" || die "refusing to write an invalid image reference for $var"
   tmp="$(mktemp "$IMAGES.XXXXXX")"
   {
-    echo "# Written by deploy.sh: the image each app runs, pinned by digest."
-    echo "# Never edit by hand; deploy.sh <service> <tag> changes it."
-    for v in BACKEND_IMAGE WEBSITE_IMAGE CLUBS_IMAGE ADMIN_IMAGE; do
-      if [ "$v" = "$var" ]; then
-        echo "$v=$ref"
-      else
-        local old
-        old="$(current_ref "$v")"
-        if [ -n "$old" ]; then echo "$v=$old"; fi
-      fi
-    done
+    echo "# Written by deploy.sh: the image each app runs (pinned by digest when pulled)."
+    echo "# deploy.sh <service> <tag> changes its line; the other lines are kept."
+    if [ -r "$IMAGES" ]; then
+      while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+          "# Written by deploy.sh"* | "# Never edit by hand"* | "# deploy.sh <service> <tag> changes"*) ;;
+          "$var="*)
+            [ "$seen" = "yes" ] || echo "$var=$ref"
+            seen=yes
+            ;;
+          *) printf '%s\n' "$line" ;;
+        esac
+      done < "$IMAGES"
+    fi
+    [ "$seen" = "yes" ] || echo "$var=$ref"
   } > "$tmp"
   chmod 644 "$tmp"
   mv -f "$tmp" "$IMAGES"
+}
+
+# A copy of images.env before a deploy changes it, like the hand-made pins of
+# the old routine (state/images.env.before-*, which are never touched). The
+# newest 30 of its own are kept.
+STAMP_GLOB='[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z'
+keep_images_env() {
+  local service="$1"
+  [ -s "$IMAGES" ] || return 0
+  cp -p "$IMAGES" "$STATE/images.env.before-$service-$(date -u +%Y%m%dT%H%M%SZ)" 2> /dev/null || return 0
+  # shellcheck disable=SC2012,SC2086 # our own names (no spaces); the glob must expand
+  ls -1t "$STATE"/images.env.before-*-$STAMP_GLOB 2> /dev/null | tail -n +31 | while read -r old; do rm -f "$old"; done
 }
 
 record() {
@@ -256,6 +286,29 @@ pull() {
   return 1
 }
 
+has_image() { docker image inspect -f '{{.Id}}' "$1" < /dev/null > /dev/null 2>&1; }
+
+# Gets `ref` onto the box. local: it must be here already (built here), and
+# nothing is pulled. registry: pulled, unless it is pinned by digest and
+# already here (a rollback then needs no registry at all).
+fetch() {
+  local ref="$1" source="$2"
+  if [ "$source" = "local" ]; then
+    has_image "$ref" || die "$ref is not on this box: build it first (build/build.sh), or deploy without --local to pull it. Nothing was changed."
+    log "using ${ref##*/}, built on this box (not pulled)"
+    return 0
+  fi
+  if [[ "$ref" == *@sha256:* ]] && has_image "$ref"; then
+    log "${ref##*/} is already on this box"
+    return 0
+  fi
+  log "pulling $ref"
+  if ! pull "$ref"; then
+    has_image "$ref" && die "could not pull $ref, but an image of that name is on this box: if it was built here, deploy again with --local. Nothing was changed."
+    die "could not pull $ref (is the package public, or the box logged in to ghcr.io?). Nothing was changed."
+  fi
+}
+
 # name:tag@sha256:... for what was just pulled, so images.env is exact.
 pinned() {
   local ref="$1" repo="${1%%@*}" digest
@@ -293,33 +346,83 @@ swap() {
   log "$service healthy"
 }
 
-# Keep the newest KEEP_IMAGES images of a repository (the running one and the
-# rollback target among them); a running one is never removed.
+# Keep the newest KEEP_IMAGES images of a repository; a running one is never
+# removed, and neither is any image named after the repository (the new one,
+# the rollback target, whatever images.env pins).
 prune() {
-  local repo="$1"
-  docker image ls --format '{{.ID}}' "$repo" | awk '!seen[$0]++' | tail -n +"$((KEEP_IMAGES + 1))" |
-    while read -r id; do docker image rm "$id" > /dev/null 2>&1 || true; done
+  local repo="$1" ref id keep=" "
+  shift
+  for ref in "$@" $(grep -E '^[A-Z_]+_IMAGE=' "$IMAGES" 2> /dev/null | cut -d= -f2- || true); do
+    [ -n "$ref" ] && [ "$ref" != "-" ] || continue
+    id="$(docker image inspect -f '{{.Id}}' "$ref" 2> /dev/null < /dev/null || true)"
+    [ -n "$id" ] && keep="$keep$id "
+  done
+  docker image ls --no-trunc --format '{{.ID}}' "$repo" | awk '!seen[$0]++' | tail -n +"$((KEEP_IMAGES + 1))" |
+    while read -r id; do
+      case "$keep" in *" $id "*) continue ;; esac
+      docker image rm "$id" > /dev/null 2>&1 || true
+    done
   docker image prune -f > /dev/null 2>&1 || true
 }
 
+# The one-off service that runs as the database's owner: `migrate` in a
+# compose.yml that has it (the API itself may use a role that cannot change
+# the schema), else the API's own service, as before.
+migrate_service() {
+  if dc --profile tools config --services < /dev/null 2> /dev/null | grep -qx migrate; then
+    echo migrate
+  else
+    echo backend
+  fi
+}
+
+# A dump of the database before migrating, from the postgres container (as
+# its owner, over the container's own socket), checked to be a pg_dump
+# archive. Old ones of these past PRE_MIGRATE_KEEP_DAYS are deleted; nothing
+# else in the folder is touched.
+pre_migrate_dump() {
+  local tag="$1" file
+  [[ "$PRE_MIGRATE_KEEP_DAYS" =~ ^[0-9]{1,4}$ ]] || die "PRE_MIGRATE_KEEP_DAYS must be a number of days"
+  mkdir -p "$BACKUPS"
+  file="$BACKUPS/pre-migrate-${tag}-$(date -u +%Y%m%d-%H%M%S).dump"
+  log "dumping the database first: ${file##*/}"
+  # shellcheck disable=SC2016 # expanded inside the postgres container
+  if ! dc exec -T postgres sh -c 'pg_dump -Fc -U "$POSTGRES_USER" "$POSTGRES_DB"' < /dev/null > "$file.partial"; then
+    rm -f "$file.partial"
+    die "the dump before migrating failed; nothing was migrated or swapped"
+  fi
+  if [ "$(head -c 5 "$file.partial")" != "PGDMP" ]; then
+    rm -f "$file.partial"
+    die "the dump before migrating is not a pg_dump archive; nothing was migrated or swapped"
+  fi
+  chmod 600 "$file.partial"
+  mv -f "$file.partial" "$file"
+  log "dump: $(du -h "$file" | cut -f1) in ${file%/*}"
+  find "$BACKUPS" -maxdepth 1 -type f -name 'pre-migrate-*.dump' -mtime +"$PRE_MIGRATE_KEEP_DAYS" -delete 2> /dev/null || true
+}
+
 deploy() {
-  local service="$1" ref="$2" migrate="$3" timeout="$4" reason="${5:-deploy}" worker="${6:-yes}"
+  local service="$1" ref="$2" migrate="$3" timeout="$4" reason="${5:-deploy}" worker="${6:-yes}" source="${7:-registry}"
   local var name previous new
   var="$(image_var "$service")"
   name="$(image_name "$service")"
   previous="$(current_ref "$var")"
 
-  log "pulling $ref"
-  pull "$ref" || die "could not pull $ref (is the package public, or the box logged in to ghcr.io?)"
+  fetch "$ref" "$source"
   new="$(pinned "$ref")"
   valid_ref "$new" || die "unexpected image reference: $new"
+  keep_images_env "$service"
 
   if [ "$service" = "backend" ]; then
     if [ "$migrate" = "yes" ]; then
-      log "migrating with the new image (the running API keeps serving)"
+      local tool tag="${new%%@*}"
+      tag="${tag##*:}"
+      pre_migrate_dump "$tag"
+      tool="$(migrate_service)"
+      log "migrating with the new image as the database's owner ($tool; the running API keeps serving)"
       env "$var=$new" docker compose --project-directory "$MOA_DIR" -f "$MOA_DIR/compose.yml" \
-        --env-file "$MOA_DIR/.env" --env-file "$IMAGES" \
-        run --rm --no-deps -T backend alembic upgrade head < /dev/null ||
+        --env-file "$MOA_DIR/.env" --env-file "$IMAGES" --profile tools \
+        run --rm --no-deps -T "$tool" alembic upgrade head < /dev/null ||
         die "migration failed; nothing was swapped (docs/OPERATIONS.md, section 3)"
       record backend migrated "$new" "$previous"
     else
@@ -370,16 +473,17 @@ deploy() {
   fi
 
   through_caddy "$service"
-  prune "$REGISTRY/$name"
+  prune "$REGISTRY/$name" "$new" "$previous"
   log "$reason of $service done: ${new##*/}"
 }
 
 cmd_deploy() {
   local service="$1" tag="$2"
   shift 2
-  local migrate=no timeout="$HEALTH_TIMEOUT" worker=yes
+  local migrate=no timeout="$HEALTH_TIMEOUT" worker=yes source=registry
   while [ $# -gt 0 ]; do
     case "$1" in
+      --local) source=local ;;
       --migrate) migrate=yes ;;
       --no-worker) worker=no ;;
       --timeout)
@@ -396,7 +500,7 @@ cmd_deploy() {
   [ "$migrate" = "yes" ] && [ "$service" != "backend" ] && die "--migrate is for the backend only"
   [ "$worker" = "no" ] && [ "$service" != "backend" ] && die "--no-worker is for the backend only"
   preflight
-  deploy "$service" "$REGISTRY/$(image_name "$service"):$tag" "$migrate" "$timeout" deploy "$worker"
+  deploy "$service" "$REGISTRY/$(image_name "$service"):$tag" "$migrate" "$timeout" deploy "$worker" "$source"
 }
 
 cmd_rollback() {
@@ -411,7 +515,10 @@ cmd_rollback() {
   [ -n "$target" ] && [ "$target" != "-" ] || die "no earlier image of $service on record"
   valid_ref "$target" || die "history.log holds an invalid reference for $service"
   log "rolling $service back to ${target##*/}"
-  deploy "$service" "$target" no "$HEALTH_TIMEOUT" rollback
+  # Without a digest it was built on this box: never pulled.
+  local source=registry
+  [[ "$target" == *@sha256:* ]] || source=local
+  deploy "$service" "$target" no "$HEALTH_TIMEOUT" rollback yes "$source"
 }
 
 cmd_recreate() {
@@ -530,8 +637,12 @@ install_tree() {
 
 cmd_start() {
   preflight
-  log "pulling every image"
-  dc pull -q < /dev/null
+  if [ "${1:-}" = "--local" ]; then
+    log "pulling nothing (--local): every image must be on this box already"
+  else
+    log "pulling every image"
+    dc pull -q < /dev/null
+  fi
   log "starting postgres, redis, meilisearch"
   dc up -d postgres redis meilisearch < /dev/null
   wait_healthy postgres 120 || die "postgres did not become healthy"
@@ -675,7 +786,10 @@ main() {
     status) cmd_status ;;
     caddy) preflight && cmd_caddy ;;
     stack) preflight && cmd_stack ;;
-    start) cmd_start ;;
+    start)
+      [ $# -le 1 ] && { [ $# -eq 0 ] || [ "$1" = "--local" ]; } || usage
+      cmd_start "$@"
+      ;;
     doctor) cmd_doctor ;;
     -h | --help | help) usage ;;
     *) usage ;;

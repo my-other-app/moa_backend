@@ -7,8 +7,14 @@ that ran before the last good deploy back.
 
 The stand-ins (on PATH, ahead of the real ones): `docker` keeps what each
 service runs in a JSON file and answers health from the image's tag
-(bad-api-* never gets healthy; bad-worker-* is fine for the API and never
-for the worker); `id` says root; `flock`, `sleep` and `curl` do nothing much.
+(bad-api never gets healthy; bad-worker is fine for the API and never for
+the worker); a box-* tag was built on the box (there, no digest, and the
+registry refuses it); a missing-* tag is nowhere; `id` says root; `flock`,
+`sleep` and `curl` do nothing much.
+
+With --local (box-built images) the same health wait and rollback apply and
+nothing is ever pulled; --migrate dumps the database first and migrates as
+the database's owner (the `migrate` service when compose.yml has one).
 """
 import json
 import shutil
@@ -31,7 +37,7 @@ state_path = os.environ["FAKE_DOCKER_STATE"]
 state = json.load(open(state_path))
 args = sys.argv[1:]
 state["calls"].append(args)
-VARS = {"backend": "BACKEND_IMAGE", "worker": "BACKEND_IMAGE", "website": "WEBSITE_IMAGE", "clubs": "CLUBS_IMAGE", "admin": "ADMIN_IMAGE"}
+VARS = {"backend": "BACKEND_IMAGE", "worker": "BACKEND_IMAGE", "migrate": "BACKEND_IMAGE", "website": "WEBSITE_IMAGE", "clubs": "CLUBS_IMAGE", "admin": "ADMIN_IMAGE"}
 
 
 def done(code=0, out=""):
@@ -41,20 +47,36 @@ def done(code=0, out=""):
     sys.exit(code)
 
 
+def tag_of(ref):
+    return ref.split("@")[0].rsplit(":", 1)[-1]
+
+
+def built_here(ref):
+    return tag_of(ref).startswith("box-")
+
+
+def nowhere(ref):
+    return tag_of(ref).startswith("missing-")
+
+
 def healthy(service):
-    ref = state["running"].get(service, "")
-    tag = ref.split("@")[0].rsplit(":", 1)[-1]
-    if tag.startswith("bad-api"):
+    tag = tag_of(state["running"].get(service, ""))
+    if "bad-api" in tag:
         return False
-    return not (service == "worker" and tag.startswith("bad-worker"))
+    return not (service == "worker" and "bad-worker" in tag)
 
 
 if args[:1] == ["pull"]:
-    done(0)
+    state["pulled"].append(args[-1])
+    done(1 if built_here(args[-1]) or nowhere(args[-1]) else 0)
 if args[:2] == ["image", "inspect"]:
     ref = args[-1]
+    if nowhere(ref):
+        done(1, "Error: No such image")
     repo = ref.split("@")[0].rsplit(":", 1)[0]
-    done(0, f"{repo}@sha256:{hashlib.sha256(ref.encode()).hexdigest()}")
+    if "RepoDigests" in " ".join(args):
+        done(0, "" if built_here(ref) else f"{repo}@sha256:{hashlib.sha256(ref.encode()).hexdigest()}")
+    done(0, "sha256:" + hashlib.sha256(ref.split("@")[0].encode()).hexdigest())
 if args[:2] in (["image", "ls"], ["image", "rm"], ["image", "prune"]):
     done(0)
 if args[:1] == ["inspect"]:
@@ -65,12 +87,14 @@ if args[:1] == ["inspect"]:
     done(0, "healthy" if healthy(service) else "unhealthy")
 if args[:1] == ["compose"]:
     rest, i = args[1:], 0
-    while i < len(rest) and rest[i] in ("--project-directory", "-f", "--env-file"):
+    while i < len(rest) and rest[i] in ("--project-directory", "-f", "--env-file", "--profile"):
         i += 2
     rest = rest[i:]
     verb = rest[0]
     if verb == "version":
         done(0, "Docker Compose version v2.29.0")
+    if verb == "config":
+        done(0, "\n".join(state["services"]))
     if verb == "up":
         service = rest[-1]
         state["running"][service] = os.environ.get(VARS[service], "")
@@ -79,11 +103,15 @@ if args[:1] == ["compose"]:
     if verb == "ps":
         done(0, f"c-{rest[-1]}" if rest[-1] in state["running"] else "")
     if verb == "exec":
+        if any("pg_dump" in a for a in rest):
+            state["dumps"] += 1
+            done(0, "PGDMP fake dump")
         done(0 if healthy("backend") else 1, "/health/ready 200 ok")
     if verb == "run":
         image = os.environ.get("BACKEND_IMAGE", "")
+        service = next(a for a in rest[1:] if not a.startswith("-"))
         if "alembic" in rest:
-            state["migrated_with"].append(image)
+            state["migrated_with"].append([service, image])
             state["db_behind"] = False
             done(0)
         done(3 if state["db_behind"] else 0, "migrations: compared")
@@ -100,6 +128,7 @@ def box(tmp_path):
     (moa / "state").mkdir(parents=True)
     (moa / "compose.yml").write_text("services: {}\n")
     (moa / ".env").write_text("MOA_API_HOST=api.example.test\n")
+    (moa / "deploy.conf").write_text(f"MOA_BACKUP_DIR={tmp_path / 'backups'}\n")
     bin_ = tmp_path / "bin"
     bin_.mkdir()
     (bin_ / "docker").write_text(f"#!{sys.executable}\n{FAKE_DOCKER}")
@@ -110,7 +139,8 @@ def box(tmp_path):
     for f in bin_.iterdir():
         f.chmod(0o755)
     state = tmp_path / "docker.json"
-    state.write_text(json.dumps({"calls": [], "running": {}, "ups": [], "migrated_with": [], "db_behind": False}))
+    state.write_text(json.dumps({"calls": [], "running": {}, "ups": [], "migrated_with": [], "db_behind": False,
+                                 "pulled": [], "dumps": 0, "services": ["backend", "worker", "migrate"]}))
 
     class Box:
         dir = moa
@@ -191,7 +221,11 @@ async def test_an_image_ahead_of_the_database_needs_migrate_which_runs_with_the_
 
     _ok(box.run("backend", "good-2", "--migrate", "--timeout", "5"))
     new = box.images()["BACKEND_IMAGE"]
-    assert new.startswith(_ref("good-2")) and box.docker["migrated_with"] == [new]
+    # As the database's owner (the migrate service), after a dump.
+    assert new.startswith(_ref("good-2")) and box.docker["migrated_with"] == [["migrate", new]]
+    assert box.docker["dumps"] == 1
+    [dump] = (box.dir.parent / "backups").glob("pre-migrate-good-2-*.dump")
+    assert dump.read_bytes().startswith(b"PGDMP")
     # Migrated before the swap: the migration is on record ahead of the deploy.
     assert [h[:2] for h in box.history()[-3:]] == [["backend", "migrated"], ["backend", "ok"], ["worker", "ok"]]
 
@@ -218,3 +252,94 @@ async def test_what_it_refuses_before_touching_anything(box, tmp_path):
     (tmp_path / "bin" / "id").write_text("#!/bin/sh\necho 1000\n")
     r = box.run("backend", "good-1")
     assert r.returncode != 0 and "run as root" in r.stderr
+
+
+# ─── Images built on the box (--local) ──────────────────────────────────────
+
+
+async def test_a_box_built_image_goes_live_by_its_tag_and_nothing_is_pulled(box):
+    _ok(box.run("backend", "box-1", "--local", "--timeout", "5"))
+    ref = _ref("box-1")
+    assert box.images()["BACKEND_IMAGE"] == ref  # no digest: it never came from a registry
+    assert box.docker["ups"] == [["backend", ref], ["worker", ref]]
+    assert box.docker["pulled"] == []
+    assert box.history() == [["backend", "ok", ref, "-"], ["worker", "ok", ref, "-"]]
+
+
+async def test_an_unhealthy_box_built_image_is_swapped_back_without_a_registry(box):
+    _ok(box.run("backend", "box-1", "--local", "--timeout", "5"))
+    r = box.run("backend", "box-bad-api-2", "--local", "--timeout", "2")
+    assert r.returncode != 0 and "rolled back" in r.stderr, r.stderr
+    assert box.images()["BACKEND_IMAGE"] == _ref("box-1")
+    assert box.docker["running"]["backend"] == _ref("box-1") == box.docker["running"]["worker"]
+    assert box.docker["pulled"] == []
+
+
+async def test_a_box_built_worker_that_fails_takes_the_api_back_with_it(box):
+    _ok(box.run("backend", "box-1", "--local", "--timeout", "5"))
+    r = box.run("backend", "box-bad-worker-2", "--local", "--timeout", "2")
+    assert r.returncode != 0 and "backend and worker rolled back" in r.stderr
+    assert box.images()["BACKEND_IMAGE"] == _ref("box-1")
+    assert box.docker["running"]["backend"] == _ref("box-1") == box.docker["running"]["worker"]
+
+
+async def test_rollback_of_a_box_built_image_pulls_nothing(box):
+    _ok(box.run("website", "box-1", "--local", "--timeout", "5"))
+    _ok(box.run("website", "box-2", "--local", "--timeout", "5"))
+    _ok(box.run("rollback", "website"))
+    first = f"{REGISTRY}/moa-website:box-1"
+    assert box.images()["WEBSITE_IMAGE"] == first and box.docker["running"]["website"] == first
+    assert box.docker["pulled"] == []
+
+
+async def test_local_refuses_an_image_that_is_not_on_the_box(box):
+    r = box.run("clubs", "missing-1", "--local")
+    assert r.returncode != 0 and "is not on this box" in r.stderr and "Nothing was changed" in r.stderr
+    assert box.docker["ups"] == [] and box.images() == {} and box.docker["pulled"] == []
+
+
+async def test_without_local_a_box_built_image_is_refused_with_a_hint(box):
+    r = box.run("backend", "box-1", "--timeout", "5")
+    assert r.returncode != 0 and "--local" in r.stderr and "Nothing was changed" in r.stderr
+    assert box.docker["ups"] == [] and box.images() == {}
+
+
+async def test_local_with_migrate_dumps_then_migrates_as_the_owner_with_the_new_image(box):
+    _ok(box.run("backend", "box-1", "--local", "--timeout", "5"))
+    box.set(db_behind=True)
+    refused = box.run("backend", "box-2", "--local", "--timeout", "5")
+    assert refused.returncode != 0 and "--migrate" in refused.stderr
+    assert box.docker["dumps"] == 0 and box.images()["BACKEND_IMAGE"] == _ref("box-1")
+    _ok(box.run("backend", "box-2", "--local", "--migrate", "--timeout", "5"))
+    assert box.docker["migrated_with"] == [["migrate", _ref("box-2")]]
+    assert box.docker["dumps"] == 1 and box.docker["pulled"] == []
+    assert box.images()["BACKEND_IMAGE"] == _ref("box-2")
+
+
+async def test_migrate_falls_back_to_the_api_service_on_an_older_compose_file(box):
+    box.set(services=["backend", "worker"], db_behind=True)
+    _ok(box.run("backend", "box-1", "--local", "--migrate", "--timeout", "5"))
+    assert box.docker["migrated_with"] == [["backend", _ref("box-1")]]
+
+
+async def test_images_env_keeps_its_other_lines_and_a_copy_is_kept_first(box):
+    images = box.dir / "images.env"
+    images.write_text(
+        f"BACKEND_IMAGE={_ref('box-0')}\nRENDER_IMAGE=moa-render:8.39.0-1\n"
+        f"WEBSITE_IMAGE={REGISTRY}/moa-website:box-0\n"
+    )
+    _ok(box.run("backend", "box-1", "--local", "--timeout", "5"))
+    assert box.images() == {
+        "BACKEND_IMAGE": _ref("box-1"),
+        "RENDER_IMAGE": "moa-render:8.39.0-1",
+        "WEBSITE_IMAGE": f"{REGISTRY}/moa-website:box-0",
+    }
+    [copy] = (box.dir / "state").glob("images.env.before-backend-*Z")
+    assert f"BACKEND_IMAGE={_ref('box-0')}" in copy.read_text()
+    # The previous image is the rollback target.
+    assert box.history()[0] == ["backend", "ok", _ref("box-1"), _ref("box-0")]
+
+
+async def test_start_local_pulls_nothing_and_rejects_other_words(box):
+    r = box.run("start", "--everything")
+    assert r.returncode == 64 and box.docker["pulled"] == []
