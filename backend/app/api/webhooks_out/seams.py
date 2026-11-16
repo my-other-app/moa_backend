@@ -22,7 +22,9 @@ from doth); tests swap some with `configure(...)` and `reset()` back.
 
 Until installed, each answers "no" (fail closed): no club is allocated, a
 partner's endpoints get nothing, a partner's disabled endpoint is told to the
-platform admins instead, `external_id` stays null, and no key is active.
+platform admins instead, and `external_id` stays null. The one exception is
+`key_active`, which turns endpoints off rather than holding something back:
+until installed it answers "yes", so nothing is turned off on a guess.
 """
 from __future__ import annotations
 
@@ -45,13 +47,13 @@ async def _no_external_id(session, client_id, object_type, object_id) -> Optiona
     return None
 
 
-async def _no_key(session, club_id: int, client_id) -> bool:
-    return False
+async def _key_unknown(session, club_id: int, client_id) -> bool:
+    return True
 
 
 _DEFAULTS = {
     "club_allocated": _no_club, "partner_scopes": _no_scopes,
-    "partner_contact": _no_contact, "external_id": _no_external_id, "key_active": _no_key,
+    "partner_contact": _no_contact, "external_id": _no_external_id, "key_active": _key_unknown,
 }
 #: What install() put in (the partner API's real functions); the defaults until then.
 _base = dict(_DEFAULTS)
