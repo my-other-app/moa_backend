@@ -324,7 +324,12 @@ async def authenticate(session, email: str, password: str) -> ClubMembers | None
 
 
 async def change_password(session, member: ClubMembers, *, current: str, new: str) -> None:
+    """A member's new password. The AI assistants they connected are
+    disconnected: connecting one again needs the new password."""
+    from app.api.mcp.access import end_member_grants
+
     if not await verify_password_async(current or "", member.password):
         raise _refuse(status.HTTP_400_BAD_REQUEST, "The current password is not right", "WRONG_PASSWORD")
     member.password = await get_password_hash_async(check_password(new))
+    await end_member_grants(session, member.id)
     await session.flush()

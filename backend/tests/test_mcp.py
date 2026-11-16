@@ -48,6 +48,9 @@ ALL_SCOPES = ["events:read", "events:write", "attendees:read", "finance:read", "
 def mcp_on(monkeypatch):
     monkeypatch.setattr(settings, "MCP_ENABLED", True)
     monkeypatch.setattr(settings, "MCP_RATE_LIMIT", "60/minute;2000/day")
+    oauth.reset_document_limits()
+    yield
+    oauth.reset_document_limits()
 
 
 # ─── The world ───────────────────────────────────────────────────────────
@@ -998,6 +1001,134 @@ async def test_the_document_fetch_refuses_private_addresses():
     for url in ("https://127.0.0.1/c.json", "https://localhost/c.json", "https://10.0.0.5/c.json", "http://app.example.com/c.json", "https://app.example.com:8443/c.json"):
         with pytest.raises(oauth.OAuthError):
             await oauth.fetch_document(url)
+
+
+# ─── What the pages say ──────────────────────────────────────────────────
+
+
+def _checked(html: str) -> dict:
+    """Each scope on the consent page, and whether it starts ticked."""
+    return {m.group(1): bool(m.group(2)) for m in re.finditer(r"name=scope value='([^']+)' id='[^']+'( checked)?>", html)}
+
+
+async def test_a_self_registered_app_is_unverified_and_the_return_address_comes_first(client, world):
+    client_id = await register_client(client, client_uri="https://myotherapp.in", logo_uri="https://myotherapp.in/logo.png")
+    _verifier, challenge = pkce()
+    page = await open_authorize(client, client_id, challenge, scope=" ".join(ALL_SCOPES))
+    assert page.status_code == 200
+    for html in (page.text, (consent := await sign_in(client, page, "robotics@example.com")).text):
+        # Where the person is sent back to is the first thing on the page.
+        assert html.index("claude.ai") < html.index("<h1>") and "<div class=dest>" in html
+        assert "Unverified" in html and "registered itself" in html
+        # The app's own claimed address is not shown as if it were its identity.
+        assert "myotherapp.in" not in html
+    assert consent.status_code == 200 and "wants to work with your club" in consent.text
+    ticked = _checked(consent.text)
+    assert set(ticked) == set(ALL_SCOPES)
+    assert ticked["attendees:read"] is False and ticked["finance:read"] is False
+    assert all(on for s, on in ticked.items() if s not in ("attendees:read", "finance:read"))
+
+
+async def test_a_native_app_s_return_is_named_first_with_its_warning(client, world):
+    uri = "cursor://anysphere.cursor-mcp/oauth/callback"
+    r = await client.post("/oauth/register", json={"client_name": "Cursor", "redirect_uris": [uri], "token_endpoint_auth_method": "none"})
+    _verifier, challenge = pkce()
+    page = await open_authorize(client, r.json()["client_id"], challenge, redirect_uri=uri)
+    assert page.status_code == 200
+    assert page.text.index("cursor://anysphere.cursor-mcp") < page.text.index("<h1>") and "will be reached on this device" in page.text
+
+
+async def test_unticked_scopes_are_not_granted_unless_ticked(client, session, world):
+    client_id = await register_client(client)
+    verifier, challenge = pkce()
+    page = await open_authorize(client, client_id, challenge, scope=" ".join(ALL_SCOPES))
+    consent = await sign_in(client, page, "robotics@example.com")
+    # What the browser sends when the person just presses Allow: the ticked boxes.
+    ticked = [s for s, on in _checked(consent.text).items() if on]
+    r = await exchange(client, client_id, code_of(await approve(client, consent, ticked)), verifier)
+    assert r.status_code == 200 and set(r.json()["scope"].split()) == set(ALL_SCOPES) - {"attendees:read", "finance:read"}
+    # Ticked by the person, they are granted.
+    c = await connect(client, "robotics@example.com", scopes=["events:read", "attendees:read", "finance:read"])
+    assert set(c.scope.split()) == {"events:read", "attendees:read", "finance:read"}
+
+
+async def test_an_app_named_after_myotherapp_is_refused(client):
+    for name in ("MyOtherApp", "MyOtherApp Assistant", "my other app helper", "My-Other_App"):
+        r = await client.post("/oauth/register", json={"client_name": name, "redirect_uris": [REDIRECT], "token_endpoint_auth_method": "none"})
+        assert r.status_code == 400 and r.json()["error"] == "invalid_client_metadata", name
+    assert (await client.post("/oauth/register", json={"client_name": "Other Apps Hub", "redirect_uris": [REDIRECT],
+                                                         "token_endpoint_auth_method": "none"})).status_code == 201
+
+
+async def test_an_app_known_by_its_document_is_named_by_that_address(client, world, monkeypatch):
+    url = "https://app.example.com/oauth/client.json"
+
+    async def fetch(u):
+        return {"client_id": url, "client_name": "Example App", "client_uri": "https://myotherapp.in", "redirect_uris": [REDIRECT],
+                "token_endpoint_auth_method": "none"}, timedelta(hours=1)
+
+    monkeypatch.setattr(oauth, "fetch_document", fetch)
+    _verifier, challenge = pkce()
+    page = await open_authorize(client, url, challenge)
+    assert page.status_code == 200 and "Identified by its address, <b>app.example.com</b>" in page.text
+    assert "Unverified" not in page.text and "myotherapp.in" not in page.text
+    # A document naming itself after the platform is refused.
+    named = "https://named.example.com/client.json"
+
+    async def fetch_named(u):
+        return {"client_id": named, "client_name": "MyOtherApp", "redirect_uris": [REDIRECT]}, timedelta(hours=1)
+
+    monkeypatch.setattr(oauth, "fetch_document", fetch_named)
+    assert (await open_authorize(client, named, challenge)).status_code == 400
+
+
+async def test_reading_documents_is_throttled(client, world, monkeypatch):
+    url = "https://down.example.com/client.json"
+    tried = []
+
+    async def failing(u):
+        tried.append(u)
+        raise oauth.OAuthError("invalid_client", "The client's metadata document answered 503.")
+
+    monkeypatch.setattr(oauth, "fetch_document", failing)
+    _verifier, challenge = pkce()
+    for _ in range(3):
+        assert (await open_authorize(client, url, challenge)).status_code == 400
+    # A document that could not be read is not asked for again for a while.
+    assert tried == [url]
+    # Too many reads at once in one process: refused without reading, and not remembered as a failure.
+    other = "https://busy.example.com/client.json"
+    monkeypatch.setattr(oauth, "_doc_inflight", oauth.DOC_MAX_INFLIGHT)
+    assert (await open_authorize(client, other, challenge)).status_code == 400
+    assert tried == [url] and other not in oauth._doc_failed
+    # And the page itself is limited per caller.
+    monkeypatch.setattr(oauth, "_doc_inflight", 0)
+    client_id = await register_client(client)
+    answers = [(await open_authorize(client, client_id, challenge)).status_code for _ in range(30)]
+    assert 429 in answers and answers.index(429) >= 25
+
+
+async def test_a_members_password_change_ends_the_apps_they_connected(client, session, world):
+    from app.api.club_ops import password as club_password
+
+    editor = await connect(client, "editor@robotics.example.com")
+    owner = await connect(client, "robotics@example.com")
+    editor_h = auth_header(await _member_token(session, client, "editor@robotics.example.com"))
+    r = await client.post(f"{API}/clubs/access/me/password", json={"current_password": PASSWORD, "new_password": "NewPassword456!"},
+                          headers=editor_h)
+    assert r.status_code == 200, r.text
+    assert (await rpc(client, editor.access_token, "tools/list")).status_code == 401
+    assert (await refresh(client, editor.client_id, editor.refresh_token)).json()["error"] == "invalid_grant"
+    grant = await session.scalar(select(McpGrants).where(McpGrants.member_id.isnot(None)).execution_options(populate_existing=True))
+    assert grant.revoked_reason == "password_changed"
+    # The club's own account's connection is not the member's: it carries on.
+    assert (await rpc(client, owner.access_token, "tools/list")).status_code == 200
+
+    # A forgotten-password reset ends them too.
+    door = await connect(client, "door@robotics.example.com", scopes=["events:read"])
+    _to, _name, code = await club_password.issue(session, "door@robotics.example.com")
+    assert await club_password.reset(session, email="door@robotics.example.com", code=code, new_password="AnotherPass789!") == "member"
+    assert (await rpc(client, door.access_token, "tools/list")).status_code == 401
 
 
 # ─── The rules, without a request ────────────────────────────────────────
