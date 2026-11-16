@@ -293,7 +293,10 @@ async def requester_reply(
 
 async def recent_same(session, requester: Requester, subject: str, now: Optional[datetime] = None) -> Optional[SupportCases]:
     """A case this person opened within AUTO_JOIN_WITHIN about the same
-    subject, still unfinished: the one a second message joins."""
+    subject, still unfinished: the one a second message joins. An account
+    (an app user, a club) is matched by the account; a guest, whose address
+    nobody checked, only to a guest's case with that address -- never to an
+    account holder's."""
     now = now or _now()
     key = text.subject_key(subject)
     if not key:
@@ -304,8 +307,11 @@ async def recent_same(session, requester: Requester, subject: str, now: Optional
         who.append(C.requester_user_id == requester.user_id)
     if requester.club_id:
         who.append(C.requester_club_id == requester.club_id)
-    if requester.email:
-        who.append(func.lower(C.requester_email) == requester.email.strip().lower())
+    if not who and requester.kind == "guest" and requester.email:
+        who.append(and_(
+            func.lower(C.requester_email) == requester.email.strip().lower(), C.requester_kind == "guest",
+            C.requester_user_id.is_(None), C.requester_club_id.is_(None),
+        ))
     if not who:
         return None
     rows = (await session.scalars(

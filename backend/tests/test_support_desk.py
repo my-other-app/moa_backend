@@ -95,8 +95,10 @@ async def test_a_guest_asks_with_screenshots_and_gets_a_receipt(client, session,
     files = (await session.scalars(select(SupportAttachments).where(SupportAttachments.case_id == case.id))).all()
     assert len(files) == 2 and all(f.message_id == first.id for f in files)
     receipt = desk.outbox.sent[-1]
-    assert receipt["to"] == "guest@example.org" and receipt["subject"] == f"[#{case.number}] My ticket didn't arrive"
-    assert "passwords, OTPs or card numbers" in receipt["text"]
+    # A guest's receipt: fixed words, nothing they typed (not the subject, not the name).
+    assert receipt["to"] == "guest@example.org" and receipt["subject"] == f"[#{case.number}] We have your request"
+    assert "passwords, OTPs or card numbers" in receipt["text"] and f"#{case.number}" in receipt["text"]
+    assert "ticket" not in receipt["text"].lower() and "Gita" not in receipt["text"] and "Gita" not in receipt["html"]
     audit = await session.scalar(select(AdminAuditLogs).where(AdminAuditLogs.action == "support.case.opened"))
     assert audit is not None and "4111" not in str(audit.details)
 
@@ -129,8 +131,47 @@ async def test_guests_are_limited_per_email_and_per_address(client, session, des
 async def test_the_same_person_on_the_same_subject_within_the_hour_is_one_case(client, session, desk):
     a = (await ask(client, subject="Refund please")).json()
     b = (await ask(client, subject="RE: refund please", message="Any news?")).json()
-    assert a["id"] == b["id"]
+    # A guest's second message joins, and the case it joined isn't named back.
+    assert b == {"id": None, "number": None, "status": "new"}
     assert await session.scalar(select(func.count()).select_from(SupportMessages).where(SupportMessages.case_id == a["id"])) == 2
+    assert await session.scalar(select(func.count()).select_from(SupportCases)) == 1
+    # Signed in: joined by the account, and named.
+    c = (await ask(client, headers=desk.h["person"], subject="Refund please")).json()
+    d = (await ask(client, headers=desk.h["person"], subject="Re: refund please", message="Any news?")).json()
+    assert c["id"] == d["id"] != a["id"] and d["number"] == c["number"]
+
+
+async def test_guests_never_reach_an_account_holders_case(client, session, desk):
+    mine = (await ask(client, headers=desk.h["person"], subject="Refund please")).json()
+    # The account's own address, typed into the guest form.
+    r = await ask(client, email=desk.person.email, name="Asha", subject="Refund please", message="Pay it to my new card")
+    assert r.status_code == 201 and r.json()["id"] not in (None, mine["id"])
+    theirs = await case_of(session, r.json()["id"])
+    assert theirs.requester_kind == "guest" and theirs.requester_user_id is None
+    assert (await case_of(session, mine["id"])).message_count == 1
+    # The account doesn't join a guest's case with its address either.
+    again = (await ask(client, headers=desk.h["person"], subject="Refund please", message="Any news?")).json()
+    assert again["id"] == mine["id"] and (await case_of(session, theirs.id)).message_count == 1
+    # Beside the guest's case, the account found by its address says it is only that.
+    detail = (await client.get(f"{API}/admin/support/cases/{theirs.id}", headers=desk.h["sup"])).json()
+    assert detail["panel"]["matched_by"] == "email" and detail["panel"]["account"]["id"] == desk.person.id
+    assert "isn't checked" in detail["panel"]["account"]["matched"]
+    own = (await client.get(f"{API}/admin/support/cases/{mine['id']}", headers=desk.h["sup"])).json()
+    assert "matched" not in own["panel"]["account"]
+
+
+async def test_receipts_to_guests_stop_past_the_hourly_cap(client, session, desk, monkeypatch):
+    from app.api.support import public_router
+
+    monkeypatch.setattr(public_router, "GUEST_RECEIPT_LIMIT", "2/hour")
+    for n in range(3):
+        assert (await ask(client, email=f"g{n}@example.org", subject=f"Thing {n}", net=f"192.0.2.{n + 1}")).status_code == 201
+    guest_receipts = [m for m in desk.outbox.sent if m["subject"].endswith("We have your request")]
+    assert len(guest_receipts) == 2
+    assert await session.scalar(select(func.count()).select_from(SupportCases)) == 3
+    # An account's receipt isn't counted, and still echoes its subject.
+    made = (await ask(client, headers=desk.h["person"], subject="My refund")).json()
+    assert desk.outbox.sent[-1]["subject"] == f"[#{made['number']}] My refund"
 
 
 async def test_an_app_user_and_a_club_are_linked_and_see_only_their_own(client, session, desk, make_club, mint_token):

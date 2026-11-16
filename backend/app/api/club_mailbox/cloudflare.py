@@ -10,13 +10,20 @@ the Worker throws, Cloudflare gives the sending server a temporary error,
 and the mail comes again later; nothing is kept twice.
 
 The delivery is signed: HMAC-SHA256, with the key both sides hold
-(settings.MAILBOX_HOOK_SECRET; the Worker's MAILBOX_HOOK_SECRET secret), over
+(settings.MAILBOX_HOOK_SECRET; the Worker's MAILBOX_HOOK_SECRET secret). Two
+signatures, each over the values as the Worker sent them in its headers
+(percent-encoded):
 
-    v1 \\n <unix time> \\n <envelope to> \\n <envelope from> \\n <size> \\n <auth results>
+    X-Moa-Signature     v1 \\n <unix time> \\n <envelope to> \\n <envelope from> \\n <size> \\n <auth results>
+    X-Moa-Signature-V2  v2 \\n ... the same ... \\n <the body's SHA-256, hex>  (X-Moa-Body-Sha256)
 
-(each value as the Worker sent it in its header: percent-encoded), so it is
-checked before the body is read, and a delivery older than five minutes is
-refused. The body's length must be the signed size.
+The signature (v2 when there is one) is checked before the body is read,
+and a delivery older than five minutes is refused. The body's length must be
+the signed size, and with v2 its SHA-256 the signed one. A Worker from before v2 sends only v1, which is
+taken while settings.MAILBOX_HOOK_REQUIRE_BODY_SIGNATURE is off (the
+default); on, a delivery without v2 is refused (401) and the Worker's sender
+tries again later. The order: this API first, then the Worker, then the
+setting. A mail is kept once however often it arrives (`message_key`).
 
 Cloudflare gives no spam or virus verdict. It does check SPF, DKIM and DMARC
 and prepends its own Authentication-Results (authserv-id mx.cloudflare.net)
@@ -39,6 +46,8 @@ from app.config import settings
 
 CLOUDFLARE = "cloudflare"
 VERSION = "v1"
+#: The signature that covers the body too.
+VERSION_2 = "v2"
 #: How old a signed delivery may be (seconds), either way.
 WINDOW = 300
 #: Cloudflare's own Authentication-Results (its authserv-id).
@@ -50,6 +59,9 @@ H_FROM = "x-moa-envelope-from"
 H_SIZE = "x-moa-size"
 H_AUTH = "x-moa-auth-results"
 H_SIGNATURE = "x-moa-signature"
+H_BODY = "x-moa-body-sha256"
+H_SIGNATURE_V2 = "x-moa-signature-v2"
+_HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
 
 def secret() -> str:
@@ -64,6 +76,24 @@ def sign(key: str, timestamp: str, to: str, sender: str, size: str, auth: str) -
     return hmac.new(key.encode(), signed_text(timestamp, to, sender, size, auth).encode(), hashlib.sha256).hexdigest()
 
 
+def signed_text_v2(timestamp: str, to: str, sender: str, size: str, auth: str, body_sha256: str) -> str:
+    return "\n".join((VERSION_2, timestamp, to, sender, size, auth, body_sha256))
+
+
+def sign_v2(key: str, timestamp: str, to: str, sender: str, size: str, auth: str, body_sha256: str) -> str:
+    text = signed_text_v2(timestamp, to, sender, size, auth, body_sha256)
+    return hmac.new(key.encode(), text.encode(), hashlib.sha256).hexdigest()
+
+
+def body_sha256(raw: bytes) -> str:
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _same(expected: str, given: str) -> bool:
+    """A constant-time compare that never raises (a header can hold any byte)."""
+    return hmac.compare_digest(expected.encode(), given.encode("utf-8", "replace"))
+
+
 class Delivery:
     """One signed delivery's envelope, as the Worker sent it."""
 
@@ -74,6 +104,10 @@ class Delivery:
         self.size_raw = (headers.get(H_SIZE) or "").strip()
         self.auth_raw = headers.get(H_AUTH) or ""
         self.signature = (headers.get(H_SIGNATURE) or "").strip().lower()
+        self.body_sha256 = (headers.get(H_BODY) or "").strip().lower()
+        self.signature_v2 = (headers.get(H_SIGNATURE_V2) or "").strip().lower()
+        #: Which signature `verify` took: "v1" or "v2".
+        self.version: Optional[str] = None
 
     @property
     def size(self) -> int:
@@ -92,19 +126,44 @@ class Delivery:
         return unquote(self.auth_raw)[:4000]
 
     def verify(self, now: Optional[float] = None) -> Optional[str]:
-        """None when it is signed with our key and recent; else why not."""
+        """None when it is signed with our key and recent; else why not.
+        A v2 signature, when there is one, is the one checked (the body is
+        then checked against it: `body_matches`); without one, v1, while
+        MAILBOX_HOOK_REQUIRE_BODY_SIGNATURE is off."""
         key = secret()
         if not key:
             return "not_set_up"
-        if not self.timestamp.isdigit() or not self.signature or self.size < 0 or "@" not in self.to:
+        if not self.timestamp.isdigit() or self.size < 0 or "@" not in self.to:
+            return "unsigned"
+        if not (self.signature or self.signature_v2 or self.body_sha256):
             return "unsigned"
         now = time.time() if now is None else now
         if abs(now - int(self.timestamp)) > WINDOW:
             return "stale"
+        if self.signature_v2 or self.body_sha256:
+            if not self.signature_v2 or not _HEX64.match(self.body_sha256):
+                return "signature"
+            expected = sign_v2(key, self.timestamp, self.to_raw, self.from_raw, self.size_raw, self.auth_raw, self.body_sha256)
+            if not _same(expected, self.signature_v2):
+                return "signature"
+            self.version = VERSION_2
+            return None
+        if settings.MAILBOX_HOOK_REQUIRE_BODY_SIGNATURE:
+            return "body_unsigned"
+        if not self.signature:
+            return "unsigned"
         expected = sign(key, self.timestamp, self.to_raw, self.from_raw, self.size_raw, self.auth_raw)
-        if not hmac.compare_digest(expected, self.signature):
+        if not _same(expected, self.signature):
             return "signature"
+        self.version = VERSION
         return None
+
+    def body_matches(self, raw: bytes) -> bool:
+        """Whether the body is the one signed: always for v1 (only its
+        length is signed, checked by the caller), its SHA-256 for v2."""
+        if self.version != VERSION_2:
+            return True
+        return _same(self.body_sha256, body_sha256(raw))
 
 
 _COMMENT = re.compile(r"\([^()]*\)")

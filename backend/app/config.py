@@ -295,11 +295,17 @@ class AppConfig(BaseSettings):
     # (info@, support@, ...) are never a club's (club_mailbox/handles.py).
     MAILBOX_DOMAIN: str = "myotherapp.in"
     # The key the club-mail Worker signs each delivery with (HMAC-SHA256 over
-    # the time, the envelope and the size; app/api/club_mailbox/cloudflare.py).
+    # the time, the envelope, the size and, v2, the body's SHA-256;
+    # app/api/club_mailbox/cloudflare.py).
     # The same value is the Worker's MAILBOX_HOOK_SECRET secret. Empty: the
     # Cloudflare hook answers 503 and the Worker gives the sender a temporary
     # error, so the mail is tried again later, not lost.
     MAILBOX_HOOK_SECRET: str = ""
+    # On: every Cloudflare delivery must carry the Worker's v2 signature, the
+    # one that covers the mail's body too; one signed only the older way (v1)
+    # is refused and its sender tries again later. Turn it on only once the
+    # Worker that sends v2 is deployed (cloudflare.py says the order).
+    MAILBOX_HOOK_REQUIRE_BODY_SIGNATURE: bool = False
     # The private S3 bucket SES's receipt rule writes each mail to (raw MIME),
     # and the SNS topic the rule tells. A notification naming another bucket or
     # topic is refused.

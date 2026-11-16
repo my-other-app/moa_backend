@@ -271,10 +271,13 @@ async def set_up(client, w, handle="yukthi", headers=None):
 
 
 def mime(*, subject="Is parking free?", sender=("Ananya Iyer", "ananya@example.org"), to=f"yukthi@{DOMAIN}", text="Is parking free?",
-         html=None, message_id=None, in_reply_to=None, references=None, attachments=(), cc=None, date=None) -> bytes:
+         html=None, message_id=None, in_reply_to=None, references=None, attachments=(), cc=None, date=None,
+         reply_to=None) -> bytes:
     msg = EmailMessage()
     msg["From"] = f'"{sender[0]}" <{sender[1]}>' if sender[0] else sender[1]
     msg["To"] = to
+    if reply_to:
+        msg["Reply-To"] = reply_to
     if cc:
         msg["Cc"] = cc
     msg["Subject"] = subject
@@ -409,7 +412,7 @@ async def test_the_address_changes_once_a_month_and_the_old_one_forwards_90_days
     assert msg.delivered_to == f"yukthi@{DOMAIN}"
     r = await client.put(f"{BASE}/address", json={"handle": "yukthi"}, headers=world.other_h)
     assert r.status_code == 409
-    # A month on, it may change again; 90 days on, the old one is let go.
+    # A month on, it may change again; 90 days on, the old one receives nothing...
     await session.execute(update(ClubMailboxes).where(ClubMailboxes.club_id == world.club.id)
                           .values(handle_changed_at=NOW - timedelta(days=31)))
     await session.execute(update(ClubMailboxAddresses).where(ClubMailboxAddresses.handle == "yukthi")
@@ -417,9 +420,15 @@ async def test_the_address_changes_once_a_month_and_the_old_one_forwards_90_days
     await session.commit()
     r = await deliver(client, aws, mime(to=f"yukthi@{DOMAIN}"), [f"yukthi@{DOMAIN}"])
     assert r.json()["kept"] == 0 and r.json()["dropped"] == {"unknown": 1}
-    assert (await sweep.sweep(session))["released"] == 1
-    other = await set_up(client, world, "yukthi", headers=world.other_h)
-    assert other["address"] == f"yukthi@{DOMAIN}"
+    # ... and is never another club's: the sweep keeps it, nobody else may take it.
+    assert "released" not in await sweep.sweep(session)
+    r = await client.put(f"{BASE}/address", json={"handle": "yukthi"}, headers=world.other_h)
+    assert r.status_code == 409 and r.json()["error_code"] == "HANDLE_TAKEN"
+    check = (await client.get(f"{BASE}/handle-check", params={"handle": "yukthi"}, headers=world.other_h)).json()
+    assert check["available"] is False and check["code"] == "HANDLE_TAKEN"
+    # The club itself may take it back.
+    page = await set_up(client, world, "yukthi")
+    assert page["address"] == f"yukthi@{DOMAIN}"
 
 
 async def test_a_clubs_own_old_handle_comes_back_to_it(client, session, world, aws):
