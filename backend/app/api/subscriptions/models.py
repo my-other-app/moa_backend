@@ -31,6 +31,7 @@ from sqlalchemy import (
     Column,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     String,
     UniqueConstraint,
@@ -546,9 +547,10 @@ class ClubSubscriptions(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     enterprise_trial_granter = relationship("Users", foreign_keys=[enterprise_trial_by])
 
     __table_args__ = (
-        # One live subscription per club. `is_deleted` is in the key so a
-        # cancelled-and-resubscribed club does not collide with its own
-        # history -- the same shape the club/user link tables use.
+        # One live subscription per club; the deleted ones, any number of them.
+        Index("ux_club_subscriptions_live", "club_id", unique=True, postgresql_where=text("NOT is_deleted")),
+        # The older key, with `is_deleted` in it, allows one deleted row per
+        # club and no second. It goes in a later revision.
         UniqueConstraint("club_id", "is_deleted", name="uq_club_subscription_live"),
         CheckConstraint("mrr_paise >= 0", name="ck_subscription_mrr_non_negative"),
         CheckConstraint("price_paise IS NULL OR price_paise >= 0", name="ck_subscription_price_non_negative"),

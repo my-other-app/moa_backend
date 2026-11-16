@@ -333,6 +333,16 @@ def span_sql(model=None):
     return sa.func.tstzrange(m.event_datetime, sa.func.greatest(m.event_datetime, ends_at_sql(m)), sa.literal_column("'[]'"))
 
 
+#: Room left on each page of `events` (migration schema_hygiene): the counter
+#: triggers rewrite an event's row on every registration change, and with
+#: room on the row's own page that update writes none of the table's indexes.
+EVENTS_FILLFACTOR = 85
+sa_event.listen(
+    Events.__table__, "after_create",
+    DDL(f"ALTER TABLE events SET (fillfactor = {EVENTS_FILLFACTOR})").execute_if(dialect="postgresql"),
+)
+
+
 class EventSpeakers(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     """Speakers and guests for events."""
     __tablename__ = "event_speakers"
@@ -657,7 +667,10 @@ class EventRatingsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     user = relationship("Users")
 
     __table_args__ = (
-        UniqueConstraint("event_id", "user_id", "is_deleted"),
+        # One live rating per person and event. The older key (with
+        # is_deleted, so one deleted rating at most) goes in a later revision.
+        sa.Index("ux_event_ratings_link_live", "event_id", "user_id", unique=True, postgresql_where=sa.text("NOT is_deleted")),
+        UniqueConstraint("event_id", "user_id", "is_deleted", name="uq_event_ratings_event_user_is_deleted"),
         # A person's ratings (badges read them after each check-in).
         sa.Index("ix_event_ratings_user", "user_id", postgresql_where=sa.text("NOT is_deleted")),
     )

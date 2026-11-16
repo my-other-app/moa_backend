@@ -26,6 +26,7 @@ from sqlalchemy.dialects.postgresql import UUID
 
 from app.core.utils.db_fields import TZAwareDateTime
 from app.db.base import AbstractSQLModel
+from app.db.checks import one_of
 
 
 def _now() -> datetime:
@@ -91,6 +92,10 @@ class PaymentFees(AbstractSQLModel):
     fetched_at = Column(TZAwareDateTime(timezone=True), nullable=False, default=_now, server_default=sa.text("now()"))
 
 
+#: payment_refunds.kind: part of the ticket, one store order, or what was left, in full.
+PAYMENT_REFUND_KINDS = ("ticket", "store_order", "rest")
+
+
 class PaymentRefunds(AbstractSQLModel):
     __tablename__ = "payment_refunds"
 
@@ -109,7 +114,10 @@ class PaymentRefunds(AbstractSQLModel):
     created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TZAwareDateTime(timezone=True), nullable=False, default=_now, server_default=sa.text("now()"))
 
-    __table_args__ = (sa.CheckConstraint("amount > 0", name="ck_payment_refunds_amount_positive"),)
+    __table_args__ = (
+        sa.CheckConstraint("amount > 0", name="ck_payment_refunds_amount_positive"),
+        sa.CheckConstraint(one_of("kind", PAYMENT_REFUND_KINDS), name="ck_payment_refunds_kind"),
+    )
 
 
 class PaymentDisputes(AbstractSQLModel):

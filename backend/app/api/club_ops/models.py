@@ -22,6 +22,7 @@ from sqlalchemy.dialects.postgresql import UUID
 
 from app.core.utils.db_fields import TZAwareDateTime
 from app.db.base import AbstractSQLModel
+from app.db.checks import one_of
 from app.db.mixins import TimestampsMixin
 
 
@@ -48,6 +49,7 @@ PENDING = "pending"
 PROCESSING = "processing"
 SUCCEEDED = "succeeded"
 FAILED = "failed"
+REFUND_STATUSES = (PENDING, PROCESSING, SUCCEEDED, FAILED)
 
 
 class ClubRefunds(AbstractSQLModel, TimestampsMixin):
@@ -79,6 +81,7 @@ class ClubRefunds(AbstractSQLModel, TimestampsMixin):
 
     __table_args__ = (
         sa.CheckConstraint("amount > 0", name="ck_club_refunds_amount"),
+        sa.CheckConstraint(one_of("status", REFUND_STATUSES), name="ck_club_refunds_status"),
         # Cancelling refunds each payment once, however often it is asked.
         Index("uq_club_refunds_cancellation_payment", "payment_log_id", unique=True,
               postgresql_where=sa.text("source = 'cancellation'")),

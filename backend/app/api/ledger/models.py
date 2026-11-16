@@ -30,6 +30,7 @@ from __future__ import annotations
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     Column,
     Date,
     DDL,
@@ -45,9 +46,18 @@ from sqlalchemy.dialects.postgresql import UUID
 
 from app.core.utils.db_fields import TZAwareDateTime
 from app.db.base import AbstractSQLModel
+from app.db.checks import one_of
 
 #: Rows each platform-wide key is spread over (ledger_platform_monthly.shard).
 SHARDS = 8
+
+#: ledger_entries.kind: book.KINDS (tests/test_schema_matches_models.py
+#: keeps the two the same). A kind added there needs a migration that
+#: widens ck_ledger_entries_kind.
+ENTRY_KINDS = (
+    "capture", "refund", "apply", "unapply", "desk", "fulfil", "comp", "sub_charge", "sub_refund",
+    "first_charge", "backfill", "repair",
+)
 
 
 class LedgerEntries(AbstractSQLModel):
@@ -91,6 +101,7 @@ class LedgerEntries(AbstractSQLModel):
 
     __table_args__ = (
         UniqueConstraint("txn_key", "line", name="uq_ledger_entries_txn_line"),
+        CheckConstraint(one_of("kind", ENTRY_KINDS), name="ck_ledger_entries_kind"),
         # A registration's balances, read on every posting about it.
         Index("ix_ledger_entries_registration", "registration_id", "account",
               postgresql_where=text("registration_id IS NOT NULL")),
