@@ -87,8 +87,9 @@ a server older than this feature.
 Returns the same object on its own. It takes an optional session; with one,
 it includes `viewer_waitlist`.
 
-Query: `ticket_type={id}` also lists a **hidden** type that a link names.
-Hidden types are otherwise left out.
+Query: `ticket_type={id}&ticket_key={key}` also lists a **hidden** type that
+a link names, with the key the link carries (see "Hidden types and their
+links" below). Hidden types are otherwise left out.
 
 ```json
 {
@@ -132,6 +133,32 @@ Hidden types are otherwise left out.
 
 ---
 
+### Hidden types and their links
+
+A hidden type (comp, speaker, staff, an early bird taken off sale) is not
+listed on the event page, and the public is sold it only with its link:
+
+```
+https://myotherapp.in/events/{slug}?ticket_type={id}&ticket_key={key}
+```
+
+- The club copies the link from the dashboard (`link` on each type of
+  `GET /events/{id}/ticketing/types`).
+- The key is the server's HMAC of the event and the type (code:
+  `ticketing/hidden.py`), under a key of its own made from the emailed links'
+  keys (`APP_LINK_SIGNING_KEYS`, else `APP_SECRET_KEY`). It doesn't expire.
+  To stop a link, end the type's sales or make a new type.
+- Without the key (or with a wrong one) a hidden type is left out of the
+  list, and a registration, a request, a code check or a waiting-list join
+  that names it is refused as 422 `TICKET_TYPE_NOT_FOUND`, as for an id that
+  isn't the event's.
+- No key is needed by the club adding a guest (by hand, import, the door,
+  the partner API), a waiting-list offer's claim, the club confirming a
+  request, or a registration back to pay for its own type. An event with only
+  one type sells it, hidden or not, as before.
+- `APP_HIDDEN_TYPES_REQUIRE_TOKEN=false` turns the key check off: a link that
+  names a hidden type is enough, as before. The keys are still made.
+
 ## 3. Registering
 
 ### `POST /events/registration/{event_id_or_slug}/register`
@@ -144,7 +171,8 @@ The request takes two new optional fields:
 
 | Field | Rule |
 |---|---|
-| `ticket_type_id` | Optional when the event has one type, or exactly one visible type, which is then used. Otherwise it is required (422 `TICKET_TYPE_REQUIRED`). A hidden type is sold to a request that names it. |
+| `ticket_type_id` | Optional when the event has one type, or exactly one visible type, which is then used. Otherwise it is required (422 `TICKET_TYPE_REQUIRED`). A hidden type is sold to a request that names it with its `ticket_key`. |
+| `ticket_key` | The key a hidden type's link carries (`?ticket_key=`). Without it, a hidden type is refused as 422 `TICKET_TYPE_NOT_FOUND`. Ignored for a shown type. |
 | `discount_code` | Optional. Case and spaces are ignored. Checked and applied by the server, and refused with a reason (§6). |
 
 The response keeps every existing field and gains these:
@@ -184,7 +212,7 @@ The response keeps every existing field and gains these:
 Request:
 
 ```json
-{ "code": "early20", "ticket_type_id": 12, "email": "optional", "phone": "optional" }
+{ "code": "early20", "ticket_type_id": 12, "ticket_key": "optional", "email": "optional", "phone": "optional" }
 ```
 
 Response:
@@ -197,7 +225,7 @@ Response:
   other events it works on. Every unknown, inactive or other-club code is
   the same 422 `DISCOUNT_CODE_INVALID`.
 - `ticket_type_id` follows the same rule as registering: required when the
-  event needs a choice.
+  event needs a choice, and a hidden type only with its `ticket_key`.
 - `email` and `phone` are only for a code limited per person.
 - It is limited to **10 requests a minute per address**. Past that it
   answers 429.
@@ -324,7 +352,8 @@ It takes an optional session. Request:
 
 - The person needs `email` or `phone`. A signed-in person's own email is used
   when they send none.
-- `ticket_type_id` follows the same rule as registering.
+- `ticket_type_id` follows the same rule as registering (a hidden type's line
+  takes its `ticket_key`).
 - `whatsapp_opt_in` needs a number WhatsApp can reach; otherwise it answers
   422 `WHATSAPP_NUMBER`.
 
@@ -406,7 +435,9 @@ Fields a form shows are keyed in `errors` by field name: `ticket_type_id`,
 - A type with `status: sold_out` and `waitlist: true` gets a "Join the
   waiting list" form (`POST /events/{id}/waitlist`).
 - `not_started` shows `sales_start`.
-- A link with `?ticket_type={id}` shows that hidden type.
+- A link with `?ticket_type={id}&ticket_key={key}` shows that hidden type.
+  Keep both through the form, and send `ticket_key` with the ticket types,
+  the code check, the registration and the waiting-list join.
 
 ### Registration form
 
@@ -457,7 +488,7 @@ rules: editors and admins change things, door staff read.
 
 | Method | Path | What |
 |---|---|---|
-| GET | `/events/{id}/ticketing/types` | The editor's list: every type, hidden ones too, with `sold`, `available`, `waiting`, `offered` and `has_registrations`. It also returns `follows_event`, `event_capacity`, `event_available` and `max_types` (the plan's cap; `null` = none). |
+| GET | `/events/{id}/ticketing/types` | The editor's list: every type, hidden ones too, with `sold`, `available`, `waiting`, `offered`, `has_registrations` and `link` (the event page's address for the type; a hidden type's carries its key; `null` for door staff). It also returns `follows_event`, `event_capacity`, `event_available` and `max_types` (the plan's cap; `null` = none). |
 | PUT | `/events/{id}/ticketing/types` | Saves the editor's whole list: `{"types": [{id?, name, description, price, capacity, sales_start, sales_end, is_hidden, per_person_limit}], "event_capacity"?: int\|null}`. A type with `id` is changed, one without is made, and one left out is removed. A type people hold is refused (409 `TICKET_TYPE_HAS_REGISTRATIONS`; hide it instead). The list order is the sort order. `event_capacity` is the total across types, left unchanged when not sent. |
 | POST | `/events/{id}/ticketing/types` | Adds one type. |
 | PATCH | `/events/{id}/ticketing/types/{type_id}` | Changes one type. |

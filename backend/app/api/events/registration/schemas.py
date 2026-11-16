@@ -68,6 +68,9 @@ class EventRegistrationRequest(CustomBaseModel):
     #: The ticket type (docs/TICKETING.md). Left out: the event's only one;
     #: an event selling several answers 422 TICKET_TYPE_REQUIRED.
     ticket_type_id: int | None = Field(None)
+    #: The key a hidden type's link carries (`?ticket_key=`): a hidden type
+    #: is sold only with it (app/api/ticketing/hidden.py).
+    ticket_key: str | None = Field(None, max_length=64)
     #: A discount code typed for it; checked and applied by the server.
     discount_code: str | None = Field(None, max_length=60)
     #: The client knows registration requests (docs/APPROVALS.md): on an

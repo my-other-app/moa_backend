@@ -83,6 +83,10 @@ class TicketTypeOut(CustomBaseModel):
     held: int = 0
     #: Someone holds a ticket of it: it can be hidden, not removed.
     has_registrations: bool = False
+    #: The event page's address for this type, to copy and send: a hidden
+    #: type's carries its key (ticketing.hidden). Null for door staff, or an
+    #: event with no page address yet.
+    link: Optional[str] = None
 
 
 class TicketTypesOut(CustomBaseModel):
@@ -251,6 +255,10 @@ class DiscountCodeOut(CustomBaseModel):
 class CheckCodeIn(CustomBaseModel):
     code: str = Field(..., min_length=1, max_length=60)
     ticket_type_id: Optional[int] = Field(None)
+    #: The key a hidden type's link carries (ticketing.hidden).
+    ticket_key: Optional[str] = Field(None, max_length=64)
+    #: The claim link's token, on the claim page: its offer's type needs no key.
+    offer_token: Optional[str] = Field(None, max_length=128)
     #: Who is asking, for a code held to a number of uses per person.
     email: Optional[EmailStr] = Field(None)
     phone: Optional[str] = Field(None, max_length=20)
@@ -273,6 +281,8 @@ class CheckCodeOut(CustomBaseModel):
 
 class WaitlistJoinIn(CustomBaseModel):
     ticket_type_id: Optional[int] = Field(None)
+    #: The key a hidden type's link carries (ticketing.hidden).
+    ticket_key: Optional[str] = Field(None, max_length=64)
     full_name: str = Field(..., min_length=1, max_length=100)
     email: Optional[EmailStr] = Field(None)
     phone: Optional[str] = Field(None, max_length=20)

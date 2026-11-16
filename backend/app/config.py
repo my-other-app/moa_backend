@@ -737,6 +737,16 @@ class AppConfig(BaseSettings):
         keys = [k for k in (self.LINK_SIGNING_KEYS or "").split(",") if k]
         return keys or [self.SECRET_KEY]
 
+    # A hidden ticket type (comp, speaker, staff) is listed and sold only to
+    # a link that carries its signed key, which the dashboard copies
+    # (app/api/ticketing/hidden.py). False (the default until it is switched
+    # on): a link that names a hidden type is enough, as before this setting;
+    # the keys are still made, so organisers can copy and send the new links
+    # first. Switch it on (true) once they have, and once the app sends the
+    # key (apps 1.2.1 and 1.3.0 don't). The organiser, a waiting-list offer
+    # and the club confirming a request need no key.
+    HIDDEN_TYPES_REQUIRE_TOKEN: bool = False
+
     # Club plans (app/api/subscriptions/gates.py). PLAN_ENFORCEMENT=false is
     # the kill switch: every plan gate lets everything through, as before the
     # plans existed. An event created before PLAN_ENFORCEMENT_FROM and held

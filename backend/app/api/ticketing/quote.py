@@ -18,7 +18,7 @@ from sqlalchemy import func, select
 
 from app.api.events.models import EventRegistrationsLink
 from app.api.ticketing import codes as codes_mod
-from app.api.ticketing import places
+from app.api.ticketing import hidden, places
 from app.api.ticketing import types as types_mod
 from app.api.ticketing.models import DiscountCodes, TicketTypes, WaitlistEntries
 from app.core import money
@@ -93,9 +93,24 @@ def required(types: list) -> CustomHTTPException:
     )
 
 
-def pick(types: list, ticket_type_id, *, organiser: bool = False) -> TicketTypes:
+def not_found() -> CustomHTTPException:
+    return CustomHTTPException(
+        422, message="That ticket type is not on sale for this event.", error_code="TICKET_TYPE_NOT_FOUND",
+        errors={"ticket_type_id": "Not a ticket type of this event."},
+    )
+
+
+def pick(
+    types: list, ticket_type_id, *, organiser: bool = False, ticket_key: Optional[str] = None, any_type: bool = False,
+) -> TicketTypes:
     """The type a registration is for: the one it names, else the event's
-    only (visible) one. The organiser adding a guest gets the default."""
+    only (visible) one. The organiser adding a guest gets the default.
+
+    A hidden type it names is the public's only with the key its link
+    carries (`ticket_key`, ticketing.hidden), and refused as a type the event
+    doesn't have otherwise. The organiser, and `any_type` (the club
+    confirming a request, a registration back to pay for its own type),
+    need none."""
     if ticket_type_id is not None:
         try:
             wanted = int(ticket_type_id)
@@ -103,10 +118,9 @@ def pick(types: list, ticket_type_id, *, organiser: bool = False) -> TicketTypes
             wanted = None
         ttype = next((t for t in types if t.id == wanted), None)
         if ttype is None:
-            raise CustomHTTPException(
-                422, message="That ticket type is not on sale for this event.", error_code="TICKET_TYPE_NOT_FOUND",
-                errors={"ticket_type_id": "Not a ticket type of this event."},
-            )
+            raise not_found()
+        if not (organiser or any_type) and len(types) > 1 and not hidden.may_sell(ttype, ticket_key):
+            raise not_found()
         return ttype
     if len(types) == 1:
         return types[0]
@@ -154,7 +168,8 @@ async def quote(
     session, event, *, ticket_type_id=None, discount_code: Optional[str] = None, email: Optional[str] = None,
     phone: Optional[str] = None, user_id: Optional[int] = None, organiser: bool = False,
     offer: Optional[WaitlistEntries] = None, lock: bool = True, early_capacity: bool = True,
-    now: Optional[datetime] = None, exclude=None, window: bool = True,
+    now: Optional[datetime] = None, exclude=None, window: bool = True, ticket_key: Optional[str] = None,
+    any_type: bool = False,
 ) -> Quote:
     """The price of a registration about to be made, and every check that can
     refuse it before anything is written: the type (TICKET_TYPE_REQUIRED,
@@ -164,7 +179,9 @@ async def quote(
     The organiser adding a guest is held to nothing but the places.
     `exclude`: a registration already made, being priced again. `window`
     False leaves the type's sales window alone: a club confirming a request
-    made while it was on sale (app/api/approvals)."""
+    made while it was on sale (app/api/approvals). `ticket_key`: the key a
+    hidden type's link carries (ticketing.hidden); `any_type` takes a hidden
+    type without one (see `pick`)."""
     now = now or _now()
     types = await types_mod.ensure(session, event)
     if offer is not None:
@@ -172,7 +189,7 @@ async def quote(
         if ttype is None:
             raise CustomHTTPException(409, message="That ticket type no longer exists.", error_code="TICKET_TYPE_NOT_FOUND")
     else:
-        ttype = pick(types, ticket_type_id, organiser=organiser)
+        ttype = pick(types, ticket_type_id, organiser=organiser, ticket_key=ticket_key, any_type=any_type)
     q = Quote(
         ticket_type=ttype, types=types, price=types_mod.price_of(event, ttype, types), offer=offer,
         follows=types_mod.follows(types),
