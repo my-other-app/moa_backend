@@ -237,13 +237,18 @@ async def _tracking_link(session, event, ref: Optional[str]):
 async def submit(
     session, event, *, full_name: str, email: str, phone: Optional[str], user, answers: Optional[dict],
     ticket_type_id: Optional[int] = None, discount_code: Optional[str] = None, whatsapp_opt_in: bool = False,
-    club_updates_whatsapp: bool = False, tracking_ref: Optional[str] = None,
+    club_updates_whatsapp: bool = False, tracking_ref: Optional[str] = None, ticket_key: Optional[str] = None,
+    any_type: bool = False,
 ) -> Submitted:
     """The form's request: the open one this person already has, or a new one.
 
     `user` is the signed-in account (or the guest whose session it is, with
     this address), or None for the public form, which gets a guest of its own
-    -- as a registration does -- only when a request is made. Commits."""
+    -- as a registration does -- only when a request is made. Commits.
+
+    A hidden ticket type is asked for only with the key its link carries
+    (`ticket_key`, ticketing.hidden); `any_type` (the club's own API key)
+    needs none."""
     from app.api.events.registration import answers as answers_mod
     from app.api.events.registration import service as registration
     from app.api.ticketing import codes as codes_mod
@@ -290,7 +295,7 @@ async def submit(
     # left are not asked: confirming is where they count.
     priced = await quote_mod.quote(
         session, event, ticket_type_id=ticket_type_id, discount_code=discount_code, email=email, phone=phone,
-        user_id=user_id, lock=False, early_capacity=False, now=now,
+        user_id=user_id, lock=False, early_capacity=False, now=now, ticket_key=ticket_key, any_type=any_type,
     )
     guest = None
     if user is None:
@@ -1157,6 +1162,8 @@ async def _confirm_one(session, event, req: RegistrationRequests, snap: _Snap, r
             session, event, ticket_type_id=snap.ticket_type_id, discount_code=snap.discount_code, email=snap.email,
             phone=snap.phone, user_id=user_id, early_capacity=False, window=False, now=now,
             exclude=existing.id if own_unpaid else None,
+            # The club confirming: the type was checked when the request was made.
+            any_type=True,
         )
         if priced.code is not None and priced.code.max_uses:
             await _check_code_holds(session, priced.code, now)

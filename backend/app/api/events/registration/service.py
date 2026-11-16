@@ -438,6 +438,7 @@ async def register_event(
     ticket_type_id: int | None = None,
     discount_code: str | None = None,
     offer=None,
+    ticket_key: str | None = None,
 ):
     """`relaxed_fields` is for a guest registered at the door: nothing is
     required there, and what they answer goes on the record.
@@ -447,7 +448,9 @@ async def register_event(
     an event selling several refuses it (422 TICKET_TYPE_REQUIRED), but for
     the organiser adding a guest, who gets the default. What it costs is
     worked out here alone (ticketing.quote). `offer`: the waiting-list offer
-    it claims (ticketing.waitlist), whose place it takes.
+    it claims (ticketing.waitlist), whose place it takes. `ticket_key`: the
+    key a hidden type's link carries, without which the public isn't sold a
+    hidden type (ticketing.hidden); the organiser and an offer need none.
 
     `whatsapp_opt_in` is the guest's own tick on the form, "Send my ticket
     and event reminders on WhatsApp": True asks for it (and needs a number
@@ -603,9 +606,12 @@ async def register_event(
             from app.api.ticketing import quote as ticketing_quote
             from app.api.ticketing import service as ticketing
 
+            wanted = ticket_type_id if ticket_type_id is not None else registration.ticket_type_id
             priced = await ticketing_quote.quote(
-                session, db_event, ticket_type_id=ticket_type_id if ticket_type_id is not None else registration.ticket_type_id,
+                session, db_event, ticket_type_id=wanted,
                 discount_code=discount_code, email=email, phone=phone, user_id=user_id, exclude=registration.id,
+                # Its own type, hidden or not, is still its own; another hidden one takes the link's key.
+                ticket_key=ticket_key, any_type=by_organiser or wanted == registration.ticket_type_id,
             )
             if await ticketing.requote(session, db_event, registration, priced) and notify:
                 from app.api.deliveries import service as deliveries
@@ -619,7 +625,7 @@ async def register_event(
 
         priced = await ticketing_quote.quote(
             session, db_event, ticket_type_id=ticket_type_id, discount_code=discount_code, email=email, phone=phone,
-            user_id=user_id, organiser=by_organiser, offer=offer,
+            user_id=user_id, organiser=by_organiser, offer=offer, ticket_key=ticket_key,
         )
         registration = await add_registration(
             session, db_event, priced, full_name=full_name, email=email, phone=phone, user_id=user_id,
