@@ -990,3 +990,50 @@ async def test_the_builders_are_plain_functions_with_the_answers_shapes(client, 
         "id": "9b0e", "object": "payment", "registration_id": reg["id"], "event_id": str(world.ids.upcoming), "status": "captured",
         "amount": 49900, "currency": "INR", "created_at": iso(NOW), "updated_at": iso(NOW), "livemode": True,
     }
+
+
+class _IdemRequest:
+    """What idempotency.begin reads of a request: method, path, query, the key, the body, the caller."""
+
+    def __init__(self, key: str, club_id, livemode: bool, body: bytes = b'{"name": "x"}'):
+        from types import SimpleNamespace
+
+        self.method = "POST"
+        self.url = SimpleNamespace(path=f"{V1}/events", query="")
+        self.headers = {"idempotency-key": key}
+        self.state = SimpleNamespace(partner_caller=SimpleNamespace(club_id=club_id, livemode=livemode))
+        self._body = body
+
+    async def body(self) -> bytes:
+        return self._body
+
+
+async def test_an_idempotency_key_is_per_club_and_mode(session):
+    from fastapi.responses import JSONResponse
+
+    from app.api.partner import idempotency
+
+    async def answered(req, status=201):
+        await idempotency.begin(session, req, "app_scope_test")
+        await idempotency.finish(session, req, JSONResponse({"club": req.state.partner_caller.club_id}, status_code=status))
+
+    await answered(_IdemRequest("k-1", 11, True))
+    with pytest.raises(idempotency.Replay) as replay:
+        await idempotency.begin(session, _IdemRequest("k-1", 11, True), "app_scope_test")
+    assert replay.value.response.body == b'{"club":11}'
+    # The same key for another club, or in test mode: a key of its own, done again.
+    await answered(_IdemRequest("k-1", 12, True))
+    await answered(_IdemRequest("k-1", 11, False))
+    scopes = set((await session.scalars(select(PartnerIdempotency.client_id).where(PartnerIdempotency.key == "k-1"))).all())
+    assert scopes == {"app_scope_test|11|live", "app_scope_test|12|live", "app_scope_test|11|test"}
+
+    # A key kept before the scope existed is still answered once.
+    legacy = _IdemRequest("k-old", 11, True)
+    session.add(PartnerIdempotency(
+        client_id="app_scope_test", key="k-old", request_hash=await idempotency.fingerprint(legacy), method="POST",
+        path=f"{V1}/events", status_code=201, response_body='{"old": true}', response_headers={},
+        created_at=datetime.now(timezone.utc), expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+    ))
+    await session.commit()
+    with pytest.raises(idempotency.Replay):
+        await idempotency.begin(session, _IdemRequest("k-old", 11, True), "app_scope_test")
