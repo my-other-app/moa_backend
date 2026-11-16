@@ -188,3 +188,71 @@ async def test_a_sheet_with_no_rows_fails_and_says_so(client, world, no_email):
     log = await _import(client, world, "empty.csv", b"full_name,email,phone,role\n")
     assert log["status"] == "FAILED"
     assert log["issues"] == ["The file has no rows to import."]
+
+
+# ─── Import limits (app/core/utils/excel.py) ─────────────────────────────
+
+
+def _workbook(**members) -> bytes:
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, data in members.items():
+            z.writestr(name.replace("__", "/"), data)
+    return buf.getvalue()
+
+
+async def test_an_import_past_the_size_row_or_unpacked_limits_is_refused(client, world, monkeypatch, no_email):
+    from app.config import settings
+
+    e = _base(world)
+    monkeypatch.setattr(settings, "IMPORT_MAX_MB", 1)
+    big = _sheet(*[(f"Guest {i}", f"g{i}@example.com") for i in range(40_000)])
+    assert len(big) > 1024 * 1024
+    r = await client.post(f"{e}/import", files={"file": ("big.csv", big, "text/csv")}, headers=world["club"])
+    assert r.status_code == 413 and r.json()["error_code"] == "FILE_TOO_LARGE"
+
+    monkeypatch.setattr(settings, "IMPORT_MAX_ROWS", 3)
+    rows = _sheet(*[(f"Guest {i}", f"g{i}@example.com") for i in range(4)])
+    r = await client.post(f"{e}/import", files={"file": ("rows.csv", rows, "text/csv")}, headers=world["club"])
+    assert r.status_code == 413 and r.json()["error_code"] == "TOO_MANY_ROWS"
+
+    # A small workbook that would unpack to far more than its size.
+    monkeypatch.setattr(settings, "IMPORT_MAX_UNZIPPED_MB", 1)
+    bomb = _workbook(xl__worksheets__sheet1_xml=b"\0" * (3 * 1024 * 1024))
+    assert len(bomb) < 64 * 1024
+    r = await client.post(f"{e}/import", files={"file": ("bomb.xlsx", bomb, "application/octet-stream")}, headers=world["club"])
+    assert r.status_code == 413 and r.json()["error_code"] == "FILE_TOO_LARGE"
+    assert (await client.get(f"{e}/imports", headers=world["club"])).json() == []
+
+    # Within the limits, as before.
+    ok = _sheet(("Within Limits", "within-a@example.com"))
+    r = await client.post(f"{e}/import", files={"file": ("ok.csv", ok, "text/csv")}, headers=world["club"])
+    assert r.status_code == 200, r.text
+
+
+async def test_the_sheet_is_parsed_on_a_worker_thread(monkeypatch):
+    import threading
+
+    from starlette.datastructures import UploadFile
+
+    from app.core.utils import excel
+
+    seen = []
+    parse = excel.parse
+    monkeypatch.setattr(excel, "parse", lambda c, f: seen.append(threading.current_thread()) or parse(c, f))
+    df = await excel.read_excel(UploadFile(io.BytesIO(b"full_name,email\nA,a@example.com\n"), filename="g.csv"))
+    assert list(df.columns) == ["full_name", "email"] and len(df) == 1
+    assert seen and seen[0] is not threading.main_thread()
+
+
+def test_a_workbook_with_too_many_parts_is_refused():
+    from app.core.utils import excel
+    from app.response import CustomHTTPException
+
+    many = _workbook(**{f"part{i}": b"x" for i in range(excel.MAX_ZIP_MEMBERS + 1)})
+    with pytest.raises(CustomHTTPException) as refused:
+        excel.check_workbook(many)
+    assert refused.value.status_code == 413
+    excel.check_workbook(b"not a zip at all")  # left to the parser

@@ -470,6 +470,13 @@ class AppConfig(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int
     REFRESH_TOKEN_EXPIRE_DAYS: int
 
+    # A guest-list or organisation import (app/core/utils/excel.py): the most
+    # an upload may be (MB), what a workbook may unpack to (MB), and the most
+    # rows taken at once. Past any of them the import is refused with 413.
+    IMPORT_MAX_MB: int = 10
+    IMPORT_MAX_UNZIPPED_MB: int = 100
+    IMPORT_MAX_ROWS: int = 20000
+
     DISCORD_ERROR_WEBHOOK: str | None = None
     # Who hears about billing and new club applications (app/api/admin_alerts):
     # a comma-separated list of addresses, each alert one mail to all of them.
