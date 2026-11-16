@@ -26,7 +26,7 @@ from app.config import settings
 from tests import fake_ai
 from tests.conftest import auth_header
 from tests.fake_social import META_APP_SECRET, TOKENS
-from tests.social_helpers import API, DASHBOARD, account, connect, fake, files, jpeg, seed_plans, state_of, world  # noqa: F401
+from tests.social_helpers import API, DASHBOARD, account, connect, fake, files, jpeg, keep_browser, seed_plans, state_of, world  # noqa: F401
 
 pytestmark = pytest.mark.asyncio
 
@@ -78,6 +78,7 @@ async def test_connecting_a_facebook_page_keeps_its_token_sealed_and_never_shows
     assert q["client_id"] == ["test-meta-app"] and q["scope"] == ["pages_show_list,pages_manage_posts,pages_read_engagement"]
     assert q["redirect_uri"] == ["https://api.myotherapp.in/api/v1/social/oauth/facebook/callback"]
     state = q["state"][0]
+    keep_browser(client, r)
     back = await client.get(f"{API}/social/oauth/facebook/callback", params={"code": "abc", "state": state})
     assert back.status_code == 302
     where = urlsplit(back.headers["location"])
@@ -101,6 +102,7 @@ async def test_connecting_a_facebook_page_keeps_its_token_sealed_and_never_shows
 async def test_a_state_that_was_tampered_with_or_used_once_is_refused(client, session, world):
     r = await client.post(f"{API}/clubs/social/accounts/facebook/connect", json={"return_to": DASHBOARD}, headers=world.h)
     state = state_of(r.json()["authorize_url"])
+    keep_browser(client, r)
     sid, nonce, sig = state.split(".")
     for bad in (f"{sid}.{nonce}.{'A' * len(sig)}", f"{sid}.{nonce}x.{sig}", "nonsense", ""):
         back = await client.get(f"{API}/social/oauth/facebook/callback", params={"code": "abc", "state": bad})
@@ -120,15 +122,54 @@ async def test_a_state_that_was_tampered_with_or_used_once_is_refused(client, se
 async def test_an_expired_state_and_a_refusal_go_back_with_a_reason(client, session, world):
     r = await client.post(f"{API}/clubs/social/accounts/facebook/connect", json={"return_to": DASHBOARD}, headers=world.h)
     state = state_of(r.json()["authorize_url"])
+    keep_browser(client, r)
     row = await session.scalar(select(SocialOAuthStates))
     row.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
     await session.commit()
     back = await client.get(f"{API}/social/oauth/facebook/callback", params={"code": "abc", "state": state})
     assert parse_qs(urlsplit(back.headers["location"]).query)["reason"] == ["expired_state"]
     r = await client.post(f"{API}/clubs/social/accounts/facebook/connect", json={"return_to": DASHBOARD}, headers=world.h)
+    keep_browser(client, r)
     back = await client.get(f"{API}/social/oauth/facebook/callback", params={"error": "access_denied", "state": state_of(r.json()["authorize_url"])})
     assert parse_qs(urlsplit(back.headers["location"]).query)["reason"] == ["denied"]
     assert not world.fake.calls
+
+
+async def test_the_sign_in_must_come_back_to_the_browser_that_started_it(client, session, world, monkeypatch):
+    from app.api.social import oauth
+    from app.config import settings
+
+    r = await client.post(f"{API}/clubs/social/accounts/facebook/connect", json={"return_to": DASHBOARD}, headers=world.h)
+    [line] = [c for c in r.headers.get_list("set-cookie") if c.startswith("moa_social_facebook=")]
+    attrs = {a.strip().split("=")[0].lower(): a.strip() for a in line.split(";")[1:]}
+    assert attrs["domain"].lower() == "domain=myotherapp.in" and attrs["path"] == "Path=/api/v1/social/oauth/facebook/callback"
+    assert "httponly" in attrs and attrs["samesite"].lower() == "samesite=lax" and ("secure" in attrs) is (not settings.DEBUG)
+    state = state_of(r.json()["authorize_url"])
+
+    # Another browser (no cookie, or one from its own Connect): refused, nothing exchanged, the state not spent.
+    client.cookies.clear()
+    back = await client.get(f"{API}/social/oauth/facebook/callback", params={"code": "abc", "state": state})
+    assert parse_qs(urlsplit(back.headers["location"]).query)["reason"] == ["invalid_state"]
+    client.cookies.set("moa_social_facebook", "someone-elses")
+    back = await client.get(f"{API}/social/oauth/facebook/callback", params={"code": "abc", "state": state})
+    assert parse_qs(urlsplit(back.headers["location"]).query)["reason"] == ["invalid_state"]
+    assert not world.fake.calls
+    row = await session.scalar(select(SocialOAuthStates).execution_options(populate_existing=True))
+    assert row.used_at is None
+
+    # The browser that pressed Connect: connected, and its cookie cleared.
+    keep_browser(client, r)
+    ok = await client.get(f"{API}/social/oauth/facebook/callback", params={"code": "abc", "state": state})
+    assert parse_qs(urlsplit(ok.headers["location"]).query)["social"] == ["connected"]
+    assert any(c.startswith("moa_social_facebook=") and "Max-Age=0" in c for c in ok.headers.get_list("set-cookie"))
+
+    # Switched off: any browser holding the link finishes it, as before.
+    monkeypatch.setattr(settings, "SOCIAL_OAUTH_BROWSER_CHECK", False)
+    client.cookies.clear()
+    r = await client.post(f"{API}/clubs/social/accounts/facebook/connect", json={"return_to": DASHBOARD}, headers=world.h)
+    back = await client.get(f"{API}/social/oauth/facebook/callback", params={"code": "abc", "state": state_of(r.json()["authorize_url"])})
+    assert parse_qs(urlsplit(back.headers["location"]).query)["social"] == ["connected"]
+    assert oauth.cookie_domain() == "myotherapp.in"
 
 
 async def test_return_to_must_be_the_club_dashboard(client, world, monkeypatch):
@@ -184,6 +225,7 @@ async def test_x_signs_in_with_pkce(client, session, world):
     r = await client.post(f"{API}/clubs/social/accounts/x/connect", json={"return_to": DASHBOARD}, headers=world.h)
     q = parse_qs(urlsplit(r.json()["authorize_url"]).query)
     assert q["code_challenge_method"] == ["S256"] and "offline.access" in q["scope"][0] and "media.write" in q["scope"][0]
+    keep_browser(client, r)
     back = await client.get(f"{API}/social/oauth/x/callback", params={"code": "c", "state": q["state"][0]})
     assert parse_qs(urlsplit(back.headers["location"]).query)["social"] == ["connected"]
     [token] = world.fake.by("POST", r"/2/oauth2/token$")

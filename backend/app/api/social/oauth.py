@@ -4,11 +4,14 @@
    club, where to go back to, X's PKCE verifier sealed) and the platform's
    sign-in opens with a signed, one-time state: `<id>.<nonce>.<sig>`, the
    signature an HMAC of the three under SECRET_KEY; only the nonce's hash is
-   kept.
+   kept. The answer also sets a short-lived HttpOnly cookie on the browser
+   that pressed Connect (`moa_social_{platform}`, for the dashboard's and the
+   API's shared domain, only on the callback's path), tied to that state.
 2. The platform sends the browser back to
    /api/v1/social/oauth/{platform}/callback with a code. The state must be
-   ours (signature), for this platform, unexpired (15 minutes) and unused --
-   it is spent by one conditional UPDATE, so a replay is refused.
+   ours (signature), for this platform, come back to the browser that started
+   it (the cookie; SOCIAL_OAUTH_BROWSER_CHECK), unexpired (15 minutes) and
+   unused -- it is spent by one conditional UPDATE, so a replay is refused.
 3. The code is exchanged server to server; the tokens are sealed. One Page
    or account: connected. Several: they wait, sealed, on the state row
    (30 minutes) for the club to pick one (GET/POST /accounts/pending/{id}).
@@ -60,6 +63,49 @@ def _sig(state_id: str, nonce: str, platform: str) -> str:
     return base64.urlsafe_b64encode(mac).decode().rstrip("=")[:43]
 
 
+def browser_cookie(platform: str) -> str:
+    """The cookie that ties a sign-in to the browser that started it."""
+    return f"moa_social_{platform}"
+
+
+def browser_mark(state_id: uuid.UUID) -> str:
+    """The cookie's value for a state: an HMAC of its id, so it fits that sign-in only."""
+    mac = hmac.new(settings.SECRET_KEY.encode(), f"social-oauth-browser:{state_id.hex}".encode(), hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(mac).decode().rstrip("=")
+
+
+def cookie_domain() -> Optional[str]:
+    """Where the cookie lives: SOCIAL_OAUTH_COOKIE_DOMAIN, else the domain the
+    dashboard and the API share (myotherapp.in for club-dashboard. and api.),
+    so the cookie set through the dashboard's gateway reaches the API's
+    callback. None (this host only) when they share none."""
+    if settings.SOCIAL_OAUTH_COOKIE_DOMAIN:
+        return settings.SOCIAL_OAUTH_COOKIE_DOMAIN
+    api = (urlsplit(settings.PUBLIC_API_URL).hostname or "").split(".")
+    web = (urlsplit(settings.PUBLIC_WEB_URL).hostname or "").split(".")
+    common: list[str] = []
+    for a, w in zip(reversed(api), reversed(web)):
+        if a != w:
+            break
+        common.insert(0, a)
+    return ".".join(common) if len(common) >= 2 else None
+
+
+def set_browser_cookie(response, platform: str, state_id: uuid.UUID) -> None:
+    response.set_cookie(
+        browser_cookie(platform), browser_mark(state_id), max_age=int(STATE_TTL.total_seconds()),
+        path=f"/api/v1/social/oauth/{platform}/callback", domain=cookie_domain(),
+        secure=not settings.DEBUG, httponly=True, samesite="lax",
+    )
+
+
+def clear_browser_cookie(response, platform: str) -> None:
+    response.delete_cookie(
+        browser_cookie(platform), path=f"/api/v1/social/oauth/{platform}/callback", domain=cookie_domain(),
+        secure=not settings.DEBUG, httponly=True, samesite="lax",
+    )
+
+
 def make_state(state_id: uuid.UUID, nonce: str, platform: str) -> str:
     return f"{state_id.hex}.{nonce}.{_sig(state_id.hex, nonce, platform)}"
 
@@ -70,7 +116,7 @@ def read_state(raw: Optional[str], platform: str) -> Optional[tuple[uuid.UUID, s
     if len(parts) != 3 or not all(parts):
         return None
     sid, nonce, sig = parts
-    if not hmac.compare_digest(sig, _sig(sid, nonce, platform)):
+    if not hmac.compare_digest(sig.encode(), _sig(sid, nonce, platform).encode()):
         return None
     try:
         return uuid.UUID(hex=sid), nonce
@@ -108,8 +154,9 @@ def with_query(url: str, **params) -> str:
     return urlunsplit((p.scheme, p.netloc, p.path, urlencode(q), p.fragment))
 
 
-async def start(session, who: Who, platform: str, return_to: Optional[str], request=None) -> str:
-    """The platform's sign-in address for this club, with a fresh one-time state."""
+async def start(session, who: Who, platform: str, return_to: Optional[str], request=None, response=None) -> str:
+    """The platform's sign-in address for this club, with a fresh one-time
+    state; `response` gets the cookie that ties it to this browser."""
     back = safe_return(return_to)
     reason = platforms.unavailable_reason(platform)
     if reason:
@@ -124,6 +171,8 @@ async def start(session, who: Who, platform: str, return_to: Optional[str], requ
         verifier_enc=crypto.seal(verifier), created_at=_now(), expires_at=_now() + STATE_TTL,
     ))
     await session.commit()
+    if response is not None:
+        set_browser_cookie(response, platform, state_id)
     return for_platform(platform).authorize_url(
         state=make_state(state_id, nonce, platform), redirect_uri=redirect_uri(platform),
         challenge=x_adapter.challenge(verifier) if verifier else None,
@@ -134,13 +183,18 @@ def _fail(back: str, platform: str, reason: str) -> str:
     return with_query(back, social="error", platform=platform, reason=reason)
 
 
-async def callback(session, platform: str, params: dict) -> str:
-    """Where to send the browser after the platform's sign-in."""
+async def callback(session, platform: str, params: dict, browser: Optional[str] = None) -> str:
+    """Where to send the browser after the platform's sign-in. `browser`: the
+    cookie Connect set, which must be this state's."""
     default = settings.PUBLIC_WEB_URL.rstrip("/") + alerts.SETTINGS_PATH
     parsed = read_state(params.get("state"), platform)
     if parsed is None:
         return _fail(default, platform, "invalid_state")
     state_id, nonce = parsed
+    if settings.SOCIAL_OAUTH_BROWSER_CHECK and not hmac.compare_digest((browser or "").encode(), browser_mark(state_id).encode()):
+        # Not the browser that pressed Connect (or its cookie is gone): start again there.
+        logger.info("social: %s sign-in came back to another browser than the one that started it", platform)
+        return _fail(default, platform, "invalid_state")
     now = _now()
     # Spent here, once: a second arrival with the same state finds it used.
     spent = await session.scalar(

@@ -477,6 +477,14 @@ class AppConfig(BaseSettings):
     # session ends as reused. 0: answered again whenever, as before.
     REFRESH_RESEND_GRACE_SECONDS: int = 300
 
+    # Connecting a social account (app/api/social/oauth.py): the platform's
+    # sign-in must come back to the browser that pressed Connect (a cookie
+    # Connect sets). Off: any browser holding the link may finish it, as
+    # before. The cookie's domain: unset, the one PUBLIC_WEB_URL and
+    # PUBLIC_API_URL share (myotherapp.in).
+    SOCIAL_OAUTH_BROWSER_CHECK: bool = True
+    SOCIAL_OAUTH_COOKIE_DOMAIN: str = ""
+
     # A guest-list or organisation import (app/core/utils/excel.py): the most
     # an upload may be (MB), what a workbook may unpack to (MB), and the most
     # rows taken at once. Past any of them the import is refused with 413.
