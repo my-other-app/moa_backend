@@ -311,8 +311,11 @@ def _fernet_ok(key: str) -> bool:
 def _formats(settings) -> list[Problem]:
     out = []
     sse = _text(_get(settings, "BACKUP_S3_SSE")) or "AES256"
-    if sse not in ("AES256", "aws:kms"):
-        out.append(Problem("BACKUP_S3_SSE", "must be AES256 or aws:kms"))
+    if sse not in ("AES256", "aws:kms", "none"):
+        out.append(Problem("BACKUP_S3_SSE", "must be AES256, aws:kms or none"))
+    endpoint = _text(_get(settings, "BACKUP_S3_ENDPOINT_URL"))
+    if endpoint and not endpoint.startswith("https://"):
+        out.append(Problem("BACKUP_S3_ENDPOINT_URL", "must be an https:// address: the dumps leave the box over it"))
     for name in FERNET_KEYS:
         raw = _text(_get(settings, name))
         if raw and not all(_fernet_ok(k.strip()) for k in raw.split(",") if k.strip()):
@@ -397,6 +400,10 @@ def _warnings(settings) -> list[Problem]:
     out = []
     if _text(_get(settings, "BACKUP_S3_KMS_KEY_ID")) and _text(_get(settings, "BACKUP_S3_SSE")) != "aws:kms":
         out.append(Problem("BACKUP_S3_KMS_KEY_ID", "is set but APP_BACKUP_S3_SSE is not aws:kms, so it is not used", fatal=False))
+    if _text(_get(settings, "BACKUP_S3_SSE")) == "none" and not _text(_get(settings, "BACKUP_S3_ENDPOINT_URL")):
+        out.append(Problem("BACKUP_S3_SSE", "is none on AWS S3: the dumps are stored without server-side encryption", fatal=False))
+    if _get(settings, "MEDIA_SYNC") and not _text(_get(settings, "BACKUP_S3_BUCKET")):
+        out.append(Problem("MEDIA_SYNC", "is on but APP_BACKUP_S3_BUCKET is empty: the media is not copied anywhere", fatal=False))
     if _text(_get(settings, "RAZORPAY_KEY_ID")).startswith("rzp_test_"):
         out.append(Problem("RAZORPAY_KEY_ID", "is a test key: payments take no real money", fatal=False))
     path = _text(_get(settings, "FIREBASE_SERVICE_ACCOUNT_PATH"))

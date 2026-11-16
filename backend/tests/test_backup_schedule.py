@@ -244,7 +244,8 @@ def test_the_daily_timer_is_0300_india_time_and_catches_up():
     assert drill["Timer"]["OnCalendar"][0].startswith("*-*-01 ")  # monthly
 
 
-@pytest.mark.parametrize("name, what", [("myotherapp-backup.service", "backup"), ("myotherapp-restore-drill.service", "drill")])
+@pytest.mark.parametrize("name, what", [("myotherapp-backup.service", "backup"), ("myotherapp-restore-drill.service", "drill"),
+                                        ("myotherapp-media-sync.service", "media-sync")])
 def test_the_services_run_the_script_and_alert_on_failure(name, what):
     unit = _unit(name)
     assert unit["Unit"]["OnFailure"] == ["myotherapp-alert@%N.service"]
@@ -285,6 +286,47 @@ def test_run_sh_execs_the_script_in_the_backend_container(tmp_path):
     ]
     bad = subprocess.run(["bash", str(OPS / "run.sh"), "restore-everything"], env=env, capture_output=True)
     assert bad.returncode == 64
+
+
+def _box_dc(tmp_path: Path, services: str) -> Path:
+    """The Oracle box's ./dc in the project folder: writes down its arguments,
+    and answers `config --services` with `services`."""
+    calls = tmp_path / "dc-calls"
+    dc = tmp_path / "dc"
+    dc.write_text(
+        "#!/bin/bash\n"
+        f'echo "$@" >> {calls}\n'
+        f'case " $* " in *" config --services "*) printf "%s\\n" {services} ;; esac\n'
+    )
+    dc.chmod(0o755)
+    return calls
+
+
+def test_run_sh_on_the_box_uses_dc_and_the_owner_for_the_drill(tmp_path):
+    calls = _box_dc(tmp_path, "backend worker migrate")
+    env = _fake_bin(tmp_path)
+    for args in (["backup"], ["drill", "--max-age-hours", "26"], ["media-sync", "--dry-run"]):
+        subprocess.run(["bash", str(OPS / "run.sh"), *args], env=env, check=True, capture_output=True)
+    assert calls.read_text().splitlines() == [
+        "exec -T backend python scripts/backup.py --no-alert",
+        "--profile tools config --services",
+        "run --rm --no-deps -T migrate python scripts/restore_drill.py --max-age-hours 26",
+        "exec -T backend python scripts/media_sync.py --dry-run",
+    ]
+
+
+def test_run_sh_drills_in_the_api_container_when_compose_has_no_migrate(tmp_path):
+    calls = _box_dc(tmp_path, "backend worker")
+    subprocess.run(["bash", str(OPS / "run.sh"), "drill", "--source", "local"], env=_fake_bin(tmp_path), check=True, capture_output=True)
+    assert calls.read_text().splitlines()[-1] == "exec -T backend python scripts/restore_drill.py --source local"
+
+
+def test_the_media_sync_timer_runs_after_the_backup_and_alerts_like_it():
+    timer = _unit("myotherapp-media-sync.timer")
+    assert timer["Timer"]["OnCalendar"] == ["*-*-* 03:30:00 Asia/Kolkata"]
+    assert timer["Timer"]["Persistent"] == ["true"] and timer["Timer"]["Unit"] == ["myotherapp-media-sync.service"]
+    alert = (OPS / "alert.sh").read_text()
+    assert '*media-sync*) WHAT="The nightly copy of the media off the box"' in alert
 
 
 JOURNAL = 'echo "dump: backup-20261024-210000.dump"; echo "pg_dump: connection to postgresql://moa:hunter2-pw@postgres:5432/moa failed"'

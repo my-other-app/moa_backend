@@ -40,6 +40,7 @@ LOG="$(journalctl -u "$UNIT" -n 25 -o cat --no-pager 2> /dev/null \
 
 case "$UNIT" in
   *restore-drill*) WHAT="The monthly restore drill" ;;
+  *media-sync*) WHAT="The nightly copy of the media off the box" ;;
   *) WHAT="The daily database backup" ;;
 esac
 TITLE="$WHAT failed on $HOST"

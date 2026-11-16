@@ -5,6 +5,7 @@ and cannot create, alter or drop anything, run programs, or make databases or
 roles. What the owner creates afterwards is granted to it as well, and a
 second run changes nothing. Skips without psql.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -28,7 +29,11 @@ def _psql() -> str | None:
     found = shutil.which("psql")
     if found:
         return found
-    for candidate in sorted(glob("/opt/homebrew/opt/postgresql@*/bin/psql") + glob("/usr/lib/postgresql/*/bin/psql"), reverse=True):
+    for candidate in sorted(
+        glob("/opt/homebrew/opt/postgresql@*/bin/psql")
+        + glob("/usr/lib/postgresql/*/bin/psql"),
+        reverse=True,
+    ):
         return candidate
     return None
 
@@ -37,7 +42,11 @@ def _psql() -> str | None:
 def _cursor(**connect):
     """An autocommit cursor (psycopg2's `with conn` would open a transaction,
     and one refused statement would then abort the rest)."""
-    conn = psycopg2.connect(**connect) if connect else psycopg2.connect(settings.DATABASE_URL_SYNC)
+    conn = (
+        psycopg2.connect(**connect)
+        if connect
+        else psycopg2.connect(settings.DATABASE_URL_SYNC)
+    )
     conn.autocommit = True
     try:
         with conn.cursor() as cur:
@@ -50,25 +59,52 @@ def _apply(role: str = ROLE, password: str = PASSWORD) -> subprocess.CompletedPr
     with _cursor() as cur:
         cur.execute("SELECT current_user, current_database()")
         owner, db = cur.fetchone()
-    stdin = f"\\set app_role {role}\n\\set app_password '{password}'\n" + SQL.read_text()
+    stdin = (
+        f"\\set app_role {role}\n\\set app_password '{password}'\n" + SQL.read_text()
+    )
     return subprocess.run(
-        [_psql(), "-X", "-q", "-v", "ON_ERROR_STOP=1", "-v", f"owner={owner}", "-v", f"db={db}",
-         "-d", settings.DATABASE_URL_SYNC, "-f", "-"],
-        input=stdin, capture_output=True, text=True, timeout=120,
+        [
+            _psql(),
+            "-X",
+            "-q",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-v",
+            f"owner={owner}",
+            "-v",
+            f"db={db}",
+            "-d",
+            settings.DATABASE_URL_SYNC,
+            "-f",
+            "-",
+        ],
+        input=stdin,
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
 
 
 def _app_cursor():
     parts = urlsplit(settings.DATABASE_URL_SYNC)
-    return _cursor(host=parts.hostname or "localhost", port=parts.port or 5432, dbname=parts.path.lstrip("/"),
-                   user=ROLE, password=PASSWORD)
+    return _cursor(
+        host=parts.hostname or "localhost",
+        port=parts.port or 5432,
+        dbname=parts.path.lstrip("/"),
+        user=ROLE,
+        password=PASSWORD,
+    )
 
 
 def _refused(cur, sql: str) -> bool:
     try:
         cur.execute(sql)
     except psycopg2.Error as error:
-        return error.pgcode in ("42501", "42P01") or "permission denied" in str(error) or "must be" in str(error)
+        return (
+            error.pgcode in ("42501", "42P01")
+            or "permission denied" in str(error)
+            or "must be" in str(error)
+        )
     return False
 
 
@@ -77,9 +113,15 @@ def app_role(_engine):
     if _psql() is None:
         pytest.skip("needs psql")
     with _cursor() as cur:
-        cur.execute("CREATE TABLE IF NOT EXISTS alembic_version (version_num varchar(32) PRIMARY KEY)")
-        cur.execute("INSERT INTO alembic_version VALUES ('stability_indexes') ON CONFLICT DO NOTHING")
-        cur.execute("CREATE TABLE IF NOT EXISTS app_role_items (id serial PRIMARY KEY, name text)")
+        cur.execute(
+            "CREATE TABLE IF NOT EXISTS alembic_version (version_num varchar(32) PRIMARY KEY)"
+        )
+        cur.execute(
+            "INSERT INTO alembic_version VALUES ('stability_indexes') ON CONFLICT DO NOTHING"
+        )
+        cur.execute(
+            "CREATE TABLE IF NOT EXISTS app_role_items (id serial PRIMARY KEY, name text)"
+        )
     yield ROLE
     with _cursor() as cur:
         for table in ("app_role_items", "app_role_later", "app_role_made_by_app"):
@@ -97,7 +139,9 @@ async def test_the_app_role_reads_and_writes_rows_and_changes_nothing_else(app_r
     assert PASSWORD not in run.stdout + run.stderr
 
     with _app_cursor() as cur:
-        cur.execute("SELECT rolsuper, rolcreatedb, rolcreaterole, rolbypassrls FROM pg_roles WHERE rolname = current_user")
+        cur.execute(
+            "SELECT rolsuper, rolcreatedb, rolcreaterole, rolbypassrls FROM pg_roles WHERE rolname = current_user"
+        )
         assert cur.fetchone() == (False, False, False, False)
         # Rows and ids: yes.
         cur.execute("INSERT INTO app_role_items (name) VALUES ('a') RETURNING id")
@@ -120,10 +164,14 @@ async def test_the_app_role_reads_and_writes_rows_and_changes_nothing_else(app_r
         assert _refused(cur, "CREATE ROLE app_role_other")
 
 
-async def test_what_the_owner_creates_later_is_granted_and_a_second_run_is_the_same(app_role):
+async def test_what_the_owner_creates_later_is_granted_and_a_second_run_is_the_same(
+    app_role,
+):
     assert _apply().returncode == 0
     with _cursor() as cur:
-        cur.execute("CREATE TABLE app_role_later (id bigserial PRIMARY KEY, note text)")  # a later migration
+        cur.execute(
+            "CREATE TABLE app_role_later (id bigserial PRIMARY KEY, note text)"
+        )  # a later migration
     with _app_cursor() as cur:
         cur.execute("INSERT INTO app_role_later (note) VALUES ('x')")
         cur.execute("SELECT count(*) FROM app_role_later")
@@ -137,4 +185,6 @@ async def test_it_refuses_to_make_the_owner_the_app_role(app_role):
         cur.execute("SELECT current_user")
         (owner,) = cur.fetchone()
     run = _apply(role=owner)
-    assert run.returncode != 0 and "must not be the owner role" in run.stdout + run.stderr
+    assert (
+        run.returncode != 0 and "must not be the owner role" in run.stdout + run.stderr
+    )

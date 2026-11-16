@@ -108,7 +108,10 @@ def test_kms_encryption(offsite_on, tmp_path, monkeypatch):
     offsite.upload(_dump(tmp_path, "backup-20261018-213000.dump"))
     extra = offsite_on.uploads[0]["extra"]
     assert extra["ServerSideEncryption"] == "aws:kms" and extra["SSEKMSKeyId"] == "alias/moa-backups"
+    # "none" is for a store that encrypts by itself; anything else is refused.
     monkeypatch.setattr(settings, "BACKUP_S3_SSE", "none")
+    assert offsite.encryption() == {}
+    monkeypatch.setattr(settings, "BACKUP_S3_SSE", "aes256")
     with pytest.raises(ValueError):
         offsite.encryption()
 
