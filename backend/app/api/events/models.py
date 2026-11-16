@@ -12,7 +12,6 @@ from sqlalchemy import (
     JSON,
     Float,
     Numeric,
-    UniqueConstraint,
 )
 from sqlalchemy.orm import deferred, relationship
 import sqlalchemy as sa
@@ -667,10 +666,8 @@ class EventRatingsLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     user = relationship("Users")
 
     __table_args__ = (
-        # One live rating per person and event. The older key (with
-        # is_deleted, so one deleted rating at most) goes in a later revision.
+        # One live rating per person and event; deleted ones, any number.
         sa.Index("ux_event_ratings_link_live", "event_id", "user_id", unique=True, postgresql_where=sa.text("NOT is_deleted")),
-        UniqueConstraint("event_id", "user_id", "is_deleted", name="uq_event_ratings_event_user_is_deleted"),
         # A person's ratings (badges read them after each check-in).
         sa.Index("ix_event_ratings_user", "user_id", postgresql_where=sa.text("NOT is_deleted")),
     )

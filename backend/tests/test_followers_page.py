@@ -113,3 +113,33 @@ async def test_a_page_of_followers_is_the_size_asked_and_the_next_one_follows_on
     assert seen == ["Sneha J", "Rohan Patil", "Ananya Iyer", "Old Timer"]
     last = (await client.get("/api/v1/clubs/followers/list", params={"limit": 2, "offset": 4}, headers=world["h"])).json()
     assert last["items"] == [] and last["total"] == 4
+
+
+async def test_a_follow_can_be_deleted_and_made_again_more_than_once(client, session, world, make_user, mint_token):
+    """One live follow per person and club, and any number of deleted ones:
+    the key used to count deleted rows too, so the second delete of the same
+    person's follow collided with the first."""
+    from datetime import datetime, timezone
+
+    from sqlalchemy import func, select, update
+
+    club = world["club"]
+    fan = await make_user(email="again-fan@example.com")
+    h = auth_header(await mint_token(fan))
+    for _ in range(3):
+        assert (await client.post(f"/api/v1/clubs/follow/{club.id}", headers=h)).status_code == 200
+        await session.execute(
+            update(ClubUsersLink)
+            .where(ClubUsersLink.club_id == club.id, ClubUsersLink.user_id == fan.id, ClubUsersLink.is_deleted == False)  # noqa: E712
+            .values(is_deleted=True, deleted_at=datetime.now(timezone.utc))
+        )
+        await session.commit()
+    deleted = await session.scalar(
+        select(func.count()).select_from(ClubUsersLink)
+        .where(ClubUsersLink.club_id == club.id, ClubUsersLink.user_id == fan.id, ClubUsersLink.is_deleted == True)  # noqa: E712
+        .execution_options(include_deleted=True)
+    )
+    assert deleted == 3
+    # Still one live row at most: a second live follow is refused by the key.
+    assert (await client.post(f"/api/v1/clubs/follow/{club.id}", headers=h)).status_code == 200
+    assert (await client.post(f"/api/v1/clubs/follow/{club.id}", headers=h)).status_code == 409

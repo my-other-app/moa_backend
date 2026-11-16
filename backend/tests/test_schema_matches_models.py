@@ -275,10 +275,10 @@ def test_the_comparison_sees_what_it_compares(catalogues):
         assert side[("constraint", "ledger_entries", "ck_ledger_entries_kind")][0] == "c"
 
 
-def test_the_money_checks_are_added_not_valid(catalogues):
-    """Added NOT VALID: Postgres checks the rows written from the deploy on,
-    and leaves the ones already there to the later VALIDATE. (The models'
-    database is made empty, so its are valid from the start.)"""
+def test_the_money_checks_are_validated_and_the_old_keys_gone(catalogues):
+    """Added NOT VALID by schema_hygiene, validated by schema_hygiene_validate;
+    and the unique keys that counted deleted rows are gone, their live-row
+    indexes in their place."""
     conn = psycopg2.connect(_url("_schema_head"))
     try:
         with conn.cursor() as cur:
@@ -290,9 +290,22 @@ def test_the_money_checks_are_added_not_valid(catalogues):
     finally:
         conn.close()
     assert rows == [
-        ("ck_club_refunds_status", False), ("ck_event_store_orders_status", False),
-        ("ck_ledger_entries_kind", False), ("ck_payment_refunds_kind", False),
+        ("ck_club_refunds_status", True), ("ck_event_store_orders_status", True),
+        ("ck_ledger_entries_kind", True), ("ck_payment_refunds_kind", True),
     ]
+    head, _models = catalogues
+    for table, name in (
+        ("club_users_link", "club_users_link_club_id_user_id_is_deleted_key"),
+        ("event_ratings_link", "uq_event_ratings_event_user_is_deleted"),
+        ("club_socials", "club_socials_club_id_is_deleted_key"),
+        ("club_subscriptions", "uq_club_subscription_live"),
+    ):
+        assert ("constraint", table, name) not in head
+    for table, name in (
+        ("club_users_link", "ux_club_users_link_live"), ("event_ratings_link", "ux_event_ratings_link_live"),
+        ("club_socials", "ux_club_socials_live"), ("club_subscriptions", "ux_club_subscriptions_live"),
+    ):
+        assert ("index", table, name) in head
 
 
 def test_the_ledger_check_allows_every_kind_the_book_posts():

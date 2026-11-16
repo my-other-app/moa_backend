@@ -7,7 +7,6 @@ from sqlalchemy import (
     Integer,
     String,
     Float,
-    UniqueConstraint,
 )
 from sqlalchemy import event as sa_event
 from sqlmodel import Field, SQLModel
@@ -194,11 +193,8 @@ class ClubUsersLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
         # One live row per person and club: follow, pin and hide write it with
         # ON CONFLICT (club_id, user_id) WHERE NOT is_deleted, and "is
         # following" is a probe of it.
+        # Deleted rows, any number of them.
         sa.Index("ux_club_users_link_live", "club_id", "user_id", unique=True, postgresql_where=sa.text("NOT is_deleted")),
-        # The older key, with is_deleted in it: one deleted row per person and
-        # club at most. It goes in a later revision, once nothing writes
-        # against it (the key above says the same about the live rows).
-        UniqueConstraint("club_id", "user_id", "is_deleted"),
         # One person's clubs: following, pinned, hidden (the app's feeds).
         sa.Index("ix_club_users_user", "user_id", postgresql_where=sa.text("NOT is_deleted")),
         # A club's followers, newest first, a page at a time (keyset on created_at, id).
@@ -235,9 +231,8 @@ class ClubSocials(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     club = relationship("Clubs", back_populates="socials")
 
     __table_args__ = (
-        # One live row per club. The older key (with is_deleted) goes in a later revision.
+        # One live row per club; deleted ones, any number.
         sa.Index("ux_club_socials_live", "club_id", unique=True, postgresql_where=sa.text("NOT is_deleted")),
-        UniqueConstraint("club_id", "is_deleted"),
     )
 
 
