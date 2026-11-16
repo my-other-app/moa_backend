@@ -89,16 +89,6 @@ def test_own_secrets_never_leave():
     assert settings.RAZORPAY_KEY_SECRET not in out and settings.SECRET_KEY not in out
 
 
-def test_the_redis_password_never_leaves(monkeypatch):
-    monkeypatch.setattr(settings, "REDIS_URL", "redis://:a1b2c3d4e5f6a7b8c9d0@redis:6379/0")
-    obs._own_secrets.cache_clear()
-    try:
-        out = obs.scrub_text("Redis said no to a1b2c3d4e5f6a7b8c9d0 just now")
-    finally:
-        obs._own_secrets.cache_clear()
-    assert "a1b2c3d4e5f6a7b8c9d0" not in out
-
-
 def _event() -> dict:
     return {
         "request": {

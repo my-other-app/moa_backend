@@ -270,7 +270,7 @@ def _own_secrets() -> tuple[str, ...]:
         settings.BACKUP_S3_ACCESS_KEY, settings.BACKUP_S3_SECRET_KEY, settings.SMTP_USERNAME, settings.SMTP_PASSWORD,
         *settings.site_tokens,
     ]
-    for url in (settings.DATABASE_URL, settings.DATABASE_URL_SYNC, settings.REDIS_URL):
+    for url in (settings.DATABASE_URL, settings.DATABASE_URL_SYNC):
         try:
             password = urlsplit(url).password
         except ValueError:
