@@ -70,9 +70,10 @@ from typing import Any, Mapping, Optional, Union
 from app.core.doc_designs import fonts as doc_fonts
 from app.core.doc_designs import qr as doc_qr
 from app.core.layout.tokens import carries_per_guest_token
+from app.core.doc_designs import csp
 from app.core.layout_v2 import fonts as v2_fonts
 from app.core.layout_v2 import vocabulary as tk
-from app.core.layout_v2.context import Context
+from app.core.layout_v2.context import Context, safe_color
 from app.core.layout_v2.sanitize import sanitize
 from app.core.layout_v2.schema import (
     ImageLayer,
@@ -111,7 +112,9 @@ def esc(text: str) -> str:
 
 
 def _upper_hex(c: str) -> str:
-    return c.upper()
+    """A colour as the page writes it: upper case, and only ever a hex colour
+    (anything else, from a row no check saw, is black)."""
+    return safe_color(c, "#000000").upper()
 
 
 class _Paint:
@@ -121,7 +124,7 @@ class _Paint:
 
     def color(self, ref: str) -> str:
         if ref == "var:accent":
-            return self.accent
+            return safe_color(self.accent, "#000000")
         if ref == "brand.primary":
             return _upper_hex(self.ctx.colors.get("primary", "#000000"))
         if ref == "brand.secondary":
@@ -552,8 +555,11 @@ def build_html(layout: Union[LayoutV2, dict], values: Mapping[str, Any], *, cont
     script, base = _runtime()
     p = layout.page
     title = esc(ctx.title or "Design")
+    # The render service's page: nothing may load or run but what it carries.
+    policy = "" if for_browser else csp.meta(script)
     return (
         "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n"
+        f"{policy}"
         '<meta name="moa-design" content="layout-v2">\n'
         f'<meta name="moa-page" content="{p.width_mm:g}mm {p.height_mm:g}mm">\n'
         f"<title>{title}</title>\n"

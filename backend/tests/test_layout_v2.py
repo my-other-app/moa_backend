@@ -573,3 +573,51 @@ def test_a_v1_canvas_saved_twice_is_not_taken_for_v2():
     v2 = {"version": 2, "canvas": {"width": 384, "height": 576, "background": None}, "vars": {"accent": "#FF8A3D"}, "layers": []}
     assert is_v2(v2) is True
     assert is_v2({**v2, "vars": None, "canvas": {"width": 384, "height": 576, "background": {"type": "solid", "color": "#FFFFFF"}}}) is True
+
+
+# ─── Render-time checks (colours) and the render page's policy ─────────────
+
+
+@pytest.mark.parametrize("bad", ["red;background:url(https://x.example/a)", "#12345", "#GGGGGG", "", None, 7,
+                                  "#111111\" onload=\"x", "expression(alert(1))"])
+def test_a_colour_that_is_not_hex_never_reaches_the_page(bad):
+    fills = [{"type": "solid", "color": "brand.primary"}, {"type": "solid", "color": "ticket_type"}, {"type": "solid", "color": "brand.secondary"}]
+    layers = [{"id": f"s{i}", "name": "s", "kind": "shape", "x": 0, "y": 0, "width": 9, "height": 9, "fill": f} for i, f in enumerate(fills)]
+    body = v2.build_body(lay(layers), {}, context={"colors": {"primary": bad, "secondary": bad, "ticketType": bad}})
+    defaults = {k.upper() for k in ("#1F3BD8", "#FF8A3D")}
+    assert set(re.findall(r"background:(#[0-9A-F]+)", body)) <= defaults
+    assert "url(" not in body and "onload" not in body and "expression" not in body
+    # A short hex colour is a colour.
+    assert "background:#ABC" in v2.build_body(lay(layers[:1]), {}, context={"colors": {"primary": "#abc"}})
+
+
+def test_a_stored_template_colour_that_is_not_hex_falls_back(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.api.events.documents import layout_colors
+
+    club = SimpleNamespace(brand_primary="#0a0b0c", brand_secondary="javascript:x")
+    got = layout_colors({"accent_color": "red;}body{x", "secondary_text_color": "#123456"}, club)
+    assert got["primary"] == "#0a0b0c" and got["ticketType"] == "#0a0b0c" and got["secondary"] == "#123456"
+    got = layout_colors({"accent_color": "", "secondary_text_color": ""}, club)
+    assert got["secondary"].startswith("#") and "javascript" not in got["secondary"]
+
+
+def test_the_render_page_loads_nothing_but_what_it_carries():
+    import base64
+    import hashlib
+
+    layout = lay([text(), QR])
+    html = v2.build_html(layout, {"first_name": "Meera"}, context={"qr": "TK-1"}, kind="badge")
+    meta = re.search(r'<meta http-equiv="Content-Security-Policy" content="([^"]+)">', html)
+    assert meta and html.index("Content-Security-Policy") < html.index("<style")
+    policy = meta.group(1)
+    script = re.search(r'<script data-moa="fit">(.*?)</script>', html, re.S).group(1)
+    digest = base64.b64encode(hashlib.sha256(script.encode()).digest()).decode()
+    assert f"script-src 'sha256-{digest}'" in policy and "default-src 'none'" in policy
+    assert "img-src data:" in policy and "font-src data:" in policy and "connect-src" not in policy
+    # An editor's preview loads its fonts from the API: no policy there.
+    browser = v2.build_html(layout, {"first_name": "Meera"}, context={"qr": "TK-1"}, kind="badge", for_browser=True,
+                            base_url="https://api.example.com")
+    assert "Content-Security-Policy" not in browser
+
