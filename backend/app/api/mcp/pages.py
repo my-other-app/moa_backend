@@ -95,8 +95,7 @@ def _error(message: str | None) -> str:
 
 def _destination(label: str, app: str, target: str, native: bool) -> str:
     """Where the connection goes, first on the page and hard to miss: the
-    address the app is sent back to is the one thing on the page an app
-    cannot choose freely."""
+    address the app is sent back to is what identifies it."""
     block = f"<div class=dest><small>{escape(label)}</small><b>{escape(target)}</b></div>"
     if native:
         block += (
