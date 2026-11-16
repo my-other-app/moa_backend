@@ -515,6 +515,18 @@ class AppConfig(BaseSettings):
     # signs them, as before this setting. Each at least 32 characters
     # (`openssl rand -hex 32`); a shorter one stops the app at startup.
     LINK_SIGNING_KEYS: str = ""
+    # What signs the sign-in tokens (access and refresh JWTs) and the short
+    # signed payloads (a kiosk's QR and redemptions, an assistant's consent,
+    # a partner's QR image): a comma-separated list, the first signs. Every
+    # one verifies, and so does SECRET_KEY, so whatever was signed before
+    # this was set keeps working until it expires. Unset: SECRET_KEY signs,
+    # as before. Each at least 32 characters (`openssl rand -hex 32`).
+    SIGNING_KEYS: str = ""
+    # The Fernet key admin two-factor secrets are sealed with
+    # (app/api/auth/totp.py); a comma-separated list rotates. Unset:
+    # PAYMENT_KEYS_SECRET seals them, as before. A secret sealed with either
+    # keeps opening while its key is set.
+    TOTP_KEYS_SECRET: str = ""
     # The clubs dashboard, for links a volunteer opens on a phone.
     PUBLIC_WEB_URL: str = "https://club-dashboard.myotherapp.in"
     # The admin portal, for an invited admin's set-password link.
@@ -736,6 +748,27 @@ class AppConfig(BaseSettings):
     @property
     def site_tokens(self) -> list[str]:
         return [t.strip() for t in (self.SITE_TOKENS or "").split(",") if t.strip()]
+
+    @field_validator("SIGNING_KEYS")
+    @classmethod
+    def _signing_keys_long_enough(cls, value: str) -> str:
+        """A short key is a guessable one, and with it any sign-in: refused at startup."""
+        keys = [k.strip() for k in (value or "").split(",") if k.strip()]
+        if any(len(k) < 32 for k in keys):
+            raise ValueError("every key in APP_SIGNING_KEYS must be at least 32 characters (openssl rand -hex 32)")
+        return ",".join(keys)
+
+    @property
+    def signing_key(self) -> str:
+        """What signs a token or a signed payload now: the first SIGNING_KEYS, else SECRET_KEY."""
+        keys = [k for k in (self.SIGNING_KEYS or "").split(",") if k]
+        return keys[0] if keys else self.SECRET_KEY
+
+    @property
+    def verifying_keys(self) -> list[str]:
+        """What a token or a signed payload may be signed with: SIGNING_KEYS, then SECRET_KEY."""
+        keys = [k for k in (self.SIGNING_KEYS or "").split(",") if k]
+        return keys + [self.SECRET_KEY] if self.SECRET_KEY not in keys else keys
 
     @field_validator("LINK_SIGNING_KEYS")
     @classmethod

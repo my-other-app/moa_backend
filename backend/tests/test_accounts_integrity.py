@@ -539,6 +539,73 @@ async def test_the_secret_is_encrypted_when_the_server_has_a_key(client, session
     assert (await client.post(f"{API}/auth/token", data=creds)).status_code == 200
 
 
+async def test_a_two_factor_key_of_its_own_seals_new_and_old_secrets(client, session, make_admin, mint_token, monkeypatch):
+    """APP_TOTP_KEYS_SECRET seals what is enrolled now; a secret sealed with
+    the payment-keys secret before still signs in, and that sign-in seals it
+    again with the two-factor key."""
+    from cryptography.fernet import Fernet
+
+    payment = Fernet.generate_key().decode()
+    monkeypatch.setattr(settings, "PAYMENT_KEYS_SECRET", payment)
+    admin, secret, _codes = await _enrolled_admin(client, session, make_admin, mint_token, "two-keys@example.com")
+    stored = await session.scalar(select(Users.totp_secret).where(Users.id == admin.id).execution_options(populate_existing=True))
+    assert stored.startswith("fernet:")
+
+    monkeypatch.setattr(settings, "TOTP_KEYS_SECRET", Fernet.generate_key().decode())
+    creds = {"username": "two-keys@example.com", "password": "Password123!", "totp_code": pyotp.TOTP(secret).at(time.time() + 30)}
+    assert (await client.post(f"{API}/auth/token", data=creds)).status_code == 200
+    resealed = await session.scalar(select(Users.totp_secret).where(Users.id == admin.id).execution_options(populate_existing=True))
+    assert resealed.startswith("totp:") and secret not in resealed
+
+    # Now only the two-factor key is needed to read it.
+    from app.api.auth import totp
+
+    monkeypatch.setattr(settings, "PAYMENT_KEYS_SECRET", "")
+    assert totp.open_secret(resealed) == secret and totp.verify(resealed, pyotp.TOTP(secret).now())
+
+    other, other_secret, _ = await _enrolled_admin(client, session, make_admin, mint_token, "two-keys-new@example.com")
+    stored = await session.scalar(select(Users.totp_secret).where(Users.id == other.id).execution_options(populate_existing=True))
+    assert stored.startswith("totp:")
+
+
+def test_tokens_and_payloads_signed_before_the_signing_keys_still_verify(monkeypatch):
+    import jwt as pyjwt
+
+    from app.core.auth.jwt import create_access_token, decode_jwt_token
+    from app.core.auth.payloads import sign_payload, verify_payload
+
+    old_token = create_access_token({"user_id": 1, "token_type": "access_token"})
+    old_payload = sign_payload({"t": "selfqr"}, 60)
+    new_key = "n" * 40
+    monkeypatch.setattr(settings, "SIGNING_KEYS", new_key)
+
+    # Signed now with the new key, verified with it...
+    token = create_access_token({"user_id": 2, "token_type": "access_token"})
+    assert pyjwt.decode(token, new_key, algorithms=["HS256"])["user_id"] == 2
+    assert decode_jwt_token(token)["user_id"] == 2
+    payload = sign_payload({"t": "redeem"}, 60)
+    assert verify_payload(payload)["t"] == "redeem"
+    # ...and what SECRET_KEY signed before still verifies.
+    assert decode_jwt_token(old_token)["user_id"] == 1
+    assert verify_payload(old_payload)["t"] == "selfqr"
+    # A key that is neither: refused.
+    stranger = pyjwt.encode({"user_id": 3, "token_type": "access_token"}, "x" * 40, algorithm="HS256")
+    with pytest.raises(pyjwt.InvalidSignatureError):
+        decode_jwt_token(stranger)
+    body = payload.split(".", 1)[0]
+    assert verify_payload(f"{body}.{'A' * 32}") is None
+
+
+def test_a_short_signing_key_stops_the_app(monkeypatch):
+    from pydantic import ValidationError
+
+    from app.config import AppConfig
+
+    monkeypatch.setenv("APP_SIGNING_KEYS", "short")
+    with pytest.raises(ValidationError):
+        AppConfig()
+
+
 # ─── 6. Races that were 500s ───────────────────────────────────────────────
 
 
