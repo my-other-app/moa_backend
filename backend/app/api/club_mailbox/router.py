@@ -110,11 +110,9 @@ async def handle_check(request: Request, session: SessionDep, user: ClubAuth,
     club = await service.club_of(session, user)
     value = handles.normal(handle)
     out = {"handle": value, "address": service.address_of(value), "available": True, "code": None, "message": None}
-    found = handles.problem(value)
+    found = await service.new_handle_problem(session, value, club.id)
     if found is not None:
-        out.update(available=False, code=found[0], message=found[1])
-    elif not await service.handle_free(session, value, club.id):
-        out.update(available=False, code="HANDLE_TAKEN", message="That address is taken. Pick another.")
+        out.update(available=False, code=found[1], message=found[2])
     return out
 
 

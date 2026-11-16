@@ -7,8 +7,9 @@
 - Retention: each club's mail older than its retention period (12 months
   unless it chose 1 to 36) is deleted with its files, and the threads left
   empty with it.
-- Old addresses: a changed handle whose 90 days of forwarding are over is
-  let go, so another club may take it.
+- Old addresses are never let go: a changed handle whose 90 days of
+  forwarding are over receives no more mail (handles.holder) and stays its
+  club's, so no other club is ever given it.
 
 Every club has a mailbox row now (its automatic address), most of them
 holding no mail; those are only reserved and nothing here touches them:
@@ -27,11 +28,11 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from dateutil.relativedelta import relativedelta
-from sqlalchemy import delete, exists, or_, select, text
+from sqlalchemy import exists, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.api.club_mailbox import live, mail, service, store
-from app.api.club_mailbox.models import DEFAULT_RETENTION_MONTHS, ClubMailboxAddresses, ClubMailboxes, ClubMailMessages
+from app.api.club_mailbox.models import DEFAULT_RETENTION_MONTHS, ClubMailboxes, ClubMailMessages
 from app.db import lock_keys
 
 logger = logging.getLogger(__name__)
@@ -98,21 +99,11 @@ async def retention(session, now: Optional[datetime] = None) -> int:
     return deleted
 
 
-async def release_addresses(session, now: Optional[datetime] = None) -> int:
-    """Old handles whose forwarding has ended, let go. Returns how many."""
-    now = now or _now()
-    A = ClubMailboxAddresses
-    result = await session.execute(delete(A).where(A.retired_at.isnot(None), A.forward_until <= now))
-    await session.commit()
-    return int(result.rowcount or 0)
-
-
 async def sweep(session, now: Optional[datetime] = None) -> dict:
     now = now or _now()
     return {
         "lapses": await lapses(session, now),
         "forgotten": await retention(session, now),
-        "released": await release_addresses(session, now),
     }
 
 

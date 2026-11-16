@@ -199,10 +199,50 @@ async def require_mailbox(session, club_id: int) -> ClubMailboxes:
 # ─── The address ─────────────────────────────────────────────────────────
 
 
-async def handle_free(session, handle: str, club_id: Optional[int] = None) -> bool:
-    """Whether the handle can be this club's (free, or already its own)."""
-    row = await handles.holder(session, handle)
-    return row is None or (club_id is not None and row.club_id == club_id)
+TAKEN = "That address is taken. Pick another."
+
+
+async def _club_user_id(session, club_id: Optional[int]) -> Optional[int]:
+    from app.api.clubs.models import Clubs
+
+    if club_id is None:
+        return None
+    return await session.scalar(select(Clubs.user_id).where(Clubs.id == club_id))
+
+
+async def new_handle_problem(session, value: str, club_id: Optional[int], now: Optional[datetime] = None
+                             ) -> Optional[tuple[int, str, str]]:
+    """Why `value` (lowered) can't become this club's address now, as
+    (status, code, words), or None.
+
+    The club's own -- its current address, or an old one still forwarding
+    into its mailbox -- is always its to keep or go back to. Anything else is
+    a new handle, and must also not read as the platform (handles.new_problem),
+    not be the address of an account or a team member on the domain (the
+    club's own account aside), and never have been another club's: 422
+    HANDLE_INVALID / HANDLE_RESERVED, 409 HANDLE_TAKEN."""
+    now = now or _now()
+    found = handles.problem(value)
+    if found is not None:
+        return 422, found[0], found[1]
+    row = await handles.taken(session, value)
+    if row is not None and row.club_id != club_id:
+        return 409, "HANDLE_TAKEN", TAKEN
+    if row is not None and _held(row, now):
+        return None
+    found = handles.new_problem(value)
+    if found is not None:
+        return 422, found[0], found[1]
+    if value in await handles.account_locals(session, domain(), except_user_id=await _club_user_id(session, club_id)):
+        return 409, "HANDLE_TAKEN", TAKEN
+    return None
+
+
+async def require_new_handle(session, value: str, club_id: int, now: Optional[datetime] = None) -> None:
+    found = await new_handle_problem(session, value, club_id, now)
+    if found is not None:
+        status, code, words = found
+        raise _refuse(status, words, code, {"field": "handle"})
 
 
 async def set_address(session, club, user, handle: str, *, member=None, request=None) -> ClubMailboxes:
@@ -210,7 +250,8 @@ async def set_address(session, club, user, handle: str, *, member=None, request=
 
     422 HANDLE_INVALID / HANDLE_RESERVED, 409 HANDLE_TAKEN, 429
     HANDLE_CHANGED_RECENTLY (`errors.next_change_at`), 403
-    PLAN_FEATURE_LOCKED. A changed address forwards 90 days. Audited.
+    PLAN_FEATURE_LOCKED. A new handle is checked as `new_handle_problem`
+    says. A changed address forwards 90 days. Audited.
     The automatic address (ensure_address) never set `handle_changed_at`, so
     its first change can be made straight away."""
     from app.api.audit import service as audit
@@ -230,9 +271,7 @@ async def set_address(session, club, user, handle: str, *, member=None, request=
                 429, f"The address can change once a month. The next change can be made on {next_at.strftime('%-d %B %Y')}.",
                 "HANDLE_CHANGED_RECENTLY", {"field": "handle", "next_change_at": next_at.isoformat()},
             )
-    holder = await handles.holder(session, value, now)
-    if holder is not None and holder.club_id != club.id:
-        raise _refuse(409, "That address is taken. Pick another.", "HANDLE_TAKEN", {"field": "handle"})
+    await require_new_handle(session, value, club.id, now)
     mailbox = await _move_to(
         session, club.id, mailbox, current, value, now,
         created_by=getattr(user, "id", None) if member is None else None, created_by_member_id=getattr(member, "id", None),
@@ -257,10 +296,11 @@ def _held(row: ClubMailboxAddresses, now: datetime) -> bool:
 async def _move_to(session, club_id: int, mailbox: Optional[ClubMailboxes], current: Optional[ClubMailboxAddresses],
                    value: str, now: datetime, *, created_by: Optional[int] = None,
                    created_by_member_id: Optional[int] = None) -> ClubMailboxes:
-    """Make `value` (checked, and free or the club's own) the club's address,
+    """Make `value` (checked, and new or the club's own) the club's address,
     in a savepoint: the mailbox made when there is none, the current address
     retired to forward 90 days (and the month's change counted). 409
-    HANDLE_TAKEN when another club took it between the check and the write."""
+    HANDLE_TAKEN when it is another club's -- taken between the check and
+    the write, or ever theirs."""
     from sqlalchemy.exc import IntegrityError
 
     try:
@@ -283,12 +323,8 @@ async def _move_to(session, club_id: int, mailbox: Optional[ClubMailboxes], curr
                 stale.retired_at, stale.forward_until, stale.automatic = None, None, False
             else:
                 if stale is not None:
-                    if _held(stale, now):
-                        # Another club's, taken between the check and here.
-                        raise IntegrityError("handle taken", None, Exception("handle taken"))
-                    # Another club's, whose forwarding has ended (the sweep had not let it go yet).
-                    await session.delete(stale)
-                    await session.flush()
+                    # Another club's: taken between the check and here, or theirs before (a handle is never reused).
+                    raise IntegrityError("handle taken", None, Exception("handle taken"))
                 session.add(ClubMailboxAddresses(club_id=club_id, mailbox_id=mailbox.id, handle=value, created_at=now))
             await session.flush()
     except IntegrityError:
@@ -300,7 +336,7 @@ async def _move_to(session, club_id: int, mailbox: Optional[ClubMailboxes], curr
 async def admin_set_address(session, club_id: int, handle: str, *, admin, request=None) -> None:
     """A platform admin changes a club's address (the club asked): the same
     rules as the club's own change -- 422 HANDLE_INVALID / HANDLE_RESERVED,
-    409 HANDLE_TAKEN -- but no monthly limit and no plan needed, whatever
+    409 HANDLE_TAKEN (`new_handle_problem`) -- but no monthly limit and no plan needed, whatever
     APP_CLUB_MAILBOX says. The old one forwards 90 days. It counts as the
     club's change of the month. Audited (`club_mailbox.admin_address`, old
     -> new). 404 CLUB_NOT_FOUND for no such club (or a deleted one)."""
@@ -316,9 +352,7 @@ async def admin_set_address(session, club_id: int, handle: str, *, admin, reques
     current = await current_address(session, club_id) if mailbox is not None else None
     if current is not None and current.handle == value:
         return
-    holder = await handles.holder(session, value, now)
-    if holder is not None and holder.club_id != club_id:
-        raise _refuse(409, "That address is taken. Pick another.", "HANDLE_TAKEN", {"field": "handle"})
+    await require_new_handle(session, value, club_id, now)
     previous = current.handle if current is not None else None
     await _move_to(session, club_id, mailbox, current, value, now, created_by=getattr(admin, "id", None))
     await audit.record(
@@ -336,7 +370,8 @@ async def admin_set_address(session, club_id: int, handle: str, *, admin, reques
 
 async def ensure_address(session, club, now: Optional[datetime] = None) -> Optional[ClubMailboxAddresses]:
     """The club's current address, made from its name when it has none
-    (handles.from_name: `base`, then `base2`, `base3`, ... the first free).
+    (handles.from_name: `base`, then `base2`, `base3`, ... the first never
+    a club's and no account's on the domain).
 
     Whatever the plan and APP_CLUB_MAILBOX: reserving a name is harmless,
     and the mail is let in only by a plan with the mailbox. A club with a
@@ -355,8 +390,9 @@ async def ensure_address(session, club, now: Optional[datetime] = None) -> Optio
                 current = await current_address(session, club_id)
                 if current is not None:
                     return current
-            for handle in handles.candidates(handles.base_of(getattr(club, "name", None), club_id)):
-                if await handles.holder(session, handle, now) is not None:
+            accounts = await handles.account_locals(session, domain(), except_user_id=getattr(club, "user_id", None))
+            for handle in handles.candidates(handles.automatic_base(getattr(club, "name", None), club_id)):
+                if handle in accounts or await handles.taken(session, handle) is not None:
                     continue
                 try:
                     async with session.begin_nested():
@@ -366,12 +402,8 @@ async def ensure_address(session, club, now: Optional[datetime] = None) -> Optio
                             await session.flush()
                         stale = await session.scalar(select(ClubMailboxAddresses).where(ClubMailboxAddresses.handle == handle))
                         if stale is not None:
-                            if _held(stale, now):
-                                # Someone's after all: taken since the look.
-                                raise IntegrityError("handle taken", None, Exception("handle taken"))
-                            # A handle whose forwarding has ended, not let go by the sweep yet.
-                            await session.delete(stale)
-                            await session.flush()
+                            # A club's after all: taken since the look.
+                            raise IntegrityError("handle taken", None, Exception("handle taken"))
                         row = ClubMailboxAddresses(
                             club_id=club_id, mailbox_id=mailbox.id, handle=handle, created_at=now, automatic=True,
                         )
@@ -408,26 +440,25 @@ async def backfill(session, *, apply: bool, actor=None, request=None, sample_siz
     now = _now()
     has_one = exists().where(A.club_id == Clubs.id, A.retired_at.is_(None))
     rows = (await session.execute(
-        select(Clubs.id, Clubs.name, has_one).where(Clubs.is_deleted.is_(False)).order_by(Clubs.created_at.asc(), Clubs.id.asc())
+        select(Clubs.id, Clubs.name, Clubs.user_id, has_one).where(Clubs.is_deleted.is_(False))
+        .order_by(Clubs.created_at.asc(), Clubs.id.asc())
     )).all()
     created = skipped = failed = 0
     sample: list[dict] = []
     taken: set[str] = set()
     if not apply:
-        taken = set((await session.scalars(
-            select(A.handle).where((A.retired_at.is_(None)) | (A.forward_until > now))
-        )).all())
-    for n, (club_id, name, has_address) in enumerate(rows, start=1):
+        taken = set((await session.scalars(select(A.handle))).all()) | set(await handles.account_locals(session, domain()))
+    for n, (club_id, name, user_id, has_address) in enumerate(rows, start=1):
         if has_address:
             skipped += 1
             continue
         if apply:
-            row = await ensure_address(session, SimpleNamespace(id=club_id, name=name), now=now)
+            row = await ensure_address(session, SimpleNamespace(id=club_id, name=name, user_id=user_id), now=now)
             handle = row.handle if row is not None else None
             if n % 50 == 0:
                 await session.commit()
         else:
-            handle = next((h for h in handles.candidates(handles.base_of(name, club_id)) if h not in taken), None)
+            handle = next((h for h in handles.candidates(handles.automatic_base(name, club_id)) if h not in taken), None)
             if handle is not None:
                 taken.add(handle)
         if handle is None:
@@ -449,7 +480,9 @@ async def backfill(session, *, apply: bool, actor=None, request=None, sample_siz
 
 async def update_settings(session, club, user, *, display_name: Optional[str], retention_months: Optional[int],
                           request=None) -> ClubMailboxes:
-    """The name the club sends as and how long its mail is kept. Audited (what changed, not the words)."""
+    """The name the club sends as and how long its mail is kept. Audited
+    (what changed, not the words). A new name that reads as the platform's
+    is refused: 422 DISPLAY_NAME_RESERVED (a name set before is kept)."""
     from app.api.audit import service as audit
 
     require_on()
@@ -458,6 +491,9 @@ async def update_settings(session, club, user, *, display_name: Optional[str], r
     if display_name is not None:
         value = " ".join(display_name.split())[:80] or None
         if value != mailbox.display_name:
+            if value and handles.platform_name(value):
+                raise _refuse(422, "That name is kept for the platform. Pick another.", "DISPLAY_NAME_RESERVED",
+                              {"field": "display_name"})
             mailbox.display_name = value
             changed["display_name"] = True
     if retention_months is not None and retention_months != mailbox.retention_months:
