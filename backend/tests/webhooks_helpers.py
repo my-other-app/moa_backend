@@ -25,6 +25,8 @@ class Hub:
     allocated: set = field(default_factory=set)
     #: (club_id, client_id) -> scopes of a partner's connection.
     partner_scopes: dict = field(default_factory=dict)
+    #: Client ids of API keys revoked or expired (every other key is active).
+    dead_keys: set = field(default_factory=set)
 
     def bodies(self) -> list[dict]:
         return [json.loads(r.content) for r in self.requests]
@@ -96,7 +98,11 @@ def hub(monkeypatch):
     async def external_id(session, client_id, object_type, object_id):
         return f"ext-{object_type}-{object_id}" if client_id == "partner_acme" else None
 
-    seams.configure(club_allocated=allocated, partner_scopes=scopes, partner_contact=contact, external_id=external_id)
+    async def key_active(session, club_id, client_id):
+        return bool(client_id) and client_id not in h.dead_keys
+
+    seams.configure(club_allocated=allocated, partner_scopes=scopes, partner_contact=contact, external_id=external_id,
+                    key_active=key_active)
     yield h
     seams.reset()
 

@@ -10,6 +10,8 @@ import it); tests/test_webhooks_e2e.py fails if it did not.
   app is active; nothing for a suspended app or a connection revoked.
 - partner_contact: the app's name and its contact address.
 - external_id: the id that client gave the object (app/api/partner/external_ids).
+- key_active: the club's API key with that client_id, not revoked and not
+  expired (app/api/partner/keys).
 """
 from __future__ import annotations
 
@@ -66,8 +68,22 @@ async def external_id(session, client_id, object_type, object_id) -> Optional[st
     return await external_ids.of_object(session, client_id, object_type, object_id)
 
 
+async def key_active(session, club_id: int, client_id) -> bool:
+    from sqlalchemy import select
+
+    from app.api.partner import keys
+    from app.api.partner.models import PartnerApiKeys
+
+    if not client_id:
+        return False
+    row = await session.scalar(
+        select(PartnerApiKeys).where(PartnerApiKeys.club_id == club_id, PartnerApiKeys.client_id == str(client_id)).limit(1)
+    )
+    return row is not None and row.revoked_at is None and not keys.expired(row)
+
+
 def install() -> None:
     from app.api.webhooks_out import seams
 
     seams.install(club_allocated=club_allocated, partner_scopes=partner_scopes,
-                  partner_contact=partner_contact, external_id=external_id)
+                  partner_contact=partner_contact, external_id=external_id, key_active=key_active)

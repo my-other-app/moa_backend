@@ -7,8 +7,15 @@ Who sees what:
 - the club's owner and admins in the dashboard: every endpoint of the club,
   a partner's too (read-only: the partner manages it; the club can
   disconnect the partner);
-- a club API key with webhooks:manage: the club's own endpoints;
-- a partner app with webhooks:manage: its own endpoints for that club.
+- a club API key with webhooks:manage: its own endpoints -- the ones it
+  added, and the ones the dashboard linked to it (`client_id`) -- in its own
+  mode (live or test);
+- a partner app with webhooks:manage: its own endpoints for that club, in
+  its own mode.
+
+A delivery's body, as the log shows it, leaves people's names, emails,
+phones and answers out unless the caller may read them itself (the dashboard,
+or a credential with attendees:read), whatever the endpoint was sent.
 
 Errors are `WebhookError(status, code, message, details)`; each surface
 answers them in its own error shape.
@@ -23,6 +30,7 @@ from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import and_, func, or_, select
+from sqlalchemy import false as sa_false
 
 from app.api.webhooks_out import crypto, delivery, objects, seams, sender
 from app.api.webhooks_out import types as wtypes
@@ -68,6 +76,12 @@ class Owner:
     def may_share_attendees(self) -> bool:
         """Ticking the DPDP box: the dashboard, or a key that reads attendee details itself."""
         return self.via == VIA_DASHBOARD or "attendees:read" in self.scopes
+
+    @property
+    def may_see_attendees(self) -> bool:
+        """Reading people's details in the delivery log: the dashboard, or a
+        credential with attendees:read (whoever may tick the box)."""
+        return self.may_share_attendees
 
 
 def _now() -> datetime:
@@ -219,13 +233,20 @@ def _check_sharing(owner: Owner, url: str, share: Optional[bool], confirmed: boo
 
 
 def _visible(owner: Owner):
-    """The endpoints this owner may see."""
+    """The endpoints this owner may see: the dashboard all of the club's; an
+    API caller only its own, in its own mode."""
     conds = [WebhookEndpoints.club_id == owner.club_id]
     if owner.is_partner:
         conds.append(WebhookEndpoints.owner_client_id == owner.client_id)
         conds.append(or_(WebhookEndpoints.partner_app_id.isnot(None), WebhookEndpoints.created_via == VIA_PARTNER))
     elif owner.via == VIA_API_KEY:
+        conds.append(WebhookEndpoints.owner_client_id == owner.client_id)
         conds.append(and_(WebhookEndpoints.partner_app_id.is_(None), WebhookEndpoints.created_via != VIA_PARTNER))
+    if owner.via != VIA_DASHBOARD:
+        if not owner.client_id:
+            return sa_false()
+        if owner.livemode is not None:
+            conds.append(WebhookEndpoints.livemode == bool(owner.livemode))
     return and_(*conds)
 
 
@@ -303,10 +324,16 @@ async def create(session, owner: Owner, data: dict) -> tuple[WebhookEndpoints, s
 async def update(session, owner: Owner, endpoint_id, data: dict) -> WebhookEndpoints:
     endpoint = await get(session, owner, endpoint_id, for_change=True)
     if "url" in data and data["url"] is not None and data["url"].strip() != endpoint.url:
-        endpoint.url = await check_url(data["url"])
-        # The details were confirmed for the old address's system.
-        if endpoint.share_attendee_details and not data.get("dpdp_confirmed"):
-            endpoint.share_attendee_details, endpoint.dpdp_confirmed_at, endpoint.dpdp_confirmed_by = False, None, None
+        url = await check_url(data["url"])
+        if endpoint.share_attendee_details and data.get("share_attendee_details") is None:
+            # The details were confirmed for the old address's system: they
+            # keep going only when confirmed again for the new one, by someone
+            # who may send people's details.
+            keep = _check_sharing(owner, url, bool(data.get("dpdp_confirmed")), True)
+            endpoint.share_attendee_details = keep
+            endpoint.dpdp_confirmed_at = _now() if keep else None
+            endpoint.dpdp_confirmed_by = (owner.name or owner.via)[:120] if keep else None
+        endpoint.url = url
     if data.get("events") is not None:
         endpoint.events = check_events(data["events"])
     if data.get("description") is not None:
@@ -323,12 +350,35 @@ async def update(session, owner: Owner, endpoint_id, data: dict) -> WebhookEndpo
     if data.get("enabled") is not None and bool(data["enabled"]) != bool(endpoint.enabled):
         if data["enabled"]:
             await require_ready(session, owner.club_id)
+            if not await delivery.owner_key_active(session, endpoint):
+                raise WebhookError(409, "KEY_REVOKED", "This endpoint was added with an API key that has been revoked or has expired. "
+                                                      "Add the endpoint again with a current key.")
             delivery.enable(endpoint)
         else:
             await delivery.disable(session, endpoint, BY_OWNER)
     endpoint.updated_at = _now()
     await session.flush()
     return endpoint
+
+
+async def disable_for_key(session, club_id: int, client_id: Optional[str]) -> int:
+    """A key revoked: every endpoint it added is turned off (by its owner),
+    what they still had to send failed with them. In the caller's
+    transaction. Endpoints the dashboard added and linked to the key stay on:
+    they are the club's."""
+    if not client_id:
+        return 0
+    endpoints = list(await session.scalars(
+        select(WebhookEndpoints).where(
+            WebhookEndpoints.club_id == club_id, WebhookEndpoints.owner_client_id == client_id,
+            WebhookEndpoints.created_via == VIA_API_KEY, WebhookEndpoints.enabled == True,  # noqa: E712
+        ).with_for_update()
+    ))
+    for endpoint in endpoints:
+        await delivery.disable(session, endpoint, BY_OWNER)
+        endpoint.updated_at = _now()
+    await session.flush()
+    return len(endpoints)
 
 
 async def delete(session, owner: Owner, endpoint_id) -> None:
@@ -428,10 +478,14 @@ async def _delivery(session, owner: Owner, delivery_id) -> tuple[WebhookDeliveri
 
 
 async def delivery_detail(session, owner: Owner, delivery_id) -> dict:
-    """One delivery, with the body as it is sent to its endpoint."""
+    """One delivery, with the body as it is sent to its endpoint -- without
+    people's details when the caller may not read them itself."""
     row, endpoint, event = await _delivery(session, owner, delivery_id)
     out = delivery_out(row, event)
-    out["request_body"] = json.loads(await delivery.body_for(session, event, endpoint)) if event.data is not None else None
+    out["request_body"] = (
+        json.loads(await delivery.body_for(session, event, endpoint, contacts=owner.may_see_attendees))
+        if event.data is not None else None
+    )
     return out
 
 

@@ -5,8 +5,9 @@ is built once, as the change left it, and a delivery is made for each of the
 club's endpoints that is on, in the same mode (live or test), subscribed to
 the type, not the change's own client (unless it opted in), and -- for a
 partner's endpoint -- whose connection to the club still has the scope to
-read that kind of object. One delivery per (change, endpoint), whatever runs
-twice.
+read that kind of object. An endpoint added with an API key that has since
+been revoked or has expired is turned off there instead. One delivery per
+(change, endpoint), whatever runs twice.
 
 A delivery (job `webhooks.deliver`, one job per try):
 
@@ -42,7 +43,8 @@ from app.api.webhooks_out import alerts, crypto, objects, seams, sender
 from app.api.webhooks_out import types as wtypes
 from app.api.webhooks_out.emit import FANOUT_JOB
 from app.api.webhooks_out.models import (
-    BY_ADMIN, BY_OWNER, FAILED, FAILING, OPEN, PENDING, RETRYING, SUCCEEDED, WebhookDeliveries, WebhookEndpoints, WebhookEvents,
+    BY_ADMIN, BY_OWNER, FAILED, FAILING, OPEN, PENDING, RETRYING, SUCCEEDED, VIA_API_KEY, WebhookDeliveries, WebhookEndpoints,
+    WebhookEvents,
 )
 from app.core import jobs
 
@@ -94,6 +96,24 @@ async def _partner_scopes(session, endpoint, cache: dict) -> frozenset:
     return cache[key]
 
 
+def _key_owned(endpoint) -> bool:
+    return endpoint.created_via == VIA_API_KEY and bool(endpoint.owner_client_id) and endpoint.partner_app_id is None
+
+
+async def owner_key_active(session, endpoint, cache: Optional[dict] = None) -> bool:
+    """For an endpoint an API key added: that key is neither revoked nor
+    expired. Any other endpoint: True."""
+    if not _key_owned(endpoint):
+        return True
+    key = (endpoint.club_id, endpoint.owner_client_id)
+    if cache is not None and key in cache:
+        return cache[key]
+    active = await seams.key_active(session, endpoint.club_id, endpoint.owner_client_id)
+    if cache is not None:
+        cache[key] = active
+    return active
+
+
 async def fanout(session, event_id: str) -> int:
     """Build the change's object and make its deliveries. Returns how many."""
     event = await session.scalar(
@@ -116,6 +136,7 @@ async def fanout(session, event_id: str) -> int:
         ))
     scope = READ_SCOPES.get(object_name(event))
     scopes_cache: dict = {}
+    keys_cache: dict = {}
     made: list = []
     for endpoint in endpoints:
         if event.only_endpoint_id is None:
@@ -126,6 +147,9 @@ async def fanout(session, event_id: str) -> int:
             if endpoint.partner_app_id is not None or endpoint.created_via == "partner_app":
                 if scope is None or scope not in await _partner_scopes(session, endpoint, scopes_cache):
                     continue
+            if not await owner_key_active(session, endpoint, keys_cache):
+                await disable(session, endpoint, BY_OWNER)
+                continue
         delivery_id = await session.scalar(
             pg_insert(WebhookDeliveries).values(
                 event_id=event.id, endpoint_id=endpoint.id, club_id=event.club_id, status=PENDING, attempts=0,
@@ -162,11 +186,14 @@ async def may_see_attendees(session, endpoint) -> bool:
     return ATTENDEES_SCOPE in set(scopes or ())
 
 
-async def body_for(session, event: WebhookEvents, endpoint) -> bytes:
+async def body_for(session, event: WebhookEvents, endpoint, *, contacts: bool = True) -> bytes:
+    """The body as the endpoint gets it. `contacts=False` leaves people's
+    details out whatever the endpoint may have (the log, for a caller who
+    may not read them)."""
     data = dict(event.data or {})
     previous = dict(event.previous) if event.previous else None
     name = object_name(event)
-    if name in wtypes.WITH_CONTACTS and not await may_see_attendees(session, endpoint):
+    if name in wtypes.WITH_CONTACTS and (not contacts or not await may_see_attendees(session, endpoint)):
         # What changed is redacted as the object is: an old email is still an email.
         data = objects.redact(name, data)
         previous = objects.redact(name, previous) or None
@@ -265,6 +292,11 @@ async def attempt(session, delivery_id, attempt_no: int, *, manual: bool = False
         return None
     if not endpoint.enabled and not test:
         delivery.status, delivery.error, delivery.next_attempt_at = FAILED, "Not sent: the endpoint is turned off.", None
+        await session.commit()
+        return None
+    if not test and not await owner_key_active(session, endpoint):
+        # Its key was revoked or ran out since the change was queued.
+        await disable(session, endpoint, BY_OWNER)
         await session.commit()
         return None
     if attempt_no == 0 and not manual and not test and delivery.waits < ORDER_MAX_WAITS and await _older_waiting(session, event, endpoint.id):
