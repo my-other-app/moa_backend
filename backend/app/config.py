@@ -476,6 +476,28 @@ class AppConfig(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int
     REFRESH_TOKEN_EXPIRE_DAYS: int
 
+    # A refresh token just replaced (app/api/auth/sessions.py): within this
+    # many seconds of its rotation it is answered with its successor again
+    # (two requests or tabs refreshing at once); after that only while the
+    # session has not been used since (the answer was lost). Otherwise the
+    # session ends as reused. 0: answered again whenever, as before.
+    REFRESH_RESEND_GRACE_SECONDS: int = 300
+
+    # Connecting a social account (app/api/social/oauth.py): the platform's
+    # sign-in must come back to the browser that pressed Connect (a cookie
+    # Connect sets). Off: any browser holding the link may finish it, as
+    # before. The cookie's domain: unset, the one PUBLIC_WEB_URL and
+    # PUBLIC_API_URL share (myotherapp.in).
+    SOCIAL_OAUTH_BROWSER_CHECK: bool = True
+    SOCIAL_OAUTH_COOKIE_DOMAIN: str = ""
+
+    # A guest-list or organisation import (app/core/utils/excel.py): the most
+    # an upload may be (MB), what a workbook may unpack to (MB), and the most
+    # rows taken at once. Past any of them the import is refused with 413.
+    IMPORT_MAX_MB: int = 10
+    IMPORT_MAX_UNZIPPED_MB: int = 100
+    IMPORT_MAX_ROWS: int = 20000
+
     DISCORD_ERROR_WEBHOOK: str | None = None
     # Who hears about billing and new club applications (app/api/admin_alerts):
     # a comma-separated list of addresses, each alert one mail to all of them.
@@ -499,6 +521,18 @@ class AppConfig(BaseSettings):
     # signs them, as before this setting. Each at least 32 characters
     # (`openssl rand -hex 32`); a shorter one stops the app at startup.
     LINK_SIGNING_KEYS: str = ""
+    # What signs the sign-in tokens (access and refresh JWTs) and the short
+    # signed payloads (a kiosk's QR and redemptions, an assistant's consent,
+    # a partner's QR image): a comma-separated list, the first signs. Every
+    # one verifies, and so does SECRET_KEY, so whatever was signed before
+    # this was set keeps working until it expires. Unset: SECRET_KEY signs,
+    # as before. Each at least 32 characters (`openssl rand -hex 32`).
+    SIGNING_KEYS: str = ""
+    # The Fernet key admin two-factor secrets are sealed with
+    # (app/api/auth/totp.py); a comma-separated list rotates. Unset:
+    # PAYMENT_KEYS_SECRET seals them, as before. A secret sealed with either
+    # keeps opening while its key is set.
+    TOTP_KEYS_SECRET: str = ""
     # The clubs dashboard, for links a volunteer opens on a phone.
     PUBLIC_WEB_URL: str = "https://club-dashboard.myotherapp.in"
     # The admin portal, for an invited admin's set-password link.
@@ -720,6 +754,27 @@ class AppConfig(BaseSettings):
     @property
     def site_tokens(self) -> list[str]:
         return [t.strip() for t in (self.SITE_TOKENS or "").split(",") if t.strip()]
+
+    @field_validator("SIGNING_KEYS")
+    @classmethod
+    def _signing_keys_long_enough(cls, value: str) -> str:
+        """A short key is a guessable one, and with it any sign-in: refused at startup."""
+        keys = [k.strip() for k in (value or "").split(",") if k.strip()]
+        if any(len(k) < 32 for k in keys):
+            raise ValueError("every key in APP_SIGNING_KEYS must be at least 32 characters (openssl rand -hex 32)")
+        return ",".join(keys)
+
+    @property
+    def signing_key(self) -> str:
+        """What signs a token or a signed payload now: the first SIGNING_KEYS, else SECRET_KEY."""
+        keys = [k for k in (self.SIGNING_KEYS or "").split(",") if k]
+        return keys[0] if keys else self.SECRET_KEY
+
+    @property
+    def verifying_keys(self) -> list[str]:
+        """What a token or a signed payload may be signed with: SIGNING_KEYS, then SECRET_KEY."""
+        keys = [k for k in (self.SIGNING_KEYS or "").split(",") if k]
+        return keys + [self.SECRET_KEY] if self.SECRET_KEY not in keys else keys
 
     @field_validator("LINK_SIGNING_KEYS")
     @classmethod

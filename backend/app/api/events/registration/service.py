@@ -1042,9 +1042,11 @@ async def enqueue_import(session: AsyncSession, event_id: int, df: DataFrame, ba
     sheet's rows travel in the job as JSON (pandas writes NaN as null and
     dates as ISO text), so a deploy mid-import does not lose the file: the
     job is taken again and carries on."""
+    import asyncio
     import json as _json
 
-    rows = _json.loads(df.to_json(orient="records", date_format="iso"))
+    # A sheet of thousands of rows: turned into JSON on a worker thread.
+    rows = await asyncio.to_thread(lambda: _json.loads(df.to_json(orient="records", date_format="iso")))
     await jobs.enqueue(
         session, "registrations.import",
         {"event_id": int(event_id), "log_id": str(background_log.id), "notify": bool(notify), "rows": rows, "columns": list(map(str, df.columns))},

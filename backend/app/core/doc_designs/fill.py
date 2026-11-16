@@ -37,7 +37,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
-from app.core.doc_designs import designs, fonts, qr
+from app.core.doc_designs import csp, designs, fonts, qr
 from app.core.doc_designs.designs import DesignInfo
 from app.core.doc_designs.compile import TOKEN, Block, Tok, compile_fragment, text_nodes, tokens_in
 from app.core.doc_designs.errors import BadValue, DesignError, LeftoverToken, MissingValue
@@ -222,13 +222,16 @@ def _page_css(d: DesignInfo) -> str:
             f"@media print{{.moa-page{{width:{p.width_mm:g}mm;height:{p.height_mm:g}mm}}}}")
 
 
-def _document(d: DesignInfo, body: str, font_css: str, accent_var: Optional[str]) -> str:
+def _document(d: DesignInfo, body: str, font_css: str, accent_var: Optional[str], *, for_browser: bool = False) -> str:
     c = designs.compiled(d.id)
     script, base = _runtime()
     page_style = f' style="--accent:{accent_var}"' if accent_var else ""
     styles = "".join(f"<style>{s}</style>\n" for s in c.styles)
+    # The render service's page: nothing may load or run but what it carries.
+    policy = "" if for_browser else csp.meta(script)
     return (
         "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n"
+        f"{policy}"
         f'<meta name="moa-design" content="{d.id}">\n'
         f'<meta name="moa-page" content="{d.page.paper[0]} {d.page.paper[1]}">\n'
         f"<title>{c.title}</title>\n"
@@ -253,7 +256,7 @@ def _fill(design_id: str, values, options, bindings, accent, *, browser_base: Op
         font_css = fonts.for_render(d.fonts, body)
     else:
         font_css = fonts.for_browser(d.fonts, browser_base)
-    page = _document(d, body, font_css, accent_var)
+    page = _document(d, body, font_css, accent_var, for_browser=browser_base is not None)
     if "{{" in body or "{{" in page:
         raise LeftoverToken(f"{d.id}: a token is left in the page")
     if _PLACEHOLDERS.search(body):

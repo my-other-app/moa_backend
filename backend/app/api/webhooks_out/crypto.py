@@ -22,6 +22,7 @@ import secrets
 from typing import Iterable, Optional
 
 from app.core.keyring import Keyring, Unavailable as _Unavailable
+from app.core.auth.compare import same
 
 PREFIX = "whsec_"
 SIGNATURE_HEADER = "MOA-Signature"
@@ -93,4 +94,4 @@ def verify(secret: str, header_value: str, body: bytes, *, now: Optional[int] = 
     if abs((now if now is not None else int(time.time())) - timestamp) > tolerance:
         return False
     expected = sign(secret, timestamp, body)
-    return any(hmac.compare_digest(expected, s) for s in signatures)
+    return any(same(s, expected) for s in signatures)

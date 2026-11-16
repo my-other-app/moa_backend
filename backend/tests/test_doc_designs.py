@@ -418,3 +418,13 @@ def test_the_render_service_is_internal_and_loads_nothing_but_the_page():
             assert net in (app_nets if isinstance(app_nets, list) else list(app_nets)), (compose, app)
     dockerfile = (repo / "backend/render/Dockerfile").read_text()
     assert re.search(r"^FROM gotenberg/gotenberg:8\.\d+\.\d+-chromium@sha256:[0-9a-f]{64}$", dockerfile, re.M)
+
+
+def test_a_design_page_for_the_render_service_carries_its_policy_and_a_preview_does_not():
+    d = dd.get("ticket/03-daylight-boarding-pass")
+    page = dd.fill(d.id, sample(d))
+    policy = re.search(r'<meta http-equiv="Content-Security-Policy" content="([^"]+)">', page).group(1)
+    script = re.search(r'<script data-moa="fit">(.*?)</script>', page, re.S).group(1)
+    assert f"'sha256-{base64.b64encode(hashlib.sha256(script.encode()).digest()).decode()}'" in policy
+    assert policy.startswith("default-src 'none'") and page.index("Content-Security-Policy") < page.index("<style")
+    assert "Content-Security-Policy" not in dd.preview_html(d.id, sample(d), base_url="https://api.example.in")

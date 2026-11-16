@@ -1,4 +1,3 @@
-import csv
 import io
 import logging
 from datetime import datetime
@@ -48,7 +47,7 @@ from app.api.interests.schemas import InterestPublic
 from app.api.auth import service as auth_service
 from app.core.rate_limit import limiter
 from app.core.storage import formats
-from app.core.utils import spreadsheet
+from app.core.utils import csv_safe, spreadsheet
 from app.core.utils.spreadsheet import FormatQuery
 
 logger = logging.getLogger(__name__)
@@ -447,7 +446,7 @@ async def export_users_admin(
 
     async def rows() -> AsyncIterator[str]:
         buffer = io.StringIO()
-        writer = csv.writer(buffer)
+        writer = csv_safe.writer(buffer)
 
         def drain() -> str:
             chunk = buffer.getvalue()

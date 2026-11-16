@@ -41,20 +41,28 @@ there first (SET NX) so one process builds a cold key while the others wait
 a moment for its answer, and a background revalidation picks up a sibling's
 fresher value rather than rebuilding it. `clear` moves the namespace to a new
 generation, so nothing kept before it is read again. Redis down or slow: the
-local level alone, as before (app/core/redis.py). Values are pickled and the
-keys carry a hash of the app's code, so a process from another release never
-reads a value of a shape it does not know.
+local level alone, as before (app/core/redis.py). Values are kept as JSON
+(`_dumps`/`_loads`: dicts with other keys than text, tuples, sets, dates,
+times, Decimals and uuids marked so they come back as they were), never as
+anything that runs code when read; anything else in a value keeps it in this
+process only. What is in Redis is only ever parsed as JSON: a value written
+by an older release (pickled) or by anything else is a miss. The keys carry
+a hash of the app's code too, so a process from another release never reads
+a value of a shape it does not know.
 """
 from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
-import pickle
 import secrets
 import time
+import uuid
 from collections import OrderedDict
 from dataclasses import dataclass
+from datetime import date, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Hashable, Optional
 
@@ -372,6 +380,71 @@ class Got:
 
 _UNLOCK = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end"
 
+#: What starts a value this release wrote to Redis: JSON, version 1.
+_JSON = b"j1:"
+#: The key that marks a value JSON has no type for ({"~": kind, "v": ...}).
+_TAG = "~"
+
+
+def _enc(value: Any) -> Any:
+    # Exactly these types: an Enum (or another subclass) would come back as
+    # its plain value, so a value holding one is kept in this process only.
+    if value is None or type(value) in (bool, int, float, str):
+        return value
+    if isinstance(value, list):
+        return [_enc(v) for v in value]
+    if isinstance(value, dict):
+        if all(type(k) is str for k in value) and _TAG not in value:
+            return {k: _enc(v) for k, v in value.items()}
+        return {_TAG: "dict", "v": [[_enc(k), _enc(v)] for k, v in value.items()]}
+    if isinstance(value, tuple):
+        return {_TAG: "tuple", "v": [_enc(v) for v in value]}
+    if isinstance(value, (set, frozenset)):
+        return {_TAG: "frozenset" if isinstance(value, frozenset) else "set", "v": [_enc(v) for v in value]}
+    if isinstance(value, datetime):
+        return {_TAG: "datetime", "v": value.isoformat()}
+    if isinstance(value, date):
+        return {_TAG: "date", "v": value.isoformat()}
+    if isinstance(value, Decimal):
+        return {_TAG: "decimal", "v": str(value)}
+    if isinstance(value, uuid.UUID):
+        return {_TAG: "uuid", "v": str(value)}
+    raise TypeError(f"{type(value).__name__} is not kept in the shared cache")
+
+
+_DECODE = {
+    "dict": lambda v: {_dec(k): _dec(x) for k, x in v},
+    "tuple": lambda v: tuple(_dec(x) for x in v),
+    "set": lambda v: {_dec(x) for x in v},
+    "frozenset": lambda v: frozenset(_dec(x) for x in v),
+    "datetime": datetime.fromisoformat,
+    "date": date.fromisoformat,
+    "decimal": Decimal,
+    "uuid": uuid.UUID,
+}
+
+
+def _dec(value: Any) -> Any:
+    if isinstance(value, list):
+        return [_dec(v) for v in value]
+    if isinstance(value, dict):
+        if _TAG in value:
+            return _DECODE[value[_TAG]](value["v"])
+        return {k: _dec(v) for k, v in value.items()}
+    return value
+
+
+def _dumps(entry: tuple) -> bytes:
+    """An entry as Redis keeps it; TypeError for a value JSON cannot carry."""
+    return _JSON + json.dumps(_enc(entry), separators=(",", ":"), ensure_ascii=False).encode()
+
+
+def _loads(raw: bytes) -> Any:
+    """An entry `_dumps` wrote; ValueError for anything else (an older release's, say)."""
+    if not isinstance(raw, (bytes, bytearray)) or not raw.startswith(_JSON):
+        raise ValueError("not a value this release wrote")
+    return _dec(json.loads(bytes(raw[len(_JSON):])))
+
 
 class Shared:
     """One store's level in Redis. Every method falls back quietly: None,
@@ -382,7 +455,7 @@ class Shared:
     WAIT = 2.0
     STEP = 0.05
     LOCK_MS = 15_000
-    #: A value larger than this, pickled, is kept here only.
+    #: A value larger than this, as JSON, is kept here only.
     MAX_BYTES = 2 * 1024 * 1024
 
     def __init__(self, namespace: str):
@@ -416,8 +489,8 @@ class Shared:
         if raw[0] is None:
             return gen, None
         try:
-            seen, fresh_until, stale_until, value = pickle.loads(raw[0])
-        except Exception:  # noqa: BLE001 - unreadable: a miss
+            seen, fresh_until, stale_until, value = _loads(raw[0])
+        except Exception:  # noqa: BLE001 - unreadable (an older release's, say): a miss
             return gen, None
         now = time.time()
         if seen != gen or stale_until <= now:
@@ -433,8 +506,8 @@ class Shared:
         fresh_until = now + ttl
         stale_until = fresh_until + max(0.0, stale)
         try:
-            data = pickle.dumps((gen, fresh_until, stale_until, value), protocol=pickle.HIGHEST_PROTOCOL)
-        except Exception:  # noqa: BLE001 - not picklable: kept here only
+            data = _dumps((gen, fresh_until, stale_until, value))
+        except Exception:  # noqa: BLE001 - not JSON-able: kept here only
             logger.warning("discover cache value for %r cannot be shared", key, exc_info=True)
             return
         if len(data) > self.MAX_BYTES:

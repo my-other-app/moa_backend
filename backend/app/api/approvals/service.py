@@ -65,6 +65,7 @@ from app.api.approvals.models import (
 from app.api.closeout.models import EventStatus
 from app.api.events.models import EventRegistrationsLink, Events, ends_at_sql
 from app.core import jobs, money, public_urls
+from app.core.utils import csv_safe
 from app.response import CustomHTTPException
 
 logger = logging.getLogger(__name__)
@@ -1905,7 +1906,6 @@ STATUS_WORD = {
     PENDING: "Under review", APPROVED: "Confirmed", DECLINED: "Declined", WITHDRAWN: "Cancelled",
     LAPSED: "Expired", CLOSED: "Closed",
 }
-_FORMULA = ("=", "+", "-", "@", "\t", "\r")
 
 
 def _csv_cell(value) -> str:
@@ -1921,9 +1921,8 @@ def _csv_cell(value) -> str:
         import json
 
         value = json.dumps(value, ensure_ascii=False)
-    text_ = str(value)
     # A person's words are text, never a formula the sheet would run.
-    return "'" + text_ if text_.startswith(_FORMULA) else text_
+    return csv_safe.cell(str(value))
 
 
 def _payment(status: str, reg_live: bool, is_paid, actual, entry_status, expires, now: datetime) -> str:
@@ -2009,12 +2008,11 @@ async def export_table(session, event):
 async def export_csv(session, event) -> bytes:
     """The requests (export_table) as CSV: a cell that starts like a formula
     gets an apostrophe."""
-    import csv
     import io
 
     header, rows = await export_table(session, event)
     buf = io.StringIO()
-    out = csv.writer(buf)
+    out = csv_safe.writer(buf)
     out.writerow(header)
     async for row in rows:
         out.writerow([_csv_cell(v) for v in row])

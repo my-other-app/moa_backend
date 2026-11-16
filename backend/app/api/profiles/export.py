@@ -10,12 +10,11 @@ spreadsheet shows it as text and never runs it.
 """
 from __future__ import annotations
 
-import csv
 import io
 from datetime import datetime, timezone
 from typing import Iterable, Optional
 
-FORMULA_STARTS = ("=", "+", "-", "@", "\t", "\r")
+from app.core.utils import csv_safe
 
 
 # ─── vCard ──────────────────────────────────────────────────────────────
@@ -137,13 +136,12 @@ def csv_cell(value) -> str:
         value = value.astimezone(timezone.utc).isoformat()
     elif isinstance(value, (list, tuple)):
         value = ", ".join("" if v is None else str(v) for v in value)
-    text = str(value)
-    return "'" + text if text.startswith(FORMULA_STARTS) else text
+    return csv_safe.cell(str(value))
 
 
 def network_csv(items: list[dict]) -> str:
     buf = io.StringIO()
-    writer = csv.writer(buf)
+    writer = csv_safe.writer(buf)
     writer.writerow(CSV_HEADER)
     for item in items:
         person = item["person"]

@@ -11,7 +11,7 @@ anyio==4.14.2
 bcrypt==4.2.1
 click==8.4.2
 distro==1.9.0
-dnspython==2.7.0
+dnspython==2.9.2
 docstring-parser==0.18.0
 email_validator==2.2.0
 fastapi==0.139.2
@@ -65,7 +65,7 @@ jsonschema-specifications==2025.9.1
 referencing==0.37.0
 rpds-py==2026.9.1
 attrs==26.1.0
-opentelemetry-api==1.45.1
+opentelemetry-api==1.45.2
 # Clubs' mailboxes (app/api/club_mailbox): received mail's HTML sanitised (Rust's ammonia).
 nh3==0.3.7
 # HEIC/HEIF uploads (an iPhone's photos), read and converted to JPEG or PNG

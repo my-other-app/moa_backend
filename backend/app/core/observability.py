@@ -250,10 +250,22 @@ _TEXT_RULES = (
     # Query values: the live stream's keys (key, player, last_event_id; see
     # app.core.redact), any ...token..., and the usual credentials.
     (re.compile(r"(?i)([?&;\s](?:\w*token\w*|code|key|player|last_event_id|signature|password|secret|otp|email|phone)=)[^&\s#]+"), r"\1" + FILTERED),
+    # The emailed links' short signed parameters (app.core.redact), in a URL only.
+    (re.compile(r"(?i)([?&;](?:s|k|t|sig)=)[^&\s#]+"), r"\1" + FILTERED),
+    # A ticket id is what the door accepts (app.core.redact.TICKET_ID).
+    (re.compile(r"\bMOA-[0-9A-Z]{4,16}-[0-9A-Z]{4,6}\b"), "[ticket]"),
+    # A Google (Gemini) API key.
+    (re.compile(r"\bAIza[0-9A-Za-z_-]{30,}"), "[key]"),
     (re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+"), "[email]"),
     (re.compile(r"(?<![\w+])(?:\+91[\s-]?|0)?[6-9]\d{9}(?!\d)"), "[phone]"),
     (re.compile(r"(?<![\w+])\+\d{1,3}[\s-]?\d{6,12}(?!\d)"), "[phone]"),
 )
+
+
+#: A setting holding a credential, by its name; and the ones named alike
+#: that are durations or rate limits.
+_SECRET_SETTING = re.compile(r"SECRET|_KEY$|_KEYS$|TOKEN$|TOKENS$|PASSWORD|PRIVATE")
+_NOT_A_SECRET = re.compile(r"_(?:MINUTES|DAYS|HOURS|SECONDS)$|_PER_")
 
 
 @lru_cache(maxsize=1)
@@ -261,16 +273,16 @@ def _own_secrets() -> tuple[str, ...]:
     """This process's own credentials, longest first: never sent anywhere."""
     from urllib.parse import unquote, urlsplit
 
-    values = [
-        settings.SECRET_KEY, settings.S3_ACCESS_KEY, settings.S3_SECRET_KEY, settings.SES_ACCESS_KEY,
-        settings.SES_SECRET_KEY, settings.RAZORPAY_KEY_SECRET, settings.RAZORPAY_WEBHOOK_SECRET,
-        settings.RESEND_API_KEY, settings.RESEND_WEBHOOK_SECRET, settings.WHATSAPP_ACCESS_TOKEN,
-        settings.WHATSAPP_APP_SECRET, settings.CLOUDFLARE_API_TOKEN, settings.SITE_REVALIDATE_SECRET,
-        settings.PAYMENT_KEYS_SECRET, settings.AI_KEYS_SECRET, settings.WHATSAPP_KEYS_SECRET, settings.SES_WEBHOOK_TOKEN,
-        settings.BACKUP_S3_ACCESS_KEY, settings.BACKUP_S3_SECRET_KEY, settings.SMTP_USERNAME, settings.SMTP_PASSWORD,
-        *settings.site_tokens,
-    ]
-    for url in (settings.DATABASE_URL, settings.DATABASE_URL_SYNC):
+    values = [settings.SMTP_USERNAME, settings.DISCORD_ERROR_WEBHOOK, settings.ADMIN_ALERT_DISCORD_WEBHOOK, *settings.site_tokens]
+    # Every setting named like a credential (a key, a secret, a token, a
+    # password, a private key), so one added later is covered too; a
+    # comma-separated list (keys that rotate) one value at a time.
+    for name in type(settings).model_fields:
+        if _SECRET_SETTING.search(name) and not _NOT_A_SECRET.search(name):
+            value = getattr(settings, name, None)
+            if isinstance(value, str):
+                values += [value, *(v.strip() for v in value.split(","))]
+    for url in (settings.DATABASE_URL, settings.DATABASE_URL_SYNC, settings.REDIS_URL):
         try:
             password = urlsplit(url).password
         except ValueError:
@@ -281,12 +293,14 @@ def _own_secrets() -> tuple[str, ...]:
 
 
 def scrub_text(text: str) -> str:
+    from app.core import redact
+
     for secret in _own_secrets():
         if secret in text:
             text = text.replace(secret, FILTERED)
     for pattern, replacement in _TEXT_RULES:
         text = pattern.sub(replacement, text)
-    return text
+    return redact.path_tokens(text)
 
 
 def _scrub(value: Any, depth: int = 0) -> Any:
@@ -357,7 +371,7 @@ def scrub_event(event: dict, hint: Optional[dict] = None) -> Optional[dict]:
                 sensitive = False
             request["url"] = scrub_text(redact.path(request["url"]))
         if isinstance(request.get("query_string"), str):
-            request["query_string"] = scrub_text("?" + request["query_string"])[1:]
+            request["query_string"] = scrub_text(redact.query("?" + request["query_string"]))[1:]
     user = event.get("user")
     if isinstance(user, dict):
         event["user"] = {"id": user["id"]} if user.get("id") is not None else {}

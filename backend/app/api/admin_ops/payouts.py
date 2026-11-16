@@ -29,7 +29,6 @@ is in the admin audit log.
 """
 from __future__ import annotations
 
-import csv
 import io
 import logging
 from datetime import date, datetime, timedelta, timezone
@@ -50,7 +49,7 @@ from app.api.users.models import Users
 from app.core import jobs, money
 from app.core.auth.dependencies import AdminAuth
 from app.core.auth.permissions import ExportDataAuth, MoneyAuth
-from app.core.utils import spreadsheet
+from app.core.utils import csv_safe, spreadsheet
 from app.core.utils.spreadsheet import FormatQuery
 from app.db.core import SessionDep
 from app.response import CustomHTTPException
@@ -368,7 +367,7 @@ async def club_statement(
 
 def _csv(rows: list[list]) -> str:
     buf = io.StringIO()
-    writer = csv.writer(buf)
+    writer = csv_safe.writer(buf)
     for row in rows:
         writer.writerow(row)
     return buf.getvalue()
@@ -420,7 +419,7 @@ async def club_statement_csv(
         path = await spreadsheet.write_xlsx(table, title="Payouts statement", headers=STATEMENT_HEADERS)
         return spreadsheet.xlsx_response(path, f"{stem}.xlsx", cache_control="no-store")
     out = [STATEMENT_HEADERS] + [
-        [day.isoformat(), kind, event, ref, f"{amount:.2f}", f"{balance:.2f}", note]
+        [day.isoformat(), kind, event, ref, csv_safe.Number(f"{amount:.2f}"), csv_safe.Number(f"{balance:.2f}"), note]
         for day, kind, event, ref, amount, balance, note in table
     ]
     return Response(content=_csv(out), media_type="text/csv; charset=utf-8",

@@ -19,6 +19,7 @@ import hmac
 from urllib.parse import quote
 
 from app.config import settings
+from app.core.auth.compare import same
 
 FILE_KINDS = ("ticket", "certificate")
 #: Hex characters of the HMAC a link carries.
@@ -41,7 +42,7 @@ def verify(message: str, token: str) -> bool:
         return False
     ok = False
     for key in settings.link_signing_keys:
-        ok |= hmac.compare_digest(_digest(key, message), token)
+        ok |= same(token, _digest(key, message))
     return ok
 
 

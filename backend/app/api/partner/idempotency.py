@@ -1,11 +1,18 @@
 """Idempotency-Key on every POST and DELETE.
 
-The first answer to a key is kept for 24 hours, per client: the same key
-again with the same request (method, path, query and body) gets that answer
-back, marked `Idempotent-Replayed: true`, and nothing is done twice; the same
-key with a different request is 422 IDEMPOTENCY_MISMATCH. While the first is
-still being answered, a second answers 409 IDEMPOTENCY_IN_PROGRESS. A 5xx is
-not kept, so the request may be tried again with its key.
+The first answer to a key is kept for 24 hours, per client, per club it
+acts for and per mode (live or test): the same key again with the same
+request (method, path, query and body) gets that answer back, marked
+`Idempotent-Replayed: true`, and nothing is done twice; the same key with a
+different request is 422 IDEMPOTENCY_MISMATCH. The same key for another club
+or in the other mode is another key. While the first is still being
+answered, a second answers 409 IDEMPOTENCY_IN_PROGRESS. A 5xx is not kept,
+so the request may be tried again with its key.
+
+The scope is kept in the row's `client_id` (`<client>|<club>|<live|test>`).
+A key kept before that (the client alone, at most a day old) is still found
+when the scoped one is not, so a request retried across the deploy is still
+answered once.
 """
 from __future__ import annotations
 
@@ -50,10 +57,19 @@ async def fingerprint(request) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def scope(client_id: str, club_id: Optional[int], livemode: Optional[bool]) -> str:
+    """Whose keys a key is among: the client, the club it acts for, the mode."""
+    scoped = f"{client_id}|{int(club_id or 0)}|{'live' if livemode else 'test'}"
+    return scoped if len(scoped) <= 64 else hashlib.sha256(scoped.encode()).hexdigest()
+
+
 async def begin(session, request, client_id: str) -> None:
     """Before the handler: replay, refuse, or hold the key for this request."""
     if request.method not in METHODS:
         return
+    caller = getattr(request.state, "partner_caller", None)
+    legacy = client_id
+    client_id = scope(client_id, getattr(caller, "club_id", None), getattr(caller, "livemode", None))
     key = request.headers.get("idempotency-key")
     if key is None:
         return
@@ -63,6 +79,9 @@ async def begin(session, request, client_id: str) -> None:
     digest = await fingerprint(request)
     table = PartnerIdempotency.__table__
     row = await session.scalar(select(PartnerIdempotency).where(PartnerIdempotency.client_id == client_id, PartnerIdempotency.key == key))
+    if row is None:
+        # Kept before keys were scoped (a day at most).
+        row = await session.scalar(select(PartnerIdempotency).where(PartnerIdempotency.client_id == legacy, PartnerIdempotency.key == key))
     if row is not None and (aware(row.expires_at) <= now() or (row.status_code is None and aware(row.created_at) <= now() - STALE)):
         await session.execute(delete(PartnerIdempotency).where(PartnerIdempotency.id == row.id))
         await session.commit()

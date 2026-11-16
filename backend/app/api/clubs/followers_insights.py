@@ -7,7 +7,6 @@ the audience as a whole: how it grows, how much of it turns up, where it
 comes from, and what it is interested in — the things a club plans the next
 event from.
 """
-import csv
 import io
 from collections import Counter
 from datetime import date, datetime, timedelta, timezone
@@ -20,6 +19,7 @@ from app.api.clubs.models import ClubUsersLink
 from app.api.events.models import EventRegistrationsLink, Events
 from app.api.links.models import TrackingLinks
 from app.api.users.models import UserProfiles, Users
+from app.core.utils import csv_safe
 
 SEGMENTS = ("all", "new", "regulars", "once", "never", "quiet")
 SORTS = ("newest", "oldest", "active", "name")
@@ -215,7 +215,7 @@ async def export_rows(session, club_id: int, *, segment: str = "all"):
 
 async def export_csv(session, club_id: int, *, segment: str = "all") -> str:
     buf = io.StringIO()
-    w = csv.writer(buf)
+    w = csv_safe.writer(buf)
     w.writerow(EXPORT_HEADERS)
     for row in await export_rows(session, club_id, segment=segment):
         w.writerow([v.isoformat() if isinstance(v, date) else v for v in row])

@@ -28,7 +28,6 @@ registration is taking: never more offers than places.
 from __future__ import annotations
 
 import asyncio
-import csv
 import io
 import logging
 import secrets
@@ -54,6 +53,7 @@ from app.api.ticketing.models import (
     WaitlistSettings,
 )
 from app.core import jobs, public_urls
+from app.core.utils import csv_safe
 from app.response import CustomHTTPException
 
 logger = logging.getLogger(__name__)
@@ -677,7 +677,7 @@ def _csv_cell(v):
 
 async def export_csv(session, event) -> bytes:
     buf = io.StringIO()
-    out = csv.writer(buf)
+    out = csv_safe.writer(buf)
     out.writerow(EXPORT_HEADERS)
     for row in await export_rows(session, event):
         out.writerow([_csv_cell(v) for v in row])

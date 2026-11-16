@@ -18,7 +18,7 @@ from __future__ import annotations
 from typing import Annotated, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Form, Path, Query, Request
+from fastapi import APIRouter, Depends, Form, Path, Query, Request, Response
 from fastapi.responses import RedirectResponse
 
 from app.api.social import accounts as accounts_mod
@@ -64,9 +64,9 @@ async def list_accounts(request: Request, session: SessionDep, user: ClubAuth) -
 
 @club_router.post("/accounts/{platform}/connect", summary="Start connecting an account: the platform's sign-in address")
 @limiter.limit("20/minute", key_func=account_or_address)
-async def connect(request: Request, session: SessionDep, user: ClubAuth, platform: Platform, body: ConnectIn) -> ConnectOut:
+async def connect(request: Request, response: Response, session: SessionDep, user: ClubAuth, platform: Platform, body: ConnectIn) -> ConnectOut:
     who = await for_club(session, request, user)
-    return ConnectOut(authorize_url=await oauth.start(session, who, platform, body.return_to, request))
+    return ConnectOut(authorize_url=await oauth.start(session, who, platform, body.return_to, request, response))
 
 
 @club_router.get("/accounts/pending/{state_id}", summary="The Pages or accounts a sign-in found, to pick one")
@@ -241,8 +241,10 @@ async def retry(request: Request, session: SessionDep, user: ClubAuth, target_id
 @limiter.limit("60/minute")
 async def oauth_callback(request: Request, session: SessionDep, platform: Platform) -> RedirectResponse:
     params = {k: request.query_params.get(k) for k in ("code", "state", "error", "error_description")}
-    to = await oauth.callback(session, platform, params)
-    return RedirectResponse(to, status_code=302, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+    to = await oauth.callback(session, platform, params, request.cookies.get(oauth.browser_cookie(platform)))
+    back = RedirectResponse(to, status_code=302, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+    oauth.clear_browser_cookie(back, platform, request)
+    return back
 
 
 @public_router.post("/meta/deauthorize", summary="Meta: a person removed MyOtherApp; their Pages and Instagram accounts are disconnected")
