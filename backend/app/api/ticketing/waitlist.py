@@ -534,12 +534,33 @@ async def offer_now(session, event, entry: WaitlistEntries) -> WaitlistEntries:
 
 async def expire(session, *, now: Optional[datetime] = None) -> list[int]:
     """Offers that ran out, closed: the events they were on, whose next
-    people are then offered (`fill`). The link keeps working only to say so."""
+    people are then offered (`fill`). The link keeps working only to say so.
+
+    Requests first, then entries: the order every other path takes them in
+    (a withdrawal, a hold's payment landing, someone registered another way,
+    the event closing), so two of them never wait on each other. The
+    requests of the holds that ran out are locked first; one that a payment
+    or a withdrawal holds right now is skipped, and so is its hold, which
+    that path settles or the next minute's sweep expires. An entry another
+    transaction holds is skipped the same way."""
+    from app.api.approvals.models import RegistrationRequests as R
+
     now = now or _now()
     W = WaitlistEntries
+    due = select(W.id).where(W.status == OFFERED, W.offer_expires_at <= now)
+    locked = list((await session.execute(
+        select(R.id).where(R.waitlist_entry_id.in_(due)).with_for_update(skip_locked=True)
+    )).scalars().all())
+    others = select(R.id).where(R.waitlist_entry_id == W.id)
+    if locked:
+        others = others.where(~any_of(R.id, locked))
+    expiring = (
+        select(W.id).where(W.status == OFFERED, W.offer_expires_at <= now, ~others.exists())
+        .with_for_update(skip_locked=True).scalar_subquery()
+    )
     rows = (await session.execute(
         update(W)
-        .where(W.status == OFFERED, W.offer_expires_at <= now)
+        .where(W.id.in_(expiring))
         .values(status=EXPIRED, closed_at=now, updated_at=now)
         .returning(W.event_id, W.id, W.via_request)
     )).all()

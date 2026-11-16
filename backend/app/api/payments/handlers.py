@@ -156,12 +156,19 @@ async def registration_for_order(
     """The registration an order pays for: by the id the order was made
     with (its primary key), checked against the receipt; by the receipt when
     the order carries no usable id. `lock` takes its row; `include_deleted`
-    finds one deleted since (the ledger: its money was still taken)."""
+    finds one deleted since (the ledger: its money was still taken).
+
+    The lock is FOR NO KEY UPDATE: every other writer of the registration
+    still waits for it, but a row that only refers to the registration (a
+    check-in, a delivery, a hold a confirmation makes for it) does not. A
+    full FOR UPDATE made those wait too, and a confirmation holding the
+    event's row while it made a hold for a registration whose payment was
+    waiting for that event row deadlocked with it."""
     def query():
         q = select(EventRegistrationsLink)
         if include_deleted:
             q = q.execution_options(include_deleted=True)
-        return q.with_for_update().execution_options(populate_existing=True) if lock else q
+        return q.with_for_update(key_share=True).execution_options(populate_existing=True) if lock else q
 
     raw = (order.payload or {}).get("event_registration_id")
     try:
