@@ -609,6 +609,18 @@ async def ses_hook(request: Request, session: SessionDep) -> Response:
 # ─── Cloudflare Email Routing's deliveries (the club-mail Worker) ────────
 
 
+_signatures_seen: set = set()
+
+
+def _note_signature(version) -> None:
+    """Once per process and signature, a line saying which one the Worker
+    sends (v1: the Worker from before; v2: it signs the body too), so the
+    switch to requiring v2 can be made knowing."""
+    if version and version not in _signatures_seen:
+        _signatures_seen.add(version)
+        logger.info("mailbox hook (cloudflare): deliveries arrive signed %s", version)
+
+
 @hook_router.post("/cloudflare", summary="A mail Cloudflare Email Routing received for an address on the mailbox domain (the club-mail Worker)")
 async def cloudflare_hook(request: Request, session: SessionDep) -> Response:
     """The raw MIME, for one envelope recipient, signed by the Worker
@@ -620,8 +632,9 @@ async def cloudflare_hook(request: Request, session: SessionDep) -> Response:
     Answers: 200 `{"action": "accept"}` (kept, or kept before); 200
     `{"action": "reject", "reason", "text"}` -- the Worker rejects the mail
     in the SMTP session with `text` (no such address, a closed mailbox,
-    too large); 401 unsigned, stale or another key's; 400 a body that isn't
-    the signed size; 503 the hook isn't set up (APP_MAILBOX_HOOK_SECRET) or
+    too large); 401 unsigned, stale or another key's (or, with
+    APP_MAILBOX_HOOK_REQUIRE_BODY_SIGNATURE on, signed only the older way);
+    400 a body that isn't the signed size (or, v2, the signed body); 503 the hook isn't set up (APP_MAILBOX_HOOK_SECRET) or
     the mail couldn't be kept now: the Worker gives the sender a temporary
     error, and the mail comes again. Never a mail, an address or the body in
     the log."""
@@ -646,6 +659,9 @@ async def cloudflare_hook(request: Request, session: SessionDep) -> Response:
     raw = b"".join(chunks)
     if len(raw) != delivery.size:
         return _answer(400, {"ok": False, "reason": "size"})
+    if not await asyncio.to_thread(delivery.body_matches, raw):
+        return _answer(400, {"ok": False, "reason": "body"})
+    _note_signature(delivery.version)
     # Its id from the headers alone (the Message-ID), so a delivery kept
     # before is known without parsing it; the parse itself is made once, off
     # the event loop, for all three inboxes (incoming.py).
