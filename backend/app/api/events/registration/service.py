@@ -812,7 +812,9 @@ async def list_event_registrations(
         # Missing answers (§1.4): any required question blank or invalid for
         # them (`missing=1`), or that one; worked out from the form and their
         # answers, as everywhere (app/api/missing_answers/state.py).
-        conditions.append(EventRegistrationsLink.id.in_(await missing_answers.missing_registration_ids(session, event, wanted)))
+        from app.db.binds import any_of
+
+        conditions.append(any_of(EventRegistrationsLink.id, await missing_answers.missing_registration_ids(session, event, wanted)))
 
     query = (
         select(EventRegistrationsLink)

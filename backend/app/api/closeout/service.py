@@ -303,16 +303,21 @@ async def update_settings(session, event: Events, body) -> dict:
 # ─── Retention ────────────────────────────────────────────────────────────
 
 
+def _live_registration_ids(event: Events):
+    """The event's live registrations, as a subquery: a list of their ids
+    bound one parameter each stops working past 32,767 people."""
+    return select(EventRegistrationsLink.id).where(EventRegistrationsLink.event_id == event.id, EventRegistrationsLink.is_deleted == False)  # noqa: E712
+
+
 async def preview_counts(session, event: Events) -> dict:
     regs = list((await session.scalars(select(EventRegistrationsLink).where(EventRegistrationsLink.event_id == event.id, EventRegistrationsLink.is_deleted == False))).all())  # noqa: E712
-    ids = [r.id for r in regs]
     return {
         "registrations": len(regs),
         "walkups": sum(1 for r in regs if (r.email or "").endswith("@" + WALKUP_DOMAIN)),
         "phones": sum(1 for r in regs if r.phone),
         "answers": sum(1 for r in regs if r.additional_details),
         "deliveries": (await session.scalar(select(func.count()).select_from(Deliveries).where(Deliveries.event_id == event.id))) or 0,
-        "message_deliveries": (await session.scalar(select(func.count()).select_from(MessageDeliveries).where(MessageDeliveries.registration_id.in_(ids)))) if ids else 0,
+        "message_deliveries": (await session.scalar(select(func.count()).select_from(MessageDeliveries).where(MessageDeliveries.registration_id.in_(_live_registration_ids(event))))) if regs else 0,
         "self_check_in_sessions": (await session.scalar(select(func.count()).select_from(SelfCheckInSessions).where(SelfCheckInSessions.event_id == event.id))) or 0,
         # Registration requests (app/api/approvals): their names, addresses, numbers and answers go too.
         "requests": await approvals.count_for_event(session, event.id),
@@ -352,13 +357,12 @@ async def scrub(session, event: Events, job: RetentionJobs) -> dict:
     """What the event gathered beyond the guests' own accounts goes; the
     registrations stay, so tickets and certificates keep working in the app."""
     regs = list((await session.scalars(select(EventRegistrationsLink).where(EventRegistrationsLink.event_id == event.id, EventRegistrationsLink.is_deleted == False))).all())  # noqa: E712
-    ids = [r.id for r in regs]
     attended = set((await session.scalars(select(CheckIns.registration_id).where(CheckIns.event_id == event.id))).all()) | {r.id for r in regs if r.is_attended}
     counts = await preview_counts(session, event)
     counts["contacts_archived"] = await archive_contacts(session, event, regs, attended)
     await session.execute(delete(Deliveries).where(Deliveries.event_id == event.id))
-    if ids:
-        await session.execute(delete(MessageDeliveries).where(MessageDeliveries.registration_id.in_(ids)))
+    if regs:
+        await session.execute(delete(MessageDeliveries).where(MessageDeliveries.registration_id.in_(_live_registration_ids(event))))
     await session.execute(delete(SelfCheckInSessions).where(SelfCheckInSessions.event_id == event.id))
     for r in regs:
         if (r.email or "").endswith("@" + WALKUP_DOMAIN):
