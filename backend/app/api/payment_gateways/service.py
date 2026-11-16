@@ -43,6 +43,7 @@ from app.api.payment_gateways.models import (
 from app.config import settings
 from app.response import CustomHTTPException
 from app.db import lock_keys
+from app.core.auth.compare import same
 
 logger = logging.getLogger(__name__)
 
@@ -693,7 +694,7 @@ def signature_ok(body: bytes, signature: str | None, secret: str) -> bool:
     if not signature:
         return False
     expected = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, signature.strip())
+    return same(signature.strip(), expected)
 
 
 async def bad_signature(session, gateway: ClubPaymentGateways) -> None:

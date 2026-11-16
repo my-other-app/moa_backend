@@ -24,7 +24,6 @@ Under /api/v1/clubs, with the dashboard's own sign-in (docs/MCP.md has the contr
 - POST   /clubs/pending-actions/{token}/confirm
 - POST   /clubs/pending-actions/{token}/reject
 """
-import hmac
 import json
 import logging
 import secrets
@@ -47,6 +46,7 @@ from app.core.auth.dependencies import ClubAuth
 from app.core.auth.payloads import sign_payload, verify_payload
 from app.core.rate_limit import account_or_address, limiter
 from app.db.core import SessionDep
+from app.core.auth.compare import same
 
 logger = logging.getLogger(__name__)
 
@@ -175,7 +175,7 @@ def _open(token: str | None, kind: str, request: Request) -> dict | None:
     payload = verify_payload(token or "") if token else None
     if not payload or payload.get("k") != kind or not nonce:
         return None
-    if not hmac.compare_digest(str(payload.get("n", "")), _nonce_hash(nonce)):
+    if not same(str(payload.get("n", "")), _nonce_hash(nonce)):
         return None
     return payload
 

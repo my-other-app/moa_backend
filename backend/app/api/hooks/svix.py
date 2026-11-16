@@ -6,6 +6,7 @@ import base64
 import hashlib
 import hmac
 import time
+from app.core.auth.compare import same
 
 TOLERANCE_SECONDS = 300
 
@@ -27,6 +28,6 @@ def verify(secret: str, msg_id: str, timestamp: str, signatures: str, body: byte
     expected = base64.b64encode(hmac.new(key, signed, hashlib.sha256).digest()).decode("ascii")
     for part in signatures.split():
         version, _, sig = part.partition(",")
-        if version == "v1" and hmac.compare_digest(sig, expected):
+        if version == "v1" and same(sig, expected):
             return True
     return False

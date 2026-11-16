@@ -43,6 +43,7 @@ from app.api.mcp import scopes as catalogue
 from app.api.mcp.access import AccessEnded, end_grant, principal_for
 from app.api.mcp.models import McpAuthCodes, McpClients, McpGrants, McpTokens
 from app.config import settings
+from app.core.auth.compare import same
 
 logger = logging.getLogger(__name__)
 
@@ -535,7 +536,7 @@ def pkce_matches(verifier: str | None, challenge: str) -> bool:
     if not verifier or not _PKCE.match(verifier):
         return False
     computed = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest()).decode("ascii").rstrip("=")
-    return hmac.compare_digest(computed, challenge)
+    return same(challenge, computed)
 
 
 def _issue(session, grant: McpGrants, scopes: str, resource: str, *, parent_id=None) -> dict:

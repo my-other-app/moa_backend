@@ -37,6 +37,7 @@ from sqlalchemy.orm.attributes import set_committed_value
 
 from app.config import settings
 from app.core.auth.authentication import verify_password
+from app.core.auth.compare import same
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +102,7 @@ def matching_step(secret: str | None, code: str | None, now: float | None = None
     totp = pyotp.TOTP(secret)
     current = int((now if now is not None else time.time()) // STEP_SECONDS)
     for step in (current - 1, current, current + 1):
-        if hmac.compare_digest(totp.at(step * STEP_SECONDS), typed):
+        if same(typed, totp.at(step * STEP_SECONDS)):
             return step
     return None
 
@@ -174,7 +175,7 @@ async def consume_recovery_code(session, user, code: str | None) -> bool:
         select(Users.totp_recovery_codes).where(Users.id == user.id).with_for_update()
     ) or []
     want = _DIGEST + _digest(typed)
-    match = next((h for h in stored if isinstance(h, str) and h.startswith(_DIGEST) and hmac.compare_digest(h, want)), None)
+    match = next((h for h in stored if isinstance(h, str) and h.startswith(_DIGEST) and same(h, want)), None)
     if match is None:
         lowered = typed.lower()
         if _LEGACY_SHAPE.match(lowered):

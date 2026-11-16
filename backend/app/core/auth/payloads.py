@@ -9,6 +9,7 @@ import time
 from typing import Optional
 
 from app.config import settings
+from app.core.auth.compare import same
 
 
 def _b64(data: bytes) -> str:
@@ -37,7 +38,7 @@ def verify_payload(token: str) -> Optional[dict]:
         body, sig = token.strip().split(".", 1)
     except ValueError:
         return None
-    if not hmac.compare_digest(_sig(body), sig):
+    if not same(sig, _sig(body)):
         return None
     try:
         payload = json.loads(_unb64(body))
