@@ -122,7 +122,7 @@ x-backend: &backend
 
 services:
   caddy:
-    image: caddy:2.11-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
+    image: caddy:2.11-alpine@sha256:eb4d35b7452d1ab6171fbdbe8d9275b2301dad6dad92115d91e19fb9b24d510f
     restart: unless-stopped
     ports:
       - "80:80"
@@ -156,7 +156,7 @@ services:
     logging: *logging
 
   postgres:
-    image: postgres:17@sha256:0d938e975177bef9f1f61f3f9dbcf2e0aa0a139568f66d3415ed8892eb97f6ac
+    image: postgres:17@sha256:31ba9c94a03ada9988f2bb493a22a75eef3a185884533e5cdbcd498ea835b08f
     restart: unless-stopped
     # Only these three, not the whole .env: the database never sees the
     # API's other secrets.
@@ -235,7 +235,7 @@ services:
   # it goes into the API's address as it is). Setting or changing it means
   # recreating redis, backend and worker together (README.md, "Redis").
   redis:
-    image: redis:7-alpine@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe
+    image: redis:7-alpine@sha256:6ba19c50b56777f5c11c58eff8ddb69d0d5f27ba131cffb63f180ccfd43c66af
     restart: unless-stopped
     # The image's own unprivileged user: its entrypoint switches to it only
     # for a bare redis-server command, and this one is a shell.
