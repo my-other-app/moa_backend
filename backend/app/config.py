@@ -137,13 +137,24 @@ class AppConfig(BaseSettings):
     # BACKUP_S3_SECRET_KEY: a user that may put, list and read backups/ and
     # nothing else (no delete: the lifecycle rule expires them); unset, the
     # media bucket's S3_ACCESS_KEY and S3_SECRET_KEY.
+    # BACKUP_S3_ENDPOINT_URL: an S3-compatible store other than AWS (its
+    # https:// address, e.g. Backblaze B2 or Cloudflare R2), path-style;
+    # empty, AWS S3 as before. BACKUP_S3_SSE=none only for a store that
+    # encrypts at rest by itself and refuses the header.
     BACKUP_S3_BUCKET: str = ""
     BACKUP_S3_PREFIX: str = "backups/"
     BACKUP_S3_REGION: str = "ap-south-1"
+    BACKUP_S3_ENDPOINT_URL: str = ""
     BACKUP_S3_SSE: str = "AES256"
     BACKUP_S3_KMS_KEY_ID: str = ""
     BACKUP_S3_ACCESS_KEY: str = ""
     BACKUP_S3_SECRET_KEY: str = ""
+    # The media bucket copied off the box (scripts/media_sync.py, nightly
+    # from ops/backup when its timer is on): every object not yet in the
+    # backup bucket (above) under MEDIA_SYNC_PREFIX, copied, never deleted.
+    # Off unless MEDIA_SYNC is true and BACKUP_S3_BUCKET is set.
+    MEDIA_SYNC: bool = False
+    MEDIA_SYNC_PREFIX: str = "media/"
     # How many dumps scripts/backup.py leaves in BACKUP_DIR (the newest),
     # deleting older ones only after a good off-site upload. 0 keeps every one.
     BACKUP_KEEP_LOCAL: int = 0
@@ -165,8 +176,8 @@ class AppConfig(BaseSettings):
     S3_BASE_PATH: str = ""
     # A store of our own that speaks S3 (Garage on the production server),
     # for the media bucket only; all unset, AWS S3 as before. Off-site
-    # backups (BACKUP_S3_*), the club mailbox's inbound bucket (MAILBOX_*)
-    # and SES stay on AWS whatever these say.
+    # backups (BACKUP_S3_*, which have their own endpoint setting), the club
+    # mailbox's inbound bucket (MAILBOX_*) and SES do not follow these.
     #   S3_ENDPOINT_URL  where the API reaches the store: uploads, reads,
     #                    deletes, listings (e.g. http://media:3900 inside
     #                    Docker). Set, every media client is path-style SigV4.
@@ -184,7 +195,7 @@ class AppConfig(BaseSettings):
     S3_PUBLIC_URL: str = ""
     S3_REGION: str = ""
 
-    @field_validator("S3_ENDPOINT_URL", "S3_PUBLIC_URL", "S3_REGION")
+    @field_validator("S3_ENDPOINT_URL", "S3_PUBLIC_URL", "S3_REGION", "BACKUP_S3_ENDPOINT_URL")
     @classmethod
     def _trimmed(cls, value: str) -> str:
         """Without spaces, and an address without its trailing slash. Its

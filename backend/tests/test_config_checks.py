@@ -284,6 +284,17 @@ def test_softer_findings_only_warn():
     assert cc.enforce(config)  # returned, not raised
 
 
+def test_an_offsite_store_other_than_aws_and_the_media_copy():
+    """BACKUP_S3_ENDPOINT_URL must be https; SSE none is only quiet on such a
+    store; the media copy without a bucket is said."""
+    store = dict(BACKUP_S3_ENDPOINT_URL="https://s3.eu-central-003.backblazeb2.example", BACKUP_S3_SSE="none")
+    assert fatal(make(**store)) == {} and "BACKUP_S3_SSE" not in warnings(make(**store))
+    assert "BACKUP_S3_ENDPOINT_URL" in fatal(make(BACKUP_S3_ENDPOINT_URL="http://203.0.113.9:9000"))
+    assert "without server-side encryption" in warnings(make(BACKUP_S3_SSE="none"))["BACKUP_S3_SSE"]
+    assert "MEDIA_SYNC" in warnings(make(MEDIA_SYNC=True, BACKUP_S3_BUCKET=""))
+    assert "MEDIA_SYNC" not in warnings(make(MEDIA_SYNC=True)) and "MEDIA_SYNC" not in warnings(make())
+
+
 def test_the_ses_hook_without_its_token_or_topic_is_said():
     """POST /hooks/ses refuses everything in production without both, so no
     bounce or complaint is heard: a warning names each one."""

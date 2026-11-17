@@ -66,3 +66,12 @@ def test_the_file_must_be_the_owners_alone(tmp_path, mode):
 def test_nothing_is_expanded(tmp_path):
     values = config.parse_env("A=$(rm -rf /)\nB='x y'\nlower=no\nC\n")
     assert values == {"A": "$(rm -rf /)", "B": "x y"}
+
+
+def test_the_backup_age_alert_setting(tmp_path):
+    base = f"TELEGRAM_BOT_TOKEN={TOKEN}\nTELEGRAM_CHAT_ID=1\n"
+    assert config.load(write(tmp_path, base)).backup_max_age_hours == 26
+    assert config.load(write(tmp_path, base + "OPS_BACKUP_MAX_AGE_HOURS=0\n")).backup_max_age_hours == 0
+    assert config.load(write(tmp_path, base + "OPS_BACKUP_MAX_AGE_HOURS=50\n")).backup_max_age_hours == 50
+    with pytest.raises(config.ConfigError, match="OPS_BACKUP_MAX_AGE_HOURS"):
+        config.load(write(tmp_path, base + "OPS_BACKUP_MAX_AGE_HOURS=-1\n"))

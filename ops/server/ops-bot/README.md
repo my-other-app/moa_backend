@@ -6,8 +6,8 @@ as `moa-ops-bot.service`:
 - **Nightly backup at 03:00 IST**, encrypted with `age` before it leaves the
   box, sent to the owner's chat as a file.
 - **Alerts**, checked every 60 s: containers, disk, memory, SSH logins,
-  error bursts in the logs. One message when something goes wrong, one when
-  it recovers.
+  error bursts in the logs, no backup for 26 hours. One message when
+  something goes wrong, one when it recovers.
 - **Commands**: `/status`, `/disk`, `/logs <service> [n]`, `/backup`, `/help`.
 
 It long-polls Telegram (`getUpdates`): no webhook, no open port. It answers
@@ -49,6 +49,7 @@ token. The operator fills in:
 | `OPS_ERROR_IGNORE_SERVICES` | no | comma list of services not scanned for errors (none) |
 | `OPS_MEM_LOW_PCT` | no | alert under this % of memory available (10) |
 | `OPS_DISK_PATHS` | no | `/,/srv/moa-data,/var/backups/myotherapp` |
+| `OPS_BACKUP_MAX_AGE_HOURS` | no | alert when the newest `backup-*.dump` is older (26; 0 turns it off) |
 | `OPS_BACKUP_DIR`, `OPS_COMPOSE_PROJECT`, `OPS_DC` | no | `/var/backups/myotherapp`, `moa`, `/srv/moa/dc` |
 
 The chat id: send the new bot any message, then open
@@ -127,6 +128,7 @@ What it runs: `docker ps/inspect/stats/logs/system df`, `journalctl`,
 | OOM kills (kernel journal) | at most once per 10 min, with the count | after 10 min without |
 | SSH login accepted (journal) | every login: user, IP, method | -- |
 | error bursts: `Traceback`, `ERROR`, HTTP 5xx | 3+ lines in a minute starts one; at most once per service per 10 min, with the count and a redacted sample | after 10 min without |
+| no `backup-*.dump` in the backups folder newer than 26 h (or the folder is empty or unreadable) | once | when a new one is there |
 | a stranger writing to the bot | once a day | -- |
 
 Which alerts are open is kept in `/var/lib/moa-ops-bot/state.json`, so a

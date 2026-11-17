@@ -20,9 +20,9 @@ production server -- the clients address it path-style
   signed for the host that will receive it: the store sees the browser's
   Host header and checks the signature against it.
 
-Only the media bucket. Off-site backups (BACKUP_S3_*), the club mailbox's
-inbound bucket (MAILBOX_*) and SES make their own clients, always on AWS:
-that is why this is not boto3's global AWS_ENDPOINT_URL_S3.
+Only the media bucket. Off-site backups (BACKUP_S3_*, with an endpoint of
+their own), the club mailbox's inbound bucket (MAILBOX_*) and SES make their
+own clients: that is why this is not boto3's global AWS_ENDPOINT_URL_S3.
 
 Made once per process and shared (clients are thread-safe): making one
 loads and validates the S3 service model, about 4 ms.

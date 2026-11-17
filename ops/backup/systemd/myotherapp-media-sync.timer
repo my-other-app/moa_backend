@@ -1,0 +1,14 @@
+# Every day at 03:30 India time: after the 03:00 database backup, before the
+# 04:00 restore drill (where it is on) and the 04:30 Docker tidy. Persistent:
+# a run missed while the box was off happens when it comes back.
+[Unit]
+Description=MyOtherApp nightly media copy at 03:30 IST
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 Asia/Kolkata
+Persistent=true
+AccuracySec=1min
+Unit=myotherapp-media-sync.service
+
+[Install]
+WantedBy=timers.target

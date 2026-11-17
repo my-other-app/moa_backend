@@ -30,6 +30,15 @@
 #
 # Nothing here publishes a port to the internet except Caddy (80, 443);
 # Postgres is on 127.0.0.1 only, for an SSH tunnel.
+#
+# Networks (see `networks:` at the end): `default` is the edge, Caddy and
+# what it serves; `data` holds Postgres, Redis and Meilisearch once .env says
+# MOA_DATA_NETWORK=data, and then only the API, the worker and the one-off
+# tasks reach them. Unset, they stay on `default` as before. Moving them is
+# a recreate of each, so a quiet-hour step (README.md, "Networks").
+#
+# Base images are pinned by digest (`tag@sha256:...`), so a pull or a
+# recreate never moves a version unannounced: changing one is an edit here.
 
 name: moa
 
@@ -43,14 +52,27 @@ x-logging: &logging
 # The API and the worker: one image, one .env, the same files.
 x-backend: &backend
   image: ${BACKEND_IMAGE:-ghcr.io/my-other-app/moa-backend:latest}
+  # The image runs as its own user, uid 10001. Here it stays root until the
+  # host's folders it writes or reads are given to that uid and .env says
+  # MOA_BACKEND_USER=10001:10001 (README.md, "The API as a non-root user").
+  user: "${MOA_BACKEND_USER:-0:0}"
   env_file:
     - .env
   environment: &backend-environment
     # Built from the parts, as on the old box, so the address is always the
-    # service name and never a hard-coded IP. `:?` makes a missing value a
-    # loud compose error instead of a baffling authentication failure.
-    APP_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:?POSTGRES_USER must be set in .env}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB must be set in .env}
-    APP_DATABASE_URL_SYNC: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    # service name and never a hard-coded IP. Postgres's own `:?` checks
+    # (below) make a missing value a loud compose error. The API's own role
+    # when .env names one (MOA_APP_DB_USER / MOA_APP_DB_PASSWORD, made by
+    # db/app-role.sh: rows only, no schema changes), else the owner as before.
+    APP_DATABASE_URL: postgresql+asyncpg://${MOA_APP_DB_USER:-${POSTGRES_USER}}:${MOA_APP_DB_PASSWORD:-${POSTGRES_PASSWORD}}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB must be set in .env}
+    APP_DATABASE_URL_SYNC: postgresql://${MOA_APP_DB_USER:-${POSTGRES_USER}}:${MOA_APP_DB_PASSWORD:-${POSTGRES_PASSWORD}}@postgres:5432/${POSTGRES_DB}
+    # .env reaches these containers whole (env_file). With the app role,
+    # these two name it rather than the owner; the media store's own secrets
+    # are never needed here (the API uses its S3 key).
+    POSTGRES_USER: ${MOA_APP_DB_USER:-${POSTGRES_USER}}
+    POSTGRES_PASSWORD: ${MOA_APP_DB_PASSWORD:-${POSTGRES_PASSWORD}}
+    GARAGE_RPC_SECRET: ""
+    GARAGE_ADMIN_TOKEN: ""
     # Fixed by this stack, whatever the .env copied from the old box says:
     # Caddy and the healthcheck reach the API on 8000; three uvicorn workers
     # with two render threads each fit the API's three cores (MOA_* in .env
@@ -67,7 +89,8 @@ x-backend: &backend
     # The services this box runs, on by default here (the old box could not
     # hold them). Set in .env to override; Postgres stays the fallback for
     # each (app/core/redis.py, app/core/search.py).
-    APP_REDIS_URL: ${APP_REDIS_URL:-redis://redis:6379/0}
+    # With REDIS_PASSWORD in .env (hex), the address carries it.
+    APP_REDIS_URL: ${APP_REDIS_URL:-redis://${REDIS_PASSWORD:+:${REDIS_PASSWORD}@}redis:6379/0}
     APP_SEARCH_URL: ${APP_SEARCH_URL:-http://meilisearch:7700}
     APP_SEARCH_KEY: ${APP_SEARCH_KEY:-${MEILI_MASTER_KEY:-}}
     APP_JOBS_WORKER: ${APP_JOBS_WORKER:-true}
@@ -88,16 +111,18 @@ x-backend: &backend
       condition: service_healthy
     redis:
       condition: service_started
-  # The box's network, and the render service's internal one.
+  # The edge (Caddy and the Next servers call the API), the data network,
+  # and the render service's internal one.
   networks:
     - default
+    - data
     - render
   restart: unless-stopped
   logging: *logging
 
 services:
   caddy:
-    image: caddy:2.11-alpine
+    image: caddy:2.11-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
     restart: unless-stopped
     ports:
       - "80:80"
@@ -131,7 +156,7 @@ services:
     logging: *logging
 
   postgres:
-    image: postgres:17
+    image: postgres:17@sha256:0d938e975177bef9f1f61f3f9dbcf2e0aa0a139568f66d3415ed8892eb97f6ac
     restart: unless-stopped
     # Only these three, not the whole .env: the database never sees the
     # API's other secrets.
@@ -187,6 +212,8 @@ services:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "127.0.0.1:5432:5432"
+    networks:
+      - ${MOA_DATA_NETWORK:-default}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
       interval: 10s
@@ -204,16 +231,32 @@ services:
   # counts, the discover cache's second level, publish/subscribe for the live
   # room. Nothing in it is the only copy of anything, so no persistence: it
   # never forks to write a file and never needs twice its memory.
+  # A password only when .env sets REDIS_PASSWORD (hex: openssl rand -hex 32;
+  # it goes into the API's address as it is). Setting or changing it means
+  # recreating redis, backend and worker together (README.md, "Redis").
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "no", "--save", "", "--maxmemory", "224mb", "--maxmemory-policy", "allkeys-lru"]
+    # The image's own unprivileged user: its entrypoint switches to it only
+    # for a bare redis-server command, and this one is a shell.
+    user: redis
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    command:
+      - sh
+      - -c
+      - >-
+        set -- --appendonly no --save "" --maxmemory 224mb --maxmemory-policy allkeys-lru;
+        if [ -n "$$REDIS_PASSWORD" ]; then set -- "$$@" --requirepass "$$REDIS_PASSWORD"; fi;
+        exec redis-server "$$@"
     volumes:
       # Nothing is written here; mounted so the image's VOLUME is not a new
       # anonymous volume after every recreate.
       - redis_data:/data
+    networks:
+      - ${MOA_DATA_NETWORK:-default}
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "[ -z \"$$REDIS_PASSWORD\" ] || export REDISCLI_AUTH=\"$$REDIS_PASSWORD\"; redis-cli ping | grep -q PONG"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -227,7 +270,7 @@ services:
   # API's search falls back to Postgres. Losing the volume costs a reindex
   # from Postgres, not data.
   meilisearch:
-    image: getmeili/meilisearch:v1.54.3
+    image: getmeili/meilisearch:v1.54.3@sha256:e68913ab7d6f5b159529e472cfd362ce3c741fafd3c127961b2142abbe41b3c9
     restart: unless-stopped
     environment:
       MEILI_ENV: production
@@ -241,6 +284,8 @@ services:
       MEILI_MAX_INDEXING_MEMORY: 256MiB
     volumes:
       - meili_data:/meili_data
+    networks:
+      - ${MOA_DATA_NETWORK:-default}
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:7700/health || exit 1"]
       interval: 15s
@@ -256,10 +301,13 @@ services:
   # Garage, an S3-compatible store (media/garage.toml). The API reaches it as
   # http://media:3900 (APP_S3_ENDPOINT_URL); browsers read signed links at
   # https://media.myotherapp.in through Caddy (APP_S3_PUBLIC_URL), which lets
-  # through reads only. One copy, on this box's disk: the box's snapshots are
-  # its backup. One-time setup: media/init.sh.
+  # through reads only. On this box's disk; the box's snapshots, and
+  # ops/backup's media sync once it is set up (README.md, "Off-box copies"),
+  # are its backups. One-time setup: media/init.sh.
+  # On the edge network, not `data`: Caddy serves it. Every port it has
+  # needs a key or a secret.
   media:
-    image: dxflrs/garage:v2.4.1
+    image: dxflrs/garage:v2.4.1@sha256:9c96caa2612d3411acc5b0e6701fb238dbfba33e533a6d7d3d811a4b12d0d020
     restart: unless-stopped
     environment:
       GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:?GARAGE_RPC_SECRET must be set in .env (openssl rand -hex 32)}
@@ -325,6 +373,27 @@ services:
     stop_grace_period: 35s
     mem_limit: 1024m
     cpus: 1.5
+    cpu_shares: 512
+
+  # One-off tasks as the database's owner (POSTGRES_USER), never started by
+  # `up`: the migrations (deploy.sh --migrate), the restore drill
+  # (ops/backup/run.sh drill), and anything else that changes the schema,
+  # whichever role the API uses:
+  #   ./dc run --rm --no-deps -T migrate                       alembic upgrade head
+  #   env BACKEND_IMAGE=<new> ./dc run --rm --no-deps -T migrate    with a new image
+  migrate:
+    <<: *backend
+    profiles: ["tools"]
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      <<: *backend-environment
+      APP_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      APP_DATABASE_URL_SYNC: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    restart: "no"
+    mem_limit: 1024m
+    cpus: 1
     cpu_shares: 512
 
   # The render service (backend/render/Dockerfile, app/core/doc_designs):
@@ -423,7 +492,13 @@ services:
     logging: *logging
 
 networks:
+  # The edge: Caddy and what it serves (the API, the site, the dashboards,
+  # the media store), and the data services too until MOA_DATA_NETWORK=data.
   default: {}
+  # Postgres, Redis and Meilisearch once MOA_DATA_NETWORK=data in .env: only
+  # the API, the worker and the one-off tasks join it. Not internal, so
+  # Postgres's 127.0.0.1 port still works.
+  data: {}
   # Internal: whatever joins it reaches only the others on it.
   render:
     internal: true

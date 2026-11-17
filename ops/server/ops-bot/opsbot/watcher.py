@@ -11,6 +11,10 @@ send at most one message with whatever changed.
               OPS_ERROR_MIN_LINES (3) in one interval starts a burst, at
               most one alert per service per 10 minutes, with the count and
               a redacted sample, and one message when it has been quiet for 10
+  backup      no backup-*.dump in the backups folder newer than
+              OPS_BACKUP_MAX_AGE_HOURS (26): one alert, and one message when
+              a new one is there (a timer that stopped, a bot that never
+              delivered, a dump that keeps failing all end up here)
 """
 
 from __future__ import annotations
@@ -18,9 +22,11 @@ from __future__ import annotations
 import logging
 import re
 import time
+from pathlib import Path
 
 from . import fmt
 from .alerts import Bursts, Conditions
+from .backup import DUMP_RE
 from .config import Config
 from .redact import redact
 from .reports import container_state
@@ -65,6 +71,19 @@ def scan_errors(text: str) -> tuple[int, str]:
                 sample = line.strip()
         i += 1
     return count, redact(sample, 300)
+
+
+def newest_backup(directory: Path) -> tuple[str, float] | None:
+    """(name, mtime) of the newest backup-*.dump in `directory`, or None.
+    Hand-made dumps under other names (pre-deploy-*, pre-migrate-*) do not
+    count: the nightly one is what is watched."""
+    newest = None
+    for path in directory.iterdir():
+        if DUMP_RE.match(path.name) and path.is_file() and not path.is_symlink():
+            mtime = path.stat().st_mtime
+            if newest is None or mtime > newest[1]:
+                newest = (path.name, mtime)
+    return newest
 
 
 def disk_level(pct: float, before: int) -> int:
@@ -216,6 +235,30 @@ class Watcher:
         for _key, total, _ in self.oom_bursts.quiet(now):
             out.append(f"[OK] no out-of-memory kills for 10 minutes ({total} in all)")
 
+    def check_backup(self, now: float, out: list[str]) -> None:
+        hours = self.cfg.backup_max_age_hours
+        if hours <= 0:
+            return
+        where = fmt.esc(str(self.cfg.backup_dir))
+        try:
+            newest = newest_backup(self.cfg.backup_dir)
+        except OSError as error:
+            newest, problem = None, f"{where} cannot be read ({type(error).__name__})"
+        else:
+            problem = f"there is none in {where}"
+        if newest is None:
+            bad, ok_text = True, None
+            bad_text = f"[ALERT] no database backup in {hours} h: {problem}"
+        else:
+            name, mtime = fmt.esc(newest[0]), newest[1]
+            age = fmt.duration(now - mtime)
+            bad = now - mtime > hours * 3600
+            bad_text = f"[ALERT] no database backup in {hours} h: the newest, <code>{name}</code>, is {age} old"
+            ok_text = f"[OK] database backup again: <code>{name}</code>, {age} old"
+        msg = self.conditions.update("backup", bad, bad_text, ok_text)
+        if msg:
+            out.append(msg)
+
     def check_errors(self, containers: list, now: float, out: list[str]) -> None:
         since = self.last_logs if self.last_logs is not None else now - self.cfg.watch_interval
         self.last_logs = now
@@ -251,6 +294,7 @@ class Watcher:
             ("ssh", lambda: self.check_ssh(out)),
             ("oom", lambda: self.check_oom(now, out)),
             ("errors", lambda: self.check_errors(containers, now, out)),
+            ("backup", lambda: self.check_backup(now, out)),
         ):
             try:
                 check()
