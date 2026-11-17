@@ -373,6 +373,7 @@ async def scrub(session, event: Events, job: RetentionJobs) -> dict:
         r.phone = None
         r.additional_details = None
     await approvals.scrub_event(session, event.id)
+    await _forget_webhook_people(session, event)
     job.state = RetentionState.deleted
     job.completed_at = datetime.now(timezone.utc)
     job.deleted_counts = counts
@@ -382,6 +383,22 @@ async def scrub(session, event: Events, job: RetentionJobs) -> dict:
         event.lifecycle = EventStatus.archived
     await session.commit()
     return counts
+
+
+async def _forget_webhook_people(session, event: Events) -> int:
+    """The copies of the event's registrations kept for outgoing webhooks
+    (30 days of them, app/api/webhooks_out) lose people's details too:
+    cancelled registrations' and requests' included."""
+    from app.api.approvals.models import RegistrationRequests
+    from app.api.webhooks_out import sweep as webhooks
+
+    reg_ids = list((await session.scalars(
+        select(EventRegistrationsLink.id).where(EventRegistrationsLink.event_id == event.id).execution_options(include_deleted=True)
+    )).all())
+    request_ids = list((await session.scalars(select(RegistrationRequests.id).where(RegistrationRequests.event_id == event.id))).all())
+    if not reg_ids and not request_ids:
+        return 0
+    return await webhooks.forget_people(session, event.club_id, reg_ids, request_ids)
 
 
 def _result(state: RetentionState, refusal: Optional[str] = None, error: Optional[str] = None, deleted: Optional[dict] = None) -> dict:

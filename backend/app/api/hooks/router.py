@@ -12,6 +12,7 @@ from fastapi import APIRouter, Query, Request, Response
 from app.api.hooks import service, sns
 from app.config import settings
 from app.db.core import SessionDep
+from app.core.auth.compare import same
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/hooks")
@@ -38,7 +39,7 @@ async def ses_hook(request: Request, session: SessionDep, token: Optional[str] =
 
     expected = getattr(settings, "SES_WEBHOOK_TOKEN", "") or ""
     if expected:
-        if not hmac.compare_digest(token or "", expected):
+        if not same(token or "", expected):
             logger.warning("ses hook refused: token did not match")
             return {"ok": False, "reason": "token"}
     elif config_checks.is_production(settings):
@@ -90,7 +91,7 @@ async def whatsapp_verify(request: Request) -> Response:
     q = request.query_params
     given = q.get("hub.verify_token") or ""
     tokens = [getattr(settings, name, "") or "" for name in ("WHATSAPP_VERIFY_TOKEN", "META_WEBHOOK_VERIFY_TOKEN")]
-    if q.get("hub.mode") == "subscribe" and any(t and hmac.compare_digest(given, t) for t in tokens):
+    if q.get("hub.mode") == "subscribe" and any(t and same(given, t) for t in tokens):
         return Response(content=q.get("hub.challenge") or "", media_type="text/plain")
     return Response(content="", media_type="text/plain", status_code=403)
 
@@ -110,7 +111,7 @@ async def whatsapp_hook(request: Request, session: SessionDep) -> dict:
     raw = await request.body()
     signature = request.headers.get("x-hub-signature-256") or ""
     expected = "sha256=" + hmac.new(secret.encode("utf-8"), raw, hashlib.sha256).hexdigest() if secret else ""
-    platform = bool(secret) and hmac.compare_digest(signature, expected)
+    platform = bool(secret) and same(signature, expected)
     clubs = app_webhook.signed(raw, signature)
     if not platform and not clubs:
         return {"ok": False, "reason": "signature"}

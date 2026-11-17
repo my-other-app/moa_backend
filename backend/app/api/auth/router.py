@@ -42,6 +42,7 @@ from app.api.auth import service
 from app.db.core import SessionDep
 from app.core.response.base_model import CustomBaseModel
 from app.config import settings
+from app.core import cookies
 
 logger = logging.getLogger(__name__)
 
@@ -61,13 +62,12 @@ def _set_auth_cookies(
     reading the JSON body and simply ignore these cookies. Host-only (no
     explicit Domain) since every frontend already calls this same API host.
 
-    The `secure` flag is derived from the actual request scheme rather than
-    settings.DEBUG: a Secure cookie is silently dropped by browsers/HTTP
-    clients over plain HTTP, and DEBUG isn't a reliable proxy for "is this
-    request over HTTPS" (e.g. a non-debug local/staging setup still running
-    over http://localhost)."""
+    The `secure` flag (app/core/cookies.py): always in production, whatever
+    the proxies in front say the scheme was; elsewhere from the request's
+    scheme, since a Secure cookie is dropped over plain HTTP (a non-debug
+    local or staging setup on http://localhost)."""
     cookie_kwargs = dict(
-        httponly=True, secure=request.url.scheme == "https", samesite="lax"
+        httponly=True, secure=cookies.secure(request), samesite="lax"
     )
     response.set_cookie(
         ACCESS_TOKEN_COOKIE_NAME,
@@ -984,7 +984,7 @@ async def exchange_impersonation_token(
         ).model_dump(),
         expires_delta=timedelta(minutes=minutes),
     )
-    cookie_kwargs = dict(httponly=True, secure=request.url.scheme == "https", samesite="lax")
+    cookie_kwargs = dict(httponly=True, secure=cookies.secure(request), samesite="lax")
     response.set_cookie(ACCESS_TOKEN_COOKIE_NAME, access_token, max_age=minutes * 60, **cookie_kwargs)
     # Whatever refresh cookie this browser held belongs to another session.
     response.delete_cookie(REFRESH_TOKEN_COOKIE_NAME)

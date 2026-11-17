@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import functools
 import hashlib
 import hmac
 import ipaddress
@@ -32,6 +33,8 @@ import logging
 import re
 import secrets
 import socket
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qsl, unquote, urlencode, urlsplit, urlunsplit
@@ -43,6 +46,7 @@ from app.api.mcp import scopes as catalogue
 from app.api.mcp.access import AccessEnded, end_grant, principal_for
 from app.api.mcp.models import McpAuthCodes, McpClients, McpGrants, McpTokens
 from app.config import settings
+from app.core.auth.compare import same
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +66,14 @@ DOC_TIMEOUT = 5.0
 DOC_MIN_AGE = timedelta(minutes=5)
 DOC_MAX_AGE = timedelta(hours=24)
 DOC_DEFAULT_AGE = timedelta(hours=1)
+#: Reading documents is bounded per process: at most this many at once, their
+#: host names looked up on threads of their own (never the pool sign-ins'
+#: password checks wait in), and an address that could not be read is not
+#: tried again for a while.
+DOC_MAX_INFLIGHT = 4
+DOC_DNS_THREADS = 2
+DOC_RETRY_AFTER = timedelta(minutes=5)
+DOC_FAILURES_KEPT = 500
 
 _PKCE = re.compile(r"^[A-Za-z0-9._~-]{43,128}$")
 _LOOPBACK = frozenset({"localhost", "127.0.0.1", "::1"})
@@ -275,7 +287,7 @@ async def register_client(session, body) -> dict:
     client = McpClients(
         client_id=f"mcp_{secrets.token_urlsafe(18)}",
         kind="dcr",
-        client_name=_text(body.get("client_name"), 200),
+        client_name=_app_name(body.get("client_name")),
         client_uri=_https_url(body.get("client_uri"), "client_uri"),
         logo_uri=_https_url(body.get("logo_uri"), "logo_uri"),
         redirect_uris=redirect_uris,
@@ -320,6 +332,81 @@ def is_document_url(client_id: str | None) -> bool:
     return urlsplit(client_id).path not in ("", "/")
 
 
+def identified(client: McpClients | None) -> bool:
+    """Known by the https address of its metadata document: that address's
+    host vouches for it. A client that registered itself is not: its name
+    and links are what it said."""
+    return client is not None and client.kind == "cimd" and is_document_url(client.client_id)
+
+
+def identified_host(client: McpClients | None) -> str | None:
+    return (urlsplit(client.client_id).hostname or None) if identified(client) else None
+
+
+#: Apps are not named after the platform itself.
+_RESERVED_NAME = re.compile(r"my[\W_]*other[\W_]*app", re.IGNORECASE)
+
+
+def _app_name(value) -> str | None:
+    name = _text(value, 200)
+    if name and _RESERVED_NAME.search(name):
+        raise OAuthError("invalid_client_metadata", "An app's name cannot include MyOtherApp.")
+    return name
+
+
+#: url -> when it may be read again, after a failure (per process).
+_doc_failed: dict[str, datetime] = {}
+_doc_inflight = 0
+_dns_pool: ThreadPoolExecutor | None = None
+_dns_lock = threading.Lock()
+
+
+def reset_document_limits() -> None:
+    """Forget failed reads (tests)."""
+    _doc_failed.clear()
+
+
+def _recently_failed(url: str) -> bool:
+    until = _doc_failed.get(url)
+    if until is None:
+        return False
+    if until <= _now():
+        _doc_failed.pop(url, None)
+        return False
+    return True
+
+
+def _failed(url: str) -> None:
+    if len(_doc_failed) >= DOC_FAILURES_KEPT:
+        now = _now()
+        for key in [k for k, until in _doc_failed.items() if until <= now]:
+            _doc_failed.pop(key, None)
+        while len(_doc_failed) >= DOC_FAILURES_KEPT:
+            _doc_failed.pop(next(iter(_doc_failed)))
+    _doc_failed[url] = _now() + DOC_RETRY_AFTER
+
+
+def _dns_threads() -> ThreadPoolExecutor:
+    global _dns_pool
+    if _dns_pool is None:
+        with _dns_lock:
+            if _dns_pool is None:
+                _dns_pool = ThreadPoolExecutor(max_workers=DOC_DNS_THREADS, thread_name_prefix="mcp-dns")
+    return _dns_pool
+
+
+async def _read_document(url: str) -> tuple[dict, timedelta]:
+    """fetch_document, at most DOC_MAX_INFLIGHT at a time in this process."""
+    global _doc_inflight
+    if _doc_inflight >= DOC_MAX_INFLIGHT:
+        raise OAuthError("temporarily_unavailable", "Too many apps are being looked up right now. Try again in a minute.")
+    _doc_inflight += 1
+    try:
+        return await fetch_document(url)
+    finally:
+        _doc_inflight -= 1
+
+
 async def client_for(session, client_id: str | None) -> McpClients | None:
     """The client behind a client_id: a registered one, or one known by its
     metadata document (read now when not known, or no longer fresh)."""
@@ -332,10 +419,14 @@ async def client_for(session, client_id: str | None) -> McpClients | None:
     row = await session.scalar(select(McpClients).where(McpClients.client_id == client_id, McpClients.kind == "cimd"))
     if row is not None and _aware(row.fresh_until) and _aware(row.fresh_until) > _now():
         return row
+    if _recently_failed(client_id):
+        return None
     try:
-        document, max_age = await fetch_document(client_id)
+        document, max_age = await _read_document(client_id)
         fields = document_fields(client_id, document)
     except OAuthError as e:
+        if e.error != "temporarily_unavailable":
+            _failed(client_id)
         logger.info("client metadata document %s refused: %s", client_id, e.description)
         return None
     if row is None:
@@ -360,7 +451,7 @@ def document_fields(url: str, document) -> dict:
     if method != "none":
         raise OAuthError("invalid_client", "Only public clients (token_endpoint_auth_method none) may use a metadata document here.")
     return dict(
-        client_name=_text(document.get("client_name"), 200),
+        client_name=_app_name(document.get("client_name")),
         client_uri=_https_url(document.get("client_uri"), "client_uri"),
         logo_uri=_https_url(document.get("logo_uri"), "logo_uri"),
         redirect_uris=_redirects(document.get("redirect_uris")),
@@ -396,9 +487,10 @@ async def fetch_document(url: str) -> tuple[dict, timedelta]:
     parts = urlsplit(url)
     if parts.scheme != "https" or not parts.hostname or parts.username or parts.password or parts.fragment or parts.port not in (None, 443):
         raise OAuthError("invalid_client", "A client metadata document must be at an https URL on the default port.")
+    lookup = functools.partial(socket.getaddrinfo, parts.hostname, 443, type=socket.SOCK_STREAM)
     try:
-        infos = await asyncio.to_thread(socket.getaddrinfo, parts.hostname, 443, type=socket.SOCK_STREAM)
-    except OSError:
+        infos = await asyncio.wait_for(asyncio.get_running_loop().run_in_executor(_dns_threads(), lookup), DOC_TIMEOUT)
+    except (OSError, asyncio.TimeoutError):
         raise OAuthError("invalid_client", "The client's metadata document's host does not resolve.")
     if not infos or not all(_public(info[4][0]) for info in infos):
         raise OAuthError("invalid_client", "The client's metadata document is not on a public address.")
@@ -535,7 +627,7 @@ def pkce_matches(verifier: str | None, challenge: str) -> bool:
     if not verifier or not _PKCE.match(verifier):
         return False
     computed = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest()).decode("ascii").rstrip("=")
-    return hmac.compare_digest(computed, challenge)
+    return same(challenge, computed)
 
 
 def _issue(session, grant: McpGrants, scopes: str, resource: str, *, parent_id=None) -> dict:

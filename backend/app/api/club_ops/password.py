@@ -15,8 +15,9 @@ codes table, so neither can be used for the other:
 - using it (POST /auth/club/password/reset) sets the new password (eight
   characters or more, as for a team member's) and ends every session of that
   login: the club account's own (and with it its team's, which act on its
-  tokens), or the member's. A club account with two-factor on needs its
-  authenticator or a recovery code as well.
+  tokens), or the member's (and the AI assistants they connected). A club
+  account with two-factor on needs its authenticator or a recovery code as
+  well.
 
 When one address is both a club account and a team member somewhere, the
 club account's password is the one reset (signing in with it on the
@@ -273,11 +274,15 @@ async def reset(session, *, email: str, code: str, new_password: str, totp_code:
         )
         kind = "club"
     else:
+        from app.api.mcp.access import end_member_grants
+
         member.password = hashed
         await session.execute(
             update(UserSessions).where(UserSessions.member_id == member.id, UserSessions.revoked == False)  # noqa: E712
             .values(revoked=True).execution_options(synchronize_session=False)
         )
+        # And the AI assistants they connected.
+        await end_member_grants(session, member.id)
         kind = "member"
     await session.execute(
         update(Codes).where(or_(Codes.email_key == key), Codes.closed_at.is_(None)).values(closed_at=now)

@@ -1,6 +1,8 @@
 """Short-lived signed payloads: a kiosk's rotating QR, a redemption a
-guest can undo for a minute. HMAC under the app secret, base64url, with
-an expiry inside; nothing is stored and nothing can be forged."""
+guest can undo for a minute. HMAC under the signing key (APP_SIGNING_KEYS'
+first, else APP_SECRET_KEY), base64url, with an expiry inside; nothing is
+stored and nothing can be forged. Any of the verifying keys is accepted, so
+a payload signed before a new key was set keeps working until it expires."""
 import base64
 import hashlib
 import hmac
@@ -9,6 +11,7 @@ import time
 from typing import Optional
 
 from app.config import settings
+from app.core.auth.compare import same
 
 
 def _b64(data: bytes) -> str:
@@ -19,8 +22,9 @@ def _unb64(s: str) -> bytes:
     return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
 
 
-def _sig(body: str) -> str:
-    return _b64(hmac.new(settings.SECRET_KEY.encode(), body.encode(), hashlib.sha256).digest())[:32]
+def _sig(body: str, key: str | None = None) -> str:
+    key = settings.signing_key if key is None else key
+    return _b64(hmac.new(key.encode(), body.encode(), hashlib.sha256).digest())[:32]
 
 
 def sign_payload(payload: dict, ttl_seconds: int, *, slot: Optional[int] = None) -> str:
@@ -37,7 +41,7 @@ def verify_payload(token: str) -> Optional[dict]:
         body, sig = token.strip().split(".", 1)
     except ValueError:
         return None
-    if not hmac.compare_digest(_sig(body), sig):
+    if not any(same(sig, _sig(body, key)) for key in settings.verifying_keys):
         return None
     try:
         payload = json.loads(_unb64(body))

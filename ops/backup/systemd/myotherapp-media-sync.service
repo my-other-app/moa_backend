@@ -1,0 +1,22 @@
+# The nightly copy of the media bucket off the box: ops/backup/run.sh
+# media-sync -> scripts/media_sync.py in the backend container (copy only,
+# into the off-site backup bucket under APP_MEDIA_SYNC_PREFIX). Until .env
+# has APP_MEDIA_SYNC=true and APP_BACKUP_S3_BUCKET it only says it is off.
+# Installed with the other units (ops/server/ops-bot/install.sh) but not
+# enabled: sudo systemctl enable --now myotherapp-media-sync.timer.
+# On any failure, myotherapp-alert@ tells the admins.
+[Unit]
+Description=MyOtherApp nightly copy of the media off the box
+Documentation=file:///srv/moa/README.md
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+OnFailure=myotherapp-alert@%N.service
+
+[Service]
+Type=oneshot
+Environment=MOA_PROJECT_DIR=/var/www/myotherapp-production
+EnvironmentFile=-/etc/default/myotherapp-backup
+ExecStart=/bin/bash ${MOA_PROJECT_DIR}/ops/backup/run.sh media-sync
+# The first run copies everything; later ones only what is new.
+TimeoutStartSec=6h

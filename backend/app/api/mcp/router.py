@@ -24,7 +24,6 @@ Under /api/v1/clubs, with the dashboard's own sign-in (docs/MCP.md has the contr
 - POST   /clubs/pending-actions/{token}/confirm
 - POST   /clubs/pending-actions/{token}/reject
 """
-import hmac
 import json
 import logging
 import secrets
@@ -47,6 +46,8 @@ from app.core.auth.dependencies import ClubAuth
 from app.core.auth.payloads import sign_payload, verify_payload
 from app.core.rate_limit import account_or_address, limiter
 from app.db.core import SessionDep
+from app.core.auth.compare import same
+from app.core import cookies
 
 logger = logging.getLogger(__name__)
 
@@ -175,7 +176,7 @@ def _open(token: str | None, kind: str, request: Request) -> dict | None:
     payload = verify_payload(token or "") if token else None
     if not payload or payload.get("k") != kind or not nonce:
         return None
-    if not hmac.compare_digest(str(payload.get("n", "")), _nonce_hash(nonce)):
+    if not same(str(payload.get("n", "")), _nonce_hash(nonce)):
         return None
     return payload
 
@@ -192,10 +193,15 @@ def _request_of(payload: dict) -> oauth.AuthRequest:
 
 
 def _app_bits(client, req: oauth.AuthRequest) -> dict:
+    """What the pages say about the app. A self-registered app is marked
+    unverified (its name and links are its own claim); one known by its
+    metadata document's https address is named by that address's host."""
     return dict(
         app=client_label(client),
         target=oauth.redirect_target(req.redirect_uri),
         native=urlscheme(req.redirect_uri) != "https",
+        unverified=not oauth.identified(client),
+        identified_by=oauth.identified_host(client),
     )
 
 
@@ -204,6 +210,9 @@ def urlscheme(uri: str) -> str:
 
 
 @public_router.get("/oauth/authorize", include_in_schema=False)
+# Per caller address: a person opens this once per connection. It may read a
+# client's metadata document from the web, so it is never free to repeat.
+@limiter.limit("30/minute")
 async def authorize_page(request: Request, session: SessionDep):
     require_enabled()
     try:
@@ -218,7 +227,7 @@ async def authorize_page(request: Request, session: SessionDep):
     sealed = _seal("signin", {"r": req.payload()}, nonce, REQUEST_SECONDS)
     response = pages.signin(request=sealed, **_app_bits(client, req))
     response.set_cookie(
-        COOKIE, nonce, max_age=REQUEST_SECONDS, httponly=True, secure=request.url.scheme == "https", samesite="lax", path="/oauth",
+        COOKIE, nonce, max_age=REQUEST_SECONDS, httponly=True, secure=cookies.secure(request), samesite="lax", path="/oauth",
     )
     return response
 
@@ -270,7 +279,7 @@ async def _signed_in(session, request: Request, choice: dict, client, req: oauth
     ticket = _seal("consent", {"r": req.payload(), "c": choice}, request.cookies.get(COOKIE), TICKET_SECONDS)
     who = (member.full_name or member.email) if member is not None else "the club's own account"
     return pages.consent(
-        app_uri=client.client_uri, redirect_uri=req.redirect_uri, ticket=ticket, club=club.name, who=who,
+        redirect_uri=req.redirect_uri, ticket=ticket, club=club.name, who=who,
         role=club_access.role_label(role), offered=offered, unavailable=unavailable, error=error, **_app_bits(client, req),
     )
 

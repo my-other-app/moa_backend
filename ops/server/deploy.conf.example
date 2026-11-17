@@ -8,6 +8,11 @@ MOA_REGISTRY=ghcr.io/my-other-app
 # deploy.sh puts the previous image back.
 HEALTH_TIMEOUT=180
 
-# Images of each app kept on disk (the running one and the rollback target
-# are always among the newest).
+# Images of each app kept on disk; the running one, the rollback target and
+# whatever images.env names are never removed.
 KEEP_IMAGES=3
+
+# Where --migrate leaves its dump of the database first, and for how many
+# days its pre-migrate-*.dump files are kept.
+MOA_BACKUP_DIR=/var/backups/myotherapp
+PRE_MIGRATE_KEEP_DAYS=14

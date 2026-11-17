@@ -139,11 +139,11 @@ async def test_taken_and_still_forwarding_handles_are_skipped(session, clubs):
     await session.commit()
     assert (await service.ensure_address(session, b.club)).handle == "yukthiclub"
     assert (await service.ensure_address(session, c.club)).handle == "yukthi2"
-    # Once its forwarding is over (and before the sweep lets it go), the name is free again.
+    # Once its forwarding is over, the name is still never another club's.
     await session.execute(update(ClubMailboxAddresses).where(ClubMailboxAddresses.handle == "yukthi")
                           .values(forward_until=NOW - timedelta(minutes=1)))
     d = await clubs("Yukthi.", "yukthi4@example.com")
-    assert (await service.ensure_address(session, d.club)).handle == "yukthi"
+    assert (await service.ensure_address(session, d.club)).handle == "yukthi3"
 
 
 async def test_a_failure_is_logged_and_never_fails_the_caller(session, clubs, monkeypatch, caplog):
@@ -152,7 +152,7 @@ async def test_a_failure_is_logged_and_never_fails_the_caller(session, clubs, mo
     async def broken(*args, **kwargs):
         raise RuntimeError("database went away")
 
-    monkeypatch.setattr(handles, "holder", broken)
+    monkeypatch.setattr(handles, "taken", broken)
     assert await service.ensure_address(session, a.club) is None
     assert "could not be made" in caplog.text
     # The session is still usable.
@@ -162,14 +162,14 @@ async def test_a_failure_is_logged_and_never_fails_the_caller(session, clubs, mo
 async def test_a_race_for_the_name_takes_the_next_number(session, clubs, monkeypatch):
     a = await clubs("Chess Circle", "chess@example.com")
     b = await clubs("Chess-Circle", "chess2@example.com")
-    real = handles.holder
+    real = handles.taken
 
-    async def blind(session, handle, now=None):
+    async def blind(session, handle):
         # The look misses the other club's row, as a concurrent insert would.
-        return None if handle == "chesscircle" else await real(session, handle, now)
+        return None if handle == "chesscircle" else await real(session, handle)
 
     await service.ensure_address(session, a.club)
-    monkeypatch.setattr(handles, "holder", blind)
+    monkeypatch.setattr(handles, "taken", blind)
     assert (await service.ensure_address(session, b.club)).handle == "chesscircle2"
     # The first club's address was never touched.
     assert (await current(session, a.club.id)).handle == "chesscircle"
@@ -193,7 +193,7 @@ async def test_a_club_without_the_plan_sees_its_address_reserved(client, session
     assert r.json()["action"] == "reject" and r.json()["text"] == "This mailbox is not receiving mail"
     # The sweep tells no one, lapses nothing, lets nothing go.
     done = await sweep.sweep(session)
-    assert done["lapses"] == {} and done["released"] == 0
+    assert done == {"lapses": {}, "forgotten": 0}
     mailbox = await service.mailbox_of(session, a.club.id)
     assert mailbox.lapsed_at is None and owner_mails == []
     assert await session.scalar(select(func.count()).select_from(ClubAlerts).where(ClubAlerts.club_id == a.club.id)) == 0
@@ -339,6 +339,77 @@ async def test_the_admin_card_names_the_address_and_whether_it_is_automatic(clie
     assert out["handle"] == "chesscircle" and out["automatic"] is True and out["state"] == "reserved"
 
 
+# ─── A new handle: no look-alike, no account's address, never reused ─────
+
+
+async def test_a_new_handle_never_reads_as_the_platform_but_an_old_one_keeps_working(client, session, clubs, admins, aws):  # noqa: F811
+    from tests.test_club_mailbox import mime
+
+    a = await clubs("Fan Club", "fans@example.com", plan="pro")
+    for handle in ("myotherapp-help", "verify-account", "supp0rt", "my-other-app", "adm1n.team", "billing.desk", "noreply-club",
+                   "cybersecurity"):
+        r = await client.put(f"{BASE}/address", json={"handle": handle}, headers=a.h)
+        assert r.status_code == 422 and r.json()["error_code"] == "HANDLE_RESERVED", handle
+        check = (await client.get(f"{BASE}/handle-check", params={"handle": handle}, headers=a.h)).json()
+        assert check["available"] is False and check["code"] == "HANDLE_RESERVED", handle
+        r = await client.put(f"{ADMIN}/{a.club.id}/address", json={"handle": handle}, headers=admins.owner)
+        assert r.status_code == 422 and r.json()["error_code"] == "HANDLE_RESERVED", handle
+    assert (await client.put(f"{BASE}/address", json={"handle": "badminton.fans"}, headers=a.h)).status_code == 200
+    # A club that had a look-alike before the rule keeps it: mail reaches it, and it is still its own.
+    b = await clubs("Supporters", "supporters@example.com", plan="pro")
+    row = await service.ensure_address(session, b.club)
+    assert row.handle == f"club{b.club.id}"
+    row.handle = "supporters"
+    await session.commit()
+    r = await post(client, mime(to=f"supporters@{DOMAIN}"), to=f"supporters@{DOMAIN}")
+    assert r.json()["action"] == "accept" and r.json()["kept"] == 1
+    check = (await client.get(f"{BASE}/handle-check", params={"handle": "supporters"}, headers=b.h)).json()
+    assert check["available"] is True
+    assert (await client.put(f"{BASE}/address", json={"handle": "supporters"}, headers=b.h)).status_code == 200
+
+
+async def test_a_new_handle_is_never_an_accounts_address_on_the_domain(client, session, clubs, make_user, admins):
+    from app.api.club_access.models import ClubMembers
+
+    await make_user(email="Asha+events@MyOtherApp.in")
+    await make_user(email="ravi@myotherapp.in")
+    a = await clubs("Asha", "asha-club@example.com", plan="pro")
+    session.add(ClubMembers(club_id=a.club.id, email="mira@myotherapp.in", role="editor", status="invited"))
+    await session.commit()
+    # The automatic address passes it by.
+    assert (await service.ensure_address(session, a.club)).handle == "asha2"
+    await session.commit()
+    for handle in ("asha", "ravi", "mira"):
+        r = await client.put(f"{BASE}/address", json={"handle": handle}, headers=a.h)
+        assert r.status_code == 409 and r.json()["error_code"] == "HANDLE_TAKEN", handle
+        check = (await client.get(f"{BASE}/handle-check", params={"handle": handle}, headers=a.h)).json()
+        assert check["available"] is False and check["code"] == "HANDLE_TAKEN"
+        r = await client.put(f"{ADMIN}/{a.club.id}/address", json={"handle": handle}, headers=admins.owner)
+        assert r.status_code == 409 and r.json()["error_code"] == "HANDLE_TAKEN", handle
+    # The club's own account's address may be its handle.
+    b = await clubs("Robots", "robots@myotherapp.in", plan="pro")
+    assert (await service.ensure_address(session, b.club)).handle == "robots"
+    await session.commit()
+    r = await client.put(f"{BASE}/address", json={"handle": "robots"}, headers=a.h)
+    assert r.status_code == 409
+
+
+async def test_a_sender_name_never_reads_as_the_platform(client, session, clubs):
+    a = await clubs("Fan Club", "fans@example.com", plan="pro")
+    assert (await client.put(f"{BASE}/address", json={"handle": "fanclub"}, headers=a.h)).status_code == 200
+    for name in ("MyOtherApp Support", "My Other App", "my0therapp team", "Finnet"):
+        r = await client.patch(f"{BASE}/settings", json={"display_name": name}, headers=a.h)
+        assert r.status_code == 422 and r.json()["error_code"] == "DISPLAY_NAME_RESERVED", name
+    r = await client.patch(f"{BASE}/settings", json={"display_name": "Fan Club Team"}, headers=a.h)
+    assert r.status_code == 200 and r.json()["display_name"] == "Fan Club Team"
+    # A name set before the rule is kept; saving other settings beside it still works.
+    mailbox = await service.mailbox_of(session, a.club.id)
+    mailbox.display_name = "Fan Club x MyOtherApp"
+    await session.commit()
+    r = await client.patch(f"{BASE}/settings", json={"display_name": "Fan Club x MyOtherApp", "retention_months": 24}, headers=a.h)
+    assert r.status_code == 200 and r.json()["retention_months"] == 24
+
+
 # The tests that open no database come last: a run that starts with one sets
 # the suite's loop up apart from the session's engine (tests/conftest.py).
 
@@ -354,13 +425,27 @@ async def test_the_admin_card_names_the_address_and_whether_it_is_automatic(clie
     ("യുക്തി", "club42"),
     ("Q", "club42"),
     ("", "club42"),
-    ("Support", "support2"),
     ("Info", "info2"),
-    ("Post Master", "postmaster2"),
+    ("Support", "club42"),
+    ("Post Master", "club42"),
+    ("MyOtherApp Fans", "club42"),
+    ("Cyber Security Club", "club42"),
+    ("Badminton Club", "badmintonclub"),
 ])
 def test_the_address_is_the_names_letters_and_digits(name, handle):
     assert handles.from_name(name, 42) == handle
-    assert handles.problem(handle) is None
+    assert handles.problem(handle) is None and handles.new_problem(handle) is None
+
+
+def test_look_alike_words():
+    for handle in ("myotherapp-help", "verify-account", "supp0rt", "my-other-app", "adm1n", "billing.desk", "n0reply",
+                   "payments-team", "postmaster2", "securityclub", "password-reset", "refunds"):
+        assert handles.lookalike(handle) and handles.new_problem(handle)[0] == "HANDLE_RESERVED", handle
+        assert handles.problem(handle) in (None, ("HANDLE_RESERVED", handles.RESERVED_WORDS))
+    for handle in ("chesscircle", "badmintonclub", "ieeesbcet", "gdg.tvm", "club42", "yukthi"):
+        assert not handles.lookalike(handle) and handles.new_problem(handle) is None, handle
+    assert handles.platform_name("MyOtherApp") and handles.platform_name("My Other App Support")
+    assert not handles.platform_name("Yukthi") and not handles.platform_name(None)
 
 
 def test_a_number_is_added_within_30_characters():

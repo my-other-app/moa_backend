@@ -71,7 +71,8 @@ Made by the club's owner or an admin, while the club is allocated, at most
 `max_keys` live (default 5). Each has scopes, optional expiry, optional IP
 allowlist (addresses or CIDR ranges; the caller's address as `app/core/net.py`
 reads it). Rotating keeps the key (its id and `client_id`, which webhooks
-name as the origin) with a new secret; the old one ends at once.
+name as the origin) with a new secret; the old one ends at once. Revoking ends
+it for good and turns off the webhook endpoints it added.
 
 ### Partner apps (OAuth 2.0)
 

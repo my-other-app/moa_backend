@@ -1,5 +1,4 @@
 """The club's contact book: what retention kept of each event's guests."""
-import csv
 import io
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Optional
@@ -7,6 +6,7 @@ from typing import Optional
 from sqlalchemy import func, or_, select
 
 from app.api.closeout.models import ArchivedContacts
+from app.core.utils import csv_safe
 
 
 def _base(club_id: int):
@@ -99,7 +99,7 @@ async def export_csv(session, club_id: int, *, q: Optional[str] = None, event_id
                      since: Optional[date] = None, until: Optional[date] = None) -> str:
     """A table as a file: CSV opens anywhere."""
     out = io.StringIO()
-    w = csv.writer(out)
+    w = csv_safe.writer(out)
     w.writerow(EXPORT_HEADERS)
     for row in await export_rows(session, club_id, q=q, event_id=event_id, attended=attended, since=since, until=until):
         w.writerow([_csv_cell(v) for v in row])

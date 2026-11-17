@@ -98,11 +98,25 @@ def state_of(authorize_url: str) -> str:
     return parse_qs(urlsplit(authorize_url).query)["state"][0]
 
 
+def keep_browser(client, r) -> str:
+    """The browser's side of Connect: the cookie its answer set (for the
+    dashboard's and the API's shared domain, which the test client's host is
+    not), kept for the callback as a browser would. Its value."""
+    for line in r.headers.get_list("set-cookie"):
+        name, _, rest = line.partition("=")
+        if name.startswith("moa_social_"):
+            value = rest.split(";", 1)[0]
+            client.cookies.set(name, value)
+            return value
+    raise AssertionError("Connect set no browser cookie")
+
+
 async def connect(client, w, platform: str, headers=None, code: str = "the-code") -> dict:
     """Connect an account as a club does: Connect, the platform's sign-in, the callback."""
     r = await client.post(f"{API}/clubs/social/accounts/{platform}/connect", json={"return_to": DASHBOARD}, headers=headers or w.h)
     assert r.status_code == 200, r.text
     state = state_of(r.json()["authorize_url"])
+    keep_browser(client, r)
     back = await client.get(f"{API}/social/oauth/{platform}/callback", params={"code": code, "state": state})
     assert back.status_code == 302, back.text
     q = parse_qs(urlsplit(back.headers["location"]).query)

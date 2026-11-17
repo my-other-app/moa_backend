@@ -12,10 +12,19 @@ a dict: {"qr", "colors": {"primary", "secondary", "ticketType"}, "images",
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Optional, Union
 
 DEFAULT_COLORS = {"primary": "#1F3BD8", "secondary": "#FF8A3D", "ticketType": "#1F3BD8"}
+#: A colour as a page may carry it: #RGB, #RGBA, #RRGGBB or #RRGGBBAA, nothing else.
+SAFE_HEX = re.compile(r"^#(?:[0-9A-Fa-f]{3,4}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$")
+
+
+def safe_color(value: Any, default: str) -> str:
+    """`value` when it is a hex colour, else `default`: what reaches a page's
+    style and SVG attributes is checked again here, whatever was stored."""
+    return value if isinstance(value, str) and SAFE_HEX.match(value) else default
 
 
 @dataclass
@@ -34,7 +43,8 @@ class Context:
         if isinstance(value, Context):
             return value
         value = dict(value or {})
-        colors = {**DEFAULT_COLORS, **(value.get("colors") or {})}
+        given = value.get("colors") or {}
+        colors = {key: safe_color(given.get(key), default) for key, default in DEFAULT_COLORS.items()}
         return cls(qr=str(value.get("qr") or ""), colors=colors, images=dict(value.get("images") or {}),
                    title=str(value.get("title") or ""))
 

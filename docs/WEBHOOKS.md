@@ -91,8 +91,16 @@ are sent only to an endpoint whose owner may have them -- otherwise the fields a
 
 - a club's own endpoint: when the club ticked "Our registration form tells people their details are
   shared with <the endpoint's host>" for it (`share_attendee_details` + `dpdp_confirmed`; changing
-  the address clears the tick). Through the API, ticking it needs the key's own `attendees:read`;
+  the address clears the tick unless `dpdp_confirmed` is sent again with the new address, by someone who
+  may tick it). Through the API, ticking it needs the key's own `attendees:read`;
 - a partner's endpoint: when the partner's connection to the club has `attendees:read`.
+
+The delivery log (`GET .../deliveries/{id}`, `request_body`) shows the body as it was sent, but without
+those fields for a caller that may not read them itself: a key or partner without `attendees:read`.
+The club's dashboard sees it as sent.
+
+When an event's data wipe runs (closeout retention, "delete attendee data"), the changes kept for its
+registrations, requests and certificates lose those fields too, at once; the log keeps the rest.
 
 A partner's endpoint gets each kind of object only while its connection has that object's read scope
 (`events:read`, `registrations:read` for registrations, check-ins and payments, `certificates:read`,
@@ -217,8 +225,11 @@ rate limits and Idempotency-Key -- and listed in `/partner/v1/openapi.json`, whi
 webhook's body under OpenAPI 3.1 `webhooks`): `GET/POST /webhook-endpoints`, `GET/PATCH/DELETE
 /webhook-endpoints/{id}`, `POST .../rotate-secret`, `POST .../test`, `GET .../deliveries`,
 `GET /webhook-deliveries/{id}`, `POST /webhook-deliveries/{id}/retry`, `GET /webhook-event-types`.
-A key manages the club's own endpoints, in the key's own mode; a partner only its own for that club (an app's own
-token acts for no club: FORBIDDEN_SCOPE, or name the club with `MOA-Club-Id`).
+A key manages its own endpoints -- the ones it added, and the ones the dashboard linked to it (`client_id`) -- in
+the key's own mode, never the club's other endpoints or another key's; a partner only its own for that club, in its
+mode (an app's own token acts for no club: FORBIDDEN_SCOPE, or name the club with `MOA-Club-Id`). Revoking a key
+turns off (`disabled_reason: by_owner`) the endpoints it added, and they cannot be turned on again; an expired key's
+are turned off at their next send. The club's endpoints linked to the key stay on.
 
 Admin portal (`/api/v1/admin/integrations/webhooks`): `GET /health` (endpoints on, turned off for
 failing, failing now; deliveries per day; the busiest clubs; failing endpoints with their last error),
@@ -247,13 +258,15 @@ Limits: 10 endpoints per club, 5 per partner per club.
 - **sender.py** sends (the SSRF guard: `app/core/net.py` `check_https_url`, `resolve_public`); tests swap
   `TRANSPORT` and `RESOLVE`.
 - **seams.py** / **wiring.py**: what is asked of the partner API -- `club_allocated`, `partner_scopes` (the
-  connection's, in the endpoint's mode), `partner_contact`, `external_id` -- installed at start-up from doth
+  connection's, in the endpoint's mode), `partner_contact`, `external_id`, `key_active` (the key that added an
+  endpoint is neither revoked nor expired) -- installed at start-up from doth
   (`wiring.install()`; tests/test_webhooks_e2e.py fails if it is not). Tests swap them with `seams.configure`.
 - **openapi.py**: the webhooks in the partner API's OpenAPI document (one POST per type, the GET's schemas).
 - **origin.py**: `SurfaceMiddleware` labels each request's surface for `origin` (the partner API's auth
   dependency sets its own with `app.core.api_origin.set_origin`).
 - **sweep.py**: hourly, changes past 30 days deleted (their deliveries with them), rotated secrets'
-  overlaps emptied.
+  overlaps emptied; `forget_people`, called by closeout's scrub, strips people's details from an event's
+  kept changes.
 - To add a type: add it to `types.EVENT_TYPES`, its loader to `objects.LOADERS` if it is a new object,
   a function to signals.py, the call at the change's choke point, a test in
   `tests/test_webhooks_out_wiring.py`, and a dated line in the contract.

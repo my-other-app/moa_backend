@@ -66,6 +66,7 @@ from app.api.closeout.models import EventStatus
 from app.api.events.models import EventRegistrationsLink, Events, ends_at_sql
 from app.core import jobs, money, public_urls
 from app.db.binds import any_of
+from app.core.utils import csv_safe
 from app.response import CustomHTTPException
 
 logger = logging.getLogger(__name__)
@@ -238,13 +239,18 @@ async def _tracking_link(session, event, ref: Optional[str]):
 async def submit(
     session, event, *, full_name: str, email: str, phone: Optional[str], user, answers: Optional[dict],
     ticket_type_id: Optional[int] = None, discount_code: Optional[str] = None, whatsapp_opt_in: bool = False,
-    club_updates_whatsapp: bool = False, tracking_ref: Optional[str] = None,
+    club_updates_whatsapp: bool = False, tracking_ref: Optional[str] = None, ticket_key: Optional[str] = None,
+    any_type: bool = False,
 ) -> Submitted:
     """The form's request: the open one this person already has, or a new one.
 
     `user` is the signed-in account (or the guest whose session it is, with
     this address), or None for the public form, which gets a guest of its own
-    -- as a registration does -- only when a request is made. Commits."""
+    -- as a registration does -- only when a request is made. Commits.
+
+    A hidden ticket type is asked for only with the key its link carries
+    (`ticket_key`, ticketing.hidden); `any_type` (the club's own API key)
+    needs none."""
     from app.api.events.registration import answers as answers_mod
     from app.api.events.registration import service as registration
     from app.api.ticketing import codes as codes_mod
@@ -291,7 +297,7 @@ async def submit(
     # left are not asked: confirming is where they count.
     priced = await quote_mod.quote(
         session, event, ticket_type_id=ticket_type_id, discount_code=discount_code, email=email, phone=phone,
-        user_id=user_id, lock=False, early_capacity=False, now=now,
+        user_id=user_id, lock=False, early_capacity=False, now=now, ticket_key=ticket_key, any_type=any_type,
     )
     guest = None
     if user is None:
@@ -1158,6 +1164,8 @@ async def _confirm_one(session, event, req: RegistrationRequests, snap: _Snap, r
             session, event, ticket_type_id=snap.ticket_type_id, discount_code=snap.discount_code, email=snap.email,
             phone=snap.phone, user_id=user_id, early_capacity=False, window=False, now=now,
             exclude=existing.id if own_unpaid else None,
+            # The club confirming: the type was checked when the request was made.
+            any_type=True,
         )
         if priced.code is not None and priced.code.max_uses:
             await _check_code_holds(session, priced.code, now)
@@ -1899,7 +1907,6 @@ STATUS_WORD = {
     PENDING: "Under review", APPROVED: "Confirmed", DECLINED: "Declined", WITHDRAWN: "Cancelled",
     LAPSED: "Expired", CLOSED: "Closed",
 }
-_FORMULA = ("=", "+", "-", "@", "\t", "\r")
 
 
 def _csv_cell(value) -> str:
@@ -1915,9 +1922,8 @@ def _csv_cell(value) -> str:
         import json
 
         value = json.dumps(value, ensure_ascii=False)
-    text_ = str(value)
     # A person's words are text, never a formula the sheet would run.
-    return "'" + text_ if text_.startswith(_FORMULA) else text_
+    return csv_safe.cell(str(value))
 
 
 def _payment(status: str, reg_live: bool, is_paid, actual, entry_status, expires, now: datetime) -> str:
@@ -2003,12 +2009,11 @@ async def export_table(session, event):
 async def export_csv(session, event) -> bytes:
     """The requests (export_table) as CSV: a cell that starts like a formula
     gets an apostrophe."""
-    import csv
     import io
 
     header, rows = await export_table(session, event)
     buf = io.StringIO()
-    out = csv.writer(buf)
+    out = csv_safe.writer(buf)
     out.writerow(header)
     async for row in rows:
         out.writerow([_csv_cell(v) for v in row])

@@ -105,6 +105,61 @@ async def test_an_app_users_mail_is_theirs_and_not_flagged(client, session, desk
     assert case.requester_kind == "user" and case.requester_user_id == desk.person.id and case.flags == []
 
 
+async def test_identity_is_the_from_address_and_only_when_it_passed_the_sender_check(client, session, desk, aws):
+    # Reply-To naming an account is not who wrote it.
+    r = await deliver(client, aws, a_mail(sender=("Mallory", "mallory@example.net"), reply_to=desk.person.email))
+    assert r.json()["desk"] == {"support": "opened"}
+    [case] = await cases_of(session)
+    assert case.requester_kind == "guest" and case.requester_email == "mallory@example.net" and case.requester_user_id is None
+    assert case.flags == ["unknown_sender"] and case.links == {}
+    # The From passed the check: Reply-To is where answers go, nothing more.
+    assert case.context == {"reply_to": desk.person.email.lower()} and mail.reply_address(case) == desk.person.email.lower()
+    preview = await reply(client, case.id, desk.h["owner"], body="Hello", preview_only=True)
+    assert preview.json()["to"] == desk.person.email.lower()
+    assert (await reply(client, case.id, desk.h["owner"], body="Hello")).status_code == 200
+    assert desk.outbox.sent[-1]["to"] == desk.person.email.lower()
+    # An account's address in From, but the check failed (or there was none): a guest, flagged.
+    for verdict in ("FAIL", "GRAY"):
+        r = await deliver(client, aws, a_mail(sender=("Asha", desk.person.email), subject=f"Change my email {verdict}",
+                                              reply_to="elsewhere@example.net"), dmarc=verdict)
+        assert r.json()["desk"] == {"support": "opened"}
+        case = (await cases_of(session))[-1]
+        assert case.requester_kind == "guest" and case.requester_user_id is None and case.links == {}
+        assert case.flags == ["unknown_sender"] and case.requester_email == desk.person.email.lower()
+        # ... and its Reply-To isn't followed: answers go to the From.
+        assert case.context is None and mail.reply_address(case) == desk.person.email.lower()
+    # Passed: the account's own case, as before.
+    await deliver(client, aws, a_mail(sender=("Asha", desk.person.email), subject="A real question"))
+    case = (await cases_of(session))[-1]
+    assert case.requester_kind == "user" and case.requester_user_id == desk.person.id and case.flags == []
+
+
+async def test_an_unchecked_sender_reaches_only_a_guests_case(client, session, desk, aws):
+    # The account's own case, by mail that passed.
+    await deliver(client, aws, a_mail(sender=("Asha", desk.person.email), subject="Refund"))
+    [mine] = await cases_of(session)
+    assert mine.requester_kind == "user"
+    # The same address, unchecked: neither its tag nor the same subject within the hour joins it.
+    r = await deliver(client, aws, a_mail(sender=("Asha", desk.person.email), subject=f"Re: [#{mine.number}] Refund",
+                                          text="Send it to my other card"), dmarc="FAIL")
+    assert r.json()["desk"] == {"support": "opened"}
+    # (it joins the guest's case the mail before opened instead)
+    r = await deliver(client, aws, a_mail(sender=("Asha", desk.person.email), subject="Refund", text="Me again"), dmarc="FAIL")
+    assert r.json()["desk"] == {"support": "joined"}
+    rows = await cases_of(session)
+    assert len(rows) == 2 and (await session.get(SupportCases, mine.id, populate_existing=True)).message_count == 1
+    # A guest's own case: their unchecked mail with its tag still joins it.
+    guest_case = rows[1]
+    assert guest_case.requester_kind == "guest" and guest_case.message_count == 2
+    r = await deliver(client, aws, a_mail(sender=("Asha", desk.person.email), subject=f"Re: [#{guest_case.number}] Refund",
+                                          text="Any news?"), dmarc="FAIL")
+    assert r.json()["desk"] == {"support": "joined"}
+    # The website's guest form with the account's address doesn't reach the account's case either.
+    r = await ask(client, email=desk.person.email, subject="Refund", message="Pay it to me instead")
+    assert r.status_code == 201
+    assert (await session.get(SupportCases, mine.id, populate_existing=True)).message_count == 1
+
+
 async def test_threading_by_tag_from_the_person_and_by_headers(client, session, desk, aws):
     await deliver(client, aws, a_mail())
     [case] = await cases_of(session)

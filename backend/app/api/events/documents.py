@@ -340,11 +340,15 @@ def layout_colors(style: dict, club=None) -> dict:
     else the club's brand, else the defaults. A template still on the stock
     colours has not chosen them, so the club's brand wins there too."""
 
+    from app.core.layout_v2.context import SAFE_HEX
+
     def pick(key: str, default: str, brand: str) -> str:
+        # Only a hex colour: a stored value no check saw never reaches a page.
         own = (style.get(key) or "").strip().lower()
-        if own and own != default:
+        if own and own != default and SAFE_HEX.match(own):
             return own
-        return (getattr(club, brand, None) if club is not None else None) or default
+        theirs = (getattr(club, brand, None) if club is not None else None) or ""
+        return theirs if isinstance(theirs, str) and SAFE_HEX.match(theirs) else default
 
     primary = pick("accent_color", DEFAULT_PRIMARY, "brand_primary")
     return {"primary": primary, "secondary": pick("secondary_text_color", DEFAULT_SECONDARY, "brand_secondary"), "ticketType": primary}

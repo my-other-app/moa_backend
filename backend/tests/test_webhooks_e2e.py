@@ -153,6 +153,37 @@ def _openapi_fresh():
     openapi.reset()
 
 
+async def test_revoking_a_key_turns_off_the_endpoints_it_added(client, session, world, mint_token, real_hub):
+    from app.api.partner.models import PartnerApiKeys
+
+    raw = await key_for(session, world.ids.club, SCOPES)
+    key_client = (await client.get(f"{V1}/me", headers=H(raw))).json()["client_id"]
+    own = await client.post(f"{V1}/webhook-endpoints", json={"url": "https://erp.example.com/moa"}, headers=H(raw))
+    assert own.status_code == 201, own.text
+    # The dashboard links its own endpoint to the key: the key sees it too, the club's other one it does not.
+    linked_id, _ = await _dashboard_endpoint(client, mint_token, world.owner, "https://site.example.com/moa", client_id=key_client)
+    await _dashboard_endpoint(client, mint_token, world.owner, "https://crm.example.com/moa")
+    listed = (await client.get(f"{V1}/webhook-endpoints", headers=H(raw))).json()["data"]
+    assert sorted(e["url"] for e in listed) == ["https://erp.example.com/moa", "https://site.example.com/moa"]
+    assert await seams.key_active(session, world.ids.club, key_client) is True
+
+    row = await session.scalar(select(PartnerApiKeys).where(PartnerApiKeys.client_id == key_client))
+    owner = auth_header(await mint_token(world.owner))
+    r = await client.delete(f"/api/v1/clubs/integrations/keys/{row.id}", headers=owner)
+    assert r.status_code == 200, r.text
+    assert await seams.key_active(session, world.ids.club, key_client) is False
+
+    endpoints = {e.url: e for e in await session.scalars(select(WebhookEndpoints).execution_options(populate_existing=True))}
+    assert endpoints["https://erp.example.com/moa"].enabled is False
+    assert endpoints["https://erp.example.com/moa"].disabled_reason == "by_owner"
+    # The club's own endpoints stay on, the one linked to the key included.
+    assert endpoints["https://site.example.com/moa"].enabled is True and endpoints["https://crm.example.com/moa"].enabled is True
+    r = await client.patch(f"{DASH}/{own.json()['id']}", json={"enabled": True}, headers=owner)
+    assert r.status_code == 409 and r.json()["error_code"] == "KEY_REVOKED"
+    r = await client.patch(f"{DASH}/{linked_id}", json={"enabled": False}, headers=owner)
+    assert r.status_code == 200
+
+
 # Last in the file: a test without the event loop that runs before the async
 # ones leaves them on a loop other than the test engine's (tests/test_cov_sweeps.py).
 def test_the_seams_are_installed_at_start_up():
@@ -160,5 +191,5 @@ def test_the_seams_are_installed_at_start_up():
     import doth  # noqa: F401 - what the API and the worker import
     from app.api.webhooks_out import wiring
 
-    assert sorted(seams.installed()) == ["club_allocated", "external_id", "partner_contact", "partner_scopes"]
+    assert sorted(seams.installed()) == ["club_allocated", "external_id", "key_active", "partner_contact", "partner_scopes"]
     assert seams._base["club_allocated"] is wiring.club_allocated

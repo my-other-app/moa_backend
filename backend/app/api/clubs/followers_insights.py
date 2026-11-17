@@ -18,7 +18,6 @@ their ids back as parameters.
 The order is the follow's (newest first, then id: the club's follower
 index), and each sort keeps that order among people it ranks the same.
 """
-import csv
 import io
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
@@ -33,6 +32,7 @@ from app.api.links.models import TrackingLinks
 from app.api.orgs.models import Organizations
 from app.api.users.models import UserInterests, UserProfiles, Users
 from app.db.binds import any_of
+from app.core.utils import csv_safe
 
 SEGMENTS = ("all", "new", "regulars", "once", "never", "quiet")
 SORTS = ("newest", "oldest", "active", "name")
@@ -331,7 +331,7 @@ async def export_rows(session, club_id: int, *, segment: str = "all"):
 
 async def export_csv(session, club_id: int, *, segment: str = "all") -> str:
     buf = io.StringIO()
-    w = csv.writer(buf)
+    w = csv_safe.writer(buf)
     w.writerow(EXPORT_HEADERS)
     for row in await export_rows(session, club_id, segment=segment):
         w.writerow([v.isoformat() if isinstance(v, date) else v for v in row])

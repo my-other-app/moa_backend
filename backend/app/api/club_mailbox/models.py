@@ -13,9 +13,9 @@ which goes through the platform's own sending provider from that address.
   sent, the mail stays readable for 30 days, then only exported or deleted.
 - `club_mailbox_addresses`: the handles, current and past. The current one
   has `retired_at` null; a changed one keeps forwarding into the same mailbox
-  until `forward_until` (90 days), and holds its handle until the sweep lets
-  it go. A handle is unique across every row, so no club can take another's
-  address, or an old one still forwarding. Every club has one from the start,
+  until `forward_until` (90 days), then receives nothing, and holds its
+  handle for good. A handle is unique across every row, so no club can take
+  another's address, current or old. Every club has one from the start,
   made from its name (`automatic`), whatever its plan: on a plan without the
   mailbox it is only reserved (service.py, state `reserved`).
 - `club_mail_threads`: a conversation: its folder (inbox, sent, archive,

@@ -4,8 +4,9 @@ admin portal's path to open it, where the existing actions (refund, resend
 the ticket, suspend) keep their own permissions.
 
 Whose: the user the case links to, else the account that asked, else an
-app account with the address a guest wrote from (said so: `matched_by`).
-Read only; nothing here changes anything.
+app account with the address a guest wrote from (said so: `matched_by`,
+and the account's own `matched` line, since nobody checked a guest's
+address). Read only; nothing here changes anything.
 """
 from __future__ import annotations
 
@@ -17,6 +18,8 @@ from sqlalchemy import func, or_, select
 from app.api.support.models import SupportCases
 
 LIMIT = 10
+#: Beside a guest's case: the account shares the address, which nobody checked.
+MATCHED_BY_EMAIL = "Only by the email address on this case, which isn't checked"
 
 
 def _uuid(value) -> Optional[uuid.UUID]:
@@ -75,6 +78,8 @@ async def panel(session, case: SupportCases) -> dict:
         "suspended": getattr(user, "is_active", True) is False, "suspended_reason": user.suspended_reason,
         "created_at": user.created_at, "path": f"/users/{user.id}",
     }
+    if matched_by == "email":
+        out["account"]["matched"] = MATCHED_BY_EMAIL
     R = EventRegistrationsLink
     regs = (await session.execute(
         select(R, Events.name).join(Events, Events.id == R.event_id).where(R.user_id == user.id)

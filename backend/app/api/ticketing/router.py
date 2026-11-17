@@ -75,9 +75,13 @@ async def _club_for(session, user) -> Clubs:
 
 
 @router.get("/events/{event_id}/ticketing/types", summary="The event's ticket types, with what sold")
-async def list_types(session: SessionDep, user: ClubAuth, event_id: int) -> TicketTypesOut:
+async def list_types(request: Request, session: SessionDep, user: ClubAuth, event_id: int) -> TicketTypesOut:
+    """Each type's `link` is the event page's address for it, a hidden
+    type's with its key (ticketing.hidden); door staff get none."""
+    from app.api.club_access import service as club_access
+
     event = await deliveries.event_for_club(session, user, event_id)
-    return await views.club_types(session, event)
+    return await views.club_types(session, event, links=club_access.role_of(request) != "door")
 
 
 async def _live_unless_may_set(session, request, event) -> list | None:
@@ -381,10 +385,11 @@ async def _public_event(session, event_id: str) -> Events:
 @public_router.get("/events/{event_id}/ticket-types", summary="An event's tickets: types on sale, what is left, the waiting list")
 async def public_types(
     session: SessionDep, event_id: str, user: OptionalUserAuth,
-    ticket_type: int | None = Query(None, description="A hidden type a link names, shown too"),
+    ticket_type: int | None = Query(None, description="A hidden type a link names, shown too (with its key)"),
+    ticket_key: str | None = Query(None, max_length=64, description="The key the hidden type's link carries"),
 ) -> PublicTicketing:
     event = await _public_event(session, event_id)
-    out = await views.public(session, event, include_hidden=ticket_type, viewer=user)
+    out = await views.public(session, event, include_hidden=ticket_type, ticket_key=ticket_key, viewer=user)
     await session.commit()
     return out
 
@@ -393,13 +398,16 @@ async def public_types(
 @limiter.limit("10/minute")
 async def check_code(request: Request, session: SessionDep, event_id: str, body: CheckCodeIn) -> CheckCodeOut:
     """Only the price: never the code's limits, uses or other events. 422
-    DISCOUNT_CODE_INVALID for any code this event does not take."""
+    DISCOUNT_CODE_INVALID for any code this event does not take. A hidden
+    type is priced with its link's key (`ticket_key`), or on the claim page
+    for the type its standing offer is for (`offer_token`)."""
     from app.api.ticketing import quote as quote_mod
 
     event = await _public_event(session, event_id)
     q = await quote_mod.quote(
         session, event, ticket_type_id=body.ticket_type_id, discount_code=body.code, email=body.email, phone=body.phone,
-        lock=False, early_capacity=False,
+        lock=False, early_capacity=False, ticket_key=body.ticket_key,
+        any_type=await _offer_is_for(session, event, body.offer_token, body.ticket_type_id),
     )
     await session.commit()
     if q.code is None:
@@ -410,13 +418,24 @@ async def check_code(request: Request, session: SessionDep, event_id: str, body:
     }
 
 
+async def _offer_is_for(session, event, token, ticket_type_id) -> bool:
+    """Whether `token` is a standing offer of this event's type `ticket_type_id`."""
+    if not token or ticket_type_id is None:
+        return False
+    entry = await session.scalar(select(WaitlistEntries).where(WaitlistEntries.offer_token == token.strip()).limit(1))
+    return (
+        entry is not None and entry.event_id == event.id and entry.ticket_type_id == ticket_type_id
+        and entry.status == OFFERED and (entry.offer_expires_at is None or entry.offer_expires_at > _now())
+    )
+
+
 @public_router.post("/events/{event_id}/waitlist", summary="Join the waiting list for a sold-out ticket type")
 @limiter.limit("10/minute")
 async def join_waitlist(request: Request, session: SessionDep, event_id: str, body: WaitlistJoinIn, user: OptionalUserAuth) -> WaitlistJoinOut:
     event = await _public_event(session, event_id)
     entry, created = await waitlist.join(
         session, event, ticket_type_id=body.ticket_type_id, full_name=body.full_name, email=body.email,
-        phone=body.phone, user=user, whatsapp_opt_in=body.whatsapp_opt_in,
+        phone=body.phone, user=user, whatsapp_opt_in=body.whatsapp_opt_in, ticket_key=body.ticket_key,
     )
     return {**await views.entry_public(session, entry), "created": created}
 

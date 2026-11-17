@@ -812,6 +812,8 @@ async def create_registration(caller, event_id, body):
             done = await approvals.submit(
                 session, event, full_name=name, email=email, phone=phone, user=None, answers=body.answers or None,
                 ticket_type_id=int(body.ticket_type_id) if body.ticket_type_id not in (None, "") else None,
+                # The club's own key: any of its types, hidden ones too, as when it registers someone.
+                any_type=True,
             )
         except Exception:
             await ext_ids.release(session, reservation)

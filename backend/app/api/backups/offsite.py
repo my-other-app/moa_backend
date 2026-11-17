@@ -81,30 +81,49 @@ def key_for(name: str, tier: str) -> str:
 
 def client():
     """An S3 client with the backup credentials when they are set, else the
-    media bucket's. Made per call: a dump is a rare event, and a long-lived
-    client would hold the keys for no reason."""
+    media bucket's. AWS S3, or the S3-compatible store at
+    BACKUP_S3_ENDPOINT_URL (path-style, checksums only where an operation
+    needs one, as stores differ in the newer ones they accept). Made per
+    call: a dump is a rare event, and a long-lived client would hold the
+    keys for no reason."""
     import boto3
 
     access = settings.BACKUP_S3_ACCESS_KEY or settings.S3_ACCESS_KEY
     secret = settings.BACKUP_S3_SECRET_KEY or settings.S3_SECRET_KEY
+    kwargs = {}
+    endpoint = (settings.BACKUP_S3_ENDPOINT_URL or "").strip()
+    if endpoint:
+        from botocore.config import Config
+
+        kwargs["endpoint_url"] = endpoint
+        kwargs["config"] = Config(
+            signature_version="s3v4",
+            s3={"addressing_style": "path"},
+            request_checksum_calculation="when_required",
+            response_checksum_validation="when_required",
+        )
     return boto3.client(
         "s3",
         region_name=settings.BACKUP_S3_REGION or None,
         aws_access_key_id=access,
         aws_secret_access_key=secret,
+        **kwargs,
     )
 
 
 def encryption() -> dict:
-    """The ExtraArgs that encrypt an object at rest."""
+    """The ExtraArgs that encrypt an object at rest; none for a store that
+    does so by itself (BACKUP_S3_SSE=none)."""
     mode = (settings.BACKUP_S3_SSE or "AES256").strip()
+    if mode == "none":
+        return {}
     if mode == "aws:kms":
         extra = {"ServerSideEncryption": "aws:kms"}
         if settings.BACKUP_S3_KMS_KEY_ID:
             extra["SSEKMSKeyId"] = settings.BACKUP_S3_KMS_KEY_ID
         return extra
     if mode != "AES256":
-        raise ValueError(f"APP_BACKUP_S3_SSE must be AES256 or aws:kms, not {mode!r}")
+        raise ValueError(f"APP_BACKUP_S3_SSE must be AES256, aws:kms or none, not {mode!r}")
     return {"ServerSideEncryption": "AES256"}
 
 

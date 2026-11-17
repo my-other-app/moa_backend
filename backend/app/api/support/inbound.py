@@ -16,6 +16,13 @@ For a recipient in SUPPORT_INBOUND_ADDRESSES (plus-addressing allowed):
   app account or a club, and flagged `unknown_sender` when neither.
   Joining a resolved case reopens it; a closed one starts a new linked case.
 
+Who wrote it is the `From` address, and only a mail whose From passed the
+sender check (DMARC: SES's verdict, or Cloudflare's own
+Authentication-Results) is matched to an account or a club. Any other mail
+is a guest's, flagged `unknown_sender`, and joins only a guest's case.
+Reply-To is never who wrote it: it is kept (`context.reply_to`) as where
+our answers go, and only for a mail that passed the check.
+
 For a recipient in SALES_INBOUND_ADDRESSES (often a BCC): an `email` line on
 each lead with a contact among the people on the mail (ours left out: the
 desk's addresses and the admins'), or a new lead (source `inbound_email`).
@@ -145,14 +152,24 @@ async def by_headers(session, ids: list[str]) -> Optional[SupportCases]:
     return await session.get(SupportCases, case_id) if case_id else None
 
 
-async def by_tag(session, subject: str, sender: str) -> Optional[SupportCases]:
+def aligned(received: providers.Received) -> bool:
+    """Whether the mail's From is vouched for by its own domain: DMARC passed
+    (SES's verdict; for Cloudflare, its own Authentication-Results). Nothing
+    checks Reply-To."""
+    return (received.verdicts or {}).get("dmarc") == "PASS"
+
+
+async def by_tag(session, subject: str, sender: str, *, verified: bool = True) -> Optional[SupportCases]:
     """The case its subject's [#n] names, when the sender is the case's own
-    person (or wrote on it before): a number alone is not a key."""
+    person (or wrote on it before): a number alone is not a key. A sender
+    whose From wasn't vouched for reaches only a guest's case."""
     number = text.number_in(subject)
     if number is None:
         return None
     case = await cases.by_number(session, number)
     if case is None:
+        return None
+    if not verified and case.requester_kind != "guest":
         return None
     if (case.requester_email or "").lower() == sender:
         return case
@@ -180,7 +197,11 @@ async def requester_for(session, sender: str, display: Optional[str]) -> tuple[c
     )
     if club is not None:
         return cases.Requester(kind="club", club_id=club.id, email=sender, name=display or club.name), True
-    return cases.Requester(kind="guest", email=sender, name=display or sender.split("@")[0]), False
+    return guest(sender, display), False
+
+
+def guest(sender: str, display: Optional[str]) -> cases.Requester:
+    return cases.Requester(kind="guest", email=sender, name=display or sender.split("@")[0])
 
 
 async def _files(session, parsed: parse.Parsed) -> list:
@@ -201,12 +222,17 @@ async def keep_support(session, received: providers.Received, parsed: parse.Pars
     joined, opened, spam, duplicate, loop or no_sender."""
     if await _seen(session, received):
         return "duplicate"
-    sender = (parsed.reply_to or parsed.from_address or "").strip().lower()
+    sender = (parsed.from_address or "").strip().lower()
     if not sender:
         return "no_sender"
     if base_address(sender) in ours():
         logger.info("desk: mail %s from our own address dropped", received.provider_message_id[:24])
         return "loop"
+    verified = aligned(received)
+    # Where answers go, when the mail asks for another address: only for a From that passed.
+    reply_to = (parsed.reply_to or "").strip().lower()
+    if not verified or reply_to == sender or base_address(reply_to) in ours():
+        reply_to = ""
     body = text.mask_cards(parsed.text or "")[:200_000] or "(no text)"
     html = text.mask_cards(parsed.html) if parsed.html else None
     mail = cases.MailFields(
@@ -218,7 +244,7 @@ async def keep_support(session, received: providers.Received, parsed: parse.Pars
         async with session.begin_nested():
             attachments = await _files(session, parsed)
             keys = [a.storage_key for a in attachments]
-            requester, known = await requester_for(session, sender, parsed.from_name)
+            requester, known = await requester_for(session, sender, parsed.from_name) if verified else (guest(sender, parsed.from_name), False)
             if received.spam:
                 case, _ = await cases.open_case(
                     session, requester=requester, topic=None, subject=parsed.subject, body_text=body, body_html=html, channel="email",
@@ -227,7 +253,7 @@ async def keep_support(session, received: providers.Received, parsed: parse.Pars
                 outcome = "spam"
             else:
                 case = await by_headers(session, [*parsed.references, *([parsed.in_reply_to] if parsed.in_reply_to else [])])
-                case = case or await by_tag(session, parsed.subject, sender)
+                case = case or await by_tag(session, parsed.subject, sender, verified=verified)
                 case = case or await cases.recent_same(session, requester, parsed.subject)
                 if case is not None:
                     case, _, new = await cases.requester_reply(
@@ -240,7 +266,7 @@ async def keep_support(session, received: providers.Received, parsed: parse.Pars
                         session, requester=requester, topic="other", subject=parsed.subject, body_text=body, body_html=html,
                         channel="email", mail=mail, attachment_rows=attachments, flags=[] if known else [UNKNOWN_SENDER],
                         links={"user_id": requester.user_id} if requester.user_id else ({"club_id": requester.club_id} if requester.club_id else {}),
-                        topic_required=False,
+                        context={"reply_to": reply_to} if reply_to else None, topic_required=False,
                     )
                     outcome = "opened"
             await cases.audit(session, None, f"case.mail_{outcome}", case, f"Case #{case.number}: mail from {masked(sender)}",

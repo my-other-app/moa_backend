@@ -5,7 +5,9 @@ connected it, the member. None of that is trusted from the time of consent:
 each call (and each refresh) reads the club, the account and the membership
 as they are now. A member removed from the club, a club taken down, an
 account suspended or an owner's password changed ends the grant there and
-then -- not when its token runs out.
+then -- not when its token runs out. A team member's own password changed
+(by them, or by a reset) ends the grants they made, at the change
+(`end_member_grants`).
 
 The role read here is what the tools are checked against
 (club_access.policy.allows_tool), so a member demoted to door staff stops
@@ -14,7 +16,7 @@ being able to draft events on their next call.
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import update
+from sqlalchemy import select, update
 
 from app.api.club_access.models import ClubMembers
 from app.api.club_access.service import role_label
@@ -104,3 +106,14 @@ async def end_grant(session, grant: McpGrants, *, reason: str, by_user_id: int |
     await session.execute(
         update(McpTokens).where(McpTokens.grant_id == grant.id, McpTokens.revoked_at.is_(None)).values(revoked_at=now)
     )
+
+
+async def end_member_grants(session, member_id: int, *, reason: str = "password_changed") -> int:
+    """Every live grant a team member made ends, with its tokens: their
+    password changed. Not committed; returns how many."""
+    grants = list(await session.scalars(
+        select(McpGrants).where(McpGrants.member_id == member_id, McpGrants.revoked_at.is_(None)).with_for_update()
+    ))
+    for grant in grants:
+        await end_grant(session, grant, reason=reason, by_member_id=member_id)
+    return len(grants)

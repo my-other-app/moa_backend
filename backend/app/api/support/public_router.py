@@ -41,6 +41,9 @@ router = APIRouter(prefix="/support", tags=["support"])
 #: Per address on the network (slowapi), and per email address (below).
 REQUEST_LIMIT = "6/hour;20/day"
 EMAIL_LIMIT = ("5/hour", "10/day")
+#: Receipts to guests' addresses, all guests together: past this, a guest's
+#: case still opens, with no receipt.
+GUEST_RECEIPT_LIMIT = "100/hour"
 UPLOAD_LIMIT = "20/hour"
 REPLY_LIMIT = "30/hour"
 SURVEY_LIMIT = "20/hour"
@@ -70,6 +73,16 @@ def _per_email(email: str) -> None:
                 429, message="You've sent a lot of requests. We'll answer the ones we have; try again later.",
                 error_code="RATE_LIMITED",
             )
+
+
+def _guest_receipt_allowed() -> bool:
+    """Whether one more receipt may go to a guest's address this hour."""
+    if not limiter.enabled:
+        return True
+    if limiter.limiter.hit(_item(GUEST_RECEIPT_LIMIT), "support:receipt:guest", "all"):
+        return True
+    logger.warning("support: guest receipts are over %s; a case opened without one", GUEST_RECEIPT_LIMIT)
+    return False
 
 
 async def _requester(session, request: Request, user, body: RequestIn) -> cases.Requester:
@@ -188,13 +201,17 @@ async def create_request(request: Request, body: RequestIn, session: SessionDep,
         await cases.audit(session, user, "case.joined", case, f"Case #{case.number}: the same person wrote again",
                           {"channel": channel}, request=request)
         await session.commit()
+        if requester.kind == "guest":
+            # Nobody checked a guest's address: the case it went on isn't named back.
+            return {"id": None, "number": None, "status": "new"}
         return {"id": case.id, "number": case.number, "status": case.status}
     links = await _links(session, user, requester, ctx)
     case, _ = await cases.open_case(
         session, requester=requester, topic=body.topic, subject=subject, body_text=message, channel=channel, links=links,
         context=context, actor=user, attachment_rows=uploads,
     )
-    await mail.enqueue_receipt(session, case)
+    if requester.kind != "guest" or _guest_receipt_allowed():
+        await mail.enqueue_receipt(session, case)
     await cases.audit(session, user, "case.opened", case, f"Case #{case.number} opened ({channel})",
                       {"channel": channel, "topic": case.topic, "requester_kind": case.requester_kind}, request=request)
     await session.commit()

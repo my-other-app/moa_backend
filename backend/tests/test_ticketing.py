@@ -9,12 +9,13 @@ import pathlib
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 import pytest_asyncio
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.api.events.models import EventRegistrationsLink, Events
 from app.api.payments import service as payments
@@ -26,6 +27,12 @@ from app.api.ticketing.models import DiscountCodes, TicketTypes
 from app.config import settings
 from tests.conftest import auth_header
 from tests.test_money_integrity import FakeRazorpay, rzp_fake  # noqa: F401
+
+
+@pytest.fixture(autouse=True)
+def _hidden_types_need_the_key(monkeypatch):
+    """The setting defaults to off in production until links are re-sent; these tests check it on."""
+    monkeypatch.setattr(settings, "HIDDEN_TYPES_REQUIRE_TOKEN", True)
 
 API = "/api/v1"
 NOW = datetime.now(timezone.utc)
@@ -81,6 +88,12 @@ async def _taken(session, type_id) -> int:
     return await session.scalar(
         select(TicketTypes.taken_count).where(TicketTypes.id == type_id).execution_options(populate_existing=True)
     )
+
+
+def _key_of(listed_type: dict) -> str:
+    """The key in a type's link, as the dashboard lists it (ticketing.hidden)."""
+    query = parse_qs(urlsplit(listed_type["link"]).query)
+    return query["ticket_key"][0]
 
 
 # ─── The migration: one default type per event ──────────────────────────
@@ -175,13 +188,14 @@ async def test_an_event_selling_several_types_needs_one_named(client, session, s
     reg = await _reg(session, student["event_registration_id"])
     assert reg.ticket_label == "Student" and reg.actual_amount == Decimal("99.00")
 
-    # The page lists what is on sale; the hidden type only to a link that names it.
+    # The page lists what is on sale; the hidden type only to its link (with its key).
     page = (await client.get(f"{API}/events/{shop.paid.slug}/ticket-types")).json()
     assert [t["name"] for t in page["types"]] == ["General", "Student"] and page["requires_choice"] is True
-    linked = (await client.get(f"{API}/events/{shop.paid.id}/ticket-types", params={"ticket_type": types["Sponsor"]["id"]})).json()
+    key = _key_of(types["Sponsor"])
+    linked = (await client.get(f"{API}/events/{shop.paid.id}/ticket-types", params={"ticket_type": types["Sponsor"]["id"], "ticket_key": key})).json()
     assert "Sponsor" in [t["name"] for t in linked["types"]]
     # A free type on a paid event: confirmed at once, as paid at nothing.
-    sponsor = (await register(client, shop.paid, ticket_type_id=types["Sponsor"]["id"])).json()
+    sponsor = (await register(client, shop.paid, ticket_type_id=types["Sponsor"]["id"], ticket_key=key)).json()
     assert (sponsor["pay_amount"], sponsor["is_paid"]) == (0, True)
     # The event's own fee is what its types charge: paid, from the lowest price.
     event = await session.get(Events, shop.paid.id, populate_existing=True)
@@ -442,6 +456,207 @@ async def test_back_to_pay_with_a_code_is_priced_again(client, session, shop, ma
     # Coming back without one keeps what it has (the app sends nothing new).
     third = (await client.post(f"{API}/events/registration/{shop.paid.id}/register", json=body, headers=h)).json()
     assert third["pay_amount"] == 200.0
+
+
+# ─── Hidden types: only with their link's key ───────────────────────────
+
+
+@pytest_asyncio.fixture
+async def comp(client, session, shop):
+    """The paid event selling General (₹250), and two hidden types: Speaker
+    (free) and Staff (₹100)."""
+    types = await set_types(client, shop, shop.paid, [
+        {"name": "General", "price": 250}, {"name": "Speaker", "price": 0, "is_hidden": True},
+        {"name": "Staff", "price": 100, "is_hidden": True},
+    ])
+    return SimpleNamespace(types=types, general=types["General"]["id"], speaker=types["Speaker"]["id"], staff=types["Staff"]["id"])
+
+
+def _public(client, event, **params):
+    return client.get(f"{API}/events/{event.id}/ticket-types", params=params)
+
+
+async def test_the_dashboard_lists_each_types_link_and_a_hidden_types_carries_its_key(client, session, shop, comp):
+    from app.api.ticketing import hidden
+
+    general, speaker = comp.types["General"], comp.types["Speaker"]
+    assert general["link"] == f"https://myotherapp.in/events/{shop.paid.slug}?ticket_type={comp.general}"
+    assert speaker["link"].startswith(f"https://myotherapp.in/events/{shop.paid.slug}?ticket_type={comp.speaker}&ticket_key=")
+    key = _key_of(speaker)
+    assert len(key) == hidden.KEY_LENGTH and hidden.key_ok(shop.paid.id, comp.speaker, key)
+    # One type's key is no other's, nor another event's.
+    assert key != _key_of(comp.types["Staff"])
+    assert not hidden.key_ok(shop.paid.id, comp.staff, key) and not hidden.key_ok(shop.free.id, comp.speaker, key)
+    # Nor is an emailed link's token for the same words a key (a key of its own).
+    from app.core.mail import links
+
+    assert not hidden.key_ok(shop.paid.id, comp.speaker, links.sign(f"ticket-type:{shop.paid.id}:{comp.speaker}")[: hidden.KEY_LENGTH])
+    # The same list again (and the event form's save) gives the same links.
+    listed = (await client.get(f"{API}/events/{shop.paid.id}/ticketing/types", headers=shop.h)).json()["types"]
+    assert {t["name"]: t["link"] for t in listed} == {n: t["link"] for n, t in comp.types.items()}
+
+
+def test_a_hidden_types_key_is_never_logged():
+    from app.core import redact
+
+    line = "GET /api/v1/events/7/ticket-types?ticket_type=14&ticket_key=3f9c0a1b2c3d4e5f60718293&x=1 HTTP/1.1"
+    assert redact.query(line) == "GET /api/v1/events/7/ticket-types?ticket_type=14&ticket_key=[Filtered]&x=1 HTTP/1.1"
+
+
+async def test_door_staff_get_no_links(client, session, shop, comp):
+    from tests.test_door_privacy import _member_header
+
+    door = await _member_header(session, shop.owner, shop.club, "door")
+    editor = await _member_header(session, shop.owner, shop.club, "editor")
+    url = f"{API}/events/{shop.paid.id}/ticketing/types"
+    assert {t["link"] for t in (await client.get(url, headers=door)).json()["types"]} == {None}
+    assert all(t["link"] for t in (await client.get(url, headers=editor)).json()["types"])
+
+
+async def test_a_hidden_type_is_listed_only_with_its_key(client, session, shop, comp):
+    key = _key_of(comp.types["Speaker"])
+    names = lambda r: [t["name"] for t in r.json()["types"]]  # noqa: E731
+    assert names(await _public(client, shop.paid)) == ["General"]
+    # Named, but without its key, with a wrong one or another type's: left out.
+    for params in ({}, {"ticket_key": "0" * 24}, {"ticket_key": _key_of(comp.types["Staff"])}, {"ticket_key": key.upper() + "x"}):
+        assert names(await _public(client, shop.paid, ticket_type=comp.speaker, **params)) == ["General"], params
+    assert names(await _public(client, shop.paid, ticket_type=comp.speaker, ticket_key=key)) == ["General", "Speaker"]
+    # The event's page never lists it.
+    info = (await client.get(f"{API}/events/info/{shop.paid.id}")).json()
+    assert [t["name"] for t in info["ticketing"]["types"]] == ["General"]
+
+
+async def test_a_hidden_type_is_sold_only_with_its_key(client, session, shop, comp):
+    key = _key_of(comp.types["Speaker"])
+    for extra in ({}, {"ticket_key": "f" * 24}, {"ticket_key": _key_of(comp.types["Staff"])}):
+        r = await register(client, shop.paid, ticket_type_id=comp.speaker, **extra)
+        assert r.status_code == 422 and r.json()["error_code"] == "TICKET_TYPE_NOT_FOUND", extra
+        # Refused as an id that isn't the event's: nothing says the type is there.
+        assert r.json()["errors"] == {"ticket_type_id": "Not a ticket type of this event."}
+    assert await _taken(session, comp.speaker) == 0
+    ok = await register(client, shop.paid, ticket_type_id=comp.speaker, ticket_key=key)
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["ticket_type"]["name"] == "Speaker" and (ok.json()["pay_amount"], ok.json()["is_paid"]) == (0, True)
+    # A shown type needs no key, and a key sent with one changes nothing.
+    assert (await register(client, shop.paid, ticket_type_id=comp.general)).json()["pay_amount"] == 250.0
+    assert (await register(client, shop.paid, ticket_type_id=comp.general, ticket_key=key)).json()["pay_amount"] == 250.0
+
+
+async def test_a_code_is_checked_for_a_hidden_type_only_with_its_key(client, session, shop, comp):
+    await make_code(client, shop, code="CREW10", kind="amount", value=10)
+    url = f"{API}/events/{shop.paid.id}/discount-codes/check"
+    r = await client.post(url, json={"code": "CREW10", "ticket_type_id": comp.staff})
+    assert r.status_code == 422 and r.json()["error_code"] == "TICKET_TYPE_NOT_FOUND"
+    r = await client.post(url, json={"code": "CREW10", "ticket_type_id": comp.staff, "ticket_key": _key_of(comp.types["Staff"])})
+    assert r.status_code == 200 and (r.json()["ticket_type_id"], r.json()["amount"]) == (comp.staff, 90.0)
+    # The claim page, for the type a standing offer is for: its token instead of a key.
+    from app.api.ticketing.models import OFFERED, WaitlistEntries
+
+    session.add(WaitlistEntries(
+        event_id=shop.paid.id, ticket_type_id=comp.staff, full_name="Offered Crew", email="offered-crew@example.com",
+        status=OFFERED, offer_token="offer-for-staff", offered_at=NOW, offer_expires_at=datetime.now(timezone.utc) + timedelta(hours=2),
+    ))
+    await session.commit()
+    r = await client.post(url, json={"code": "CREW10", "ticket_type_id": comp.staff, "offer_token": "offer-for-staff"})
+    assert r.status_code == 200 and r.json()["amount"] == 90.0
+    for token, type_id in (("not-an-offer", comp.staff), ("offer-for-staff", comp.speaker)):
+        r = await client.post(url, json={"code": "CREW10", "ticket_type_id": type_id, "offer_token": token})
+        assert r.status_code == 422 and r.json()["error_code"] == "TICKET_TYPE_NOT_FOUND", token
+
+
+async def test_a_hidden_types_waiting_list_takes_its_key(client, session, shop, comp):
+    r = await client.put(f"{API}/events/{shop.paid.id}/ticketing/waitlist/settings", json={"enabled": True}, headers=shop.h)
+    assert r.status_code == 200, r.text
+    url = f"{API}/events/{shop.paid.id}/waitlist"
+    body = {"full_name": "Waiting Crew", "email": "waiting-crew@example.com", "ticket_type_id": comp.staff}
+    r = await client.post(url, json=body)
+    assert r.status_code == 422 and r.json()["error_code"] == "TICKET_TYPE_NOT_FOUND"
+    # With the key it is the type's line: not needed while it has room.
+    r = await client.post(url, json={**body, "ticket_key": _key_of(comp.types["Staff"])})
+    assert r.status_code == 409 and r.json()["error_code"] == "WAITLIST_NOT_NEEDED"
+
+
+async def test_a_request_for_a_hidden_type_takes_its_key_and_the_club_confirms_it_without(client, session, shop, comp):
+    from app.api.approvals.models import RegistrationRequests
+
+    await session.execute(update(Events).where(Events.id == shop.paid.id).values(requires_approval=True))
+    await session.commit()
+    body = {"full_name": "Speaker Asks", "email": "speaker-asks@example.com", "accepts_approval": True, "ticket_type_id": comp.speaker}
+    url = f"{API}/events/registration/{shop.paid.id}/register"
+    r = await client.post(url, json=body)
+    assert r.status_code == 422 and r.json()["error_code"] == "TICKET_TYPE_NOT_FOUND"
+    assert await session.scalar(select(RegistrationRequests.id).where(RegistrationRequests.event_id == shop.paid.id)) is None
+    asked = await client.post(url, json={**body, "ticket_key": _key_of(comp.types["Speaker"])})
+    assert asked.status_code == 200, asked.text
+    request_id = asked.json()["approval"]["id"]
+    # The club confirms it: no key asked of the club.
+    r = await client.post(f"{API}/events/registration/{shop.paid.id}/requests/approve", json={"ids": [request_id]}, headers=shop.h)
+    assert r.status_code == 200, r.text
+    assert r.json()["skipped"] == [] and r.json()["approved"][0]["registration_id"]
+    reg = await _reg(session, r.json()["approved"][0]["registration_id"])
+    assert (reg.ticket_type_id, reg.is_paid) == (comp.speaker, True)
+
+
+async def test_the_organiser_an_offer_and_a_registration_back_to_pay_need_no_key(client, session, shop, comp, make_user, mint_token):
+    from app.api.ticketing import quote as quote_mod
+    from app.response import CustomHTTPException
+
+    event = await session.get(Events, shop.paid.id, populate_existing=True)
+    with pytest.raises(CustomHTTPException) as refused:
+        await quote_mod.quote(session, event, ticket_type_id=comp.staff, lock=False, early_capacity=False)
+    assert refused.value.error_code == "TICKET_TYPE_NOT_FOUND"
+    # The organiser (adding a guest, an import, the door, the partner API), and the club confirming a request.
+    for kw in ({"organiser": True}, {"any_type": True}):
+        q = await quote_mod.quote(session, event, ticket_type_id=comp.staff, lock=False, early_capacity=False, **kw)
+        assert q.ticket_type.id == comp.staff, kw
+    # A waiting-list offer of it (its claim link is the proof).
+    q = await quote_mod.quote(session, event, offer=SimpleNamespace(ticket_type_id=comp.staff), lock=False, early_capacity=False)
+    assert q.ticket_type.id == comp.staff and q.amount == Decimal("100.00")
+
+    # Back to pay for its own hidden type, without the key: priced again.
+    user = await make_user(email="crew-returning@example.com")
+    await session.commit()
+    h = auth_header(await mint_token(user))
+    body = {"full_name": "Crew Returning", "email": "crew-returning@example.com"}
+    url = f"{API}/events/registration/{shop.paid.id}/register"
+    first = (await client.post(url, json={**body, "ticket_type_id": comp.staff, "ticket_key": _key_of(comp.types["Staff"])}, headers=h)).json()
+    assert first["pay_amount"] == 100.0
+    await make_code(client, shop, code="CREWBACK", kind="amount", value=30)
+    for extra in ({}, {"ticket_type_id": comp.staff}):
+        again = await client.post(url, json={**body, "discount_code": "CREWBACK", **extra}, headers=h)
+        assert again.status_code == 200 and again.json()["pay_amount"] == 70.0, (extra, again.text)
+    # Another hidden type is not its own: that one takes its key.
+    other = await client.post(url, json={**body, "ticket_type_id": comp.speaker}, headers=h)
+    assert other.status_code == 422 and other.json()["error_code"] == "TICKET_TYPE_NOT_FOUND"
+    assert (await _reg(session, first["event_registration_id"])).ticket_type_id == comp.staff
+
+
+async def test_an_event_with_one_type_sells_it_hidden_or_not(client, session, shop):
+    """Its one type is the event's own ticket, as it always was."""
+    only = (await set_types(client, shop, shop.free, [{"name": "Only", "is_hidden": True}]))["Only"]
+    assert only["is_hidden"] is True
+    for extra in ({}, {"ticket_type_id": only["id"]}):
+        r = await register(client, shop.free, **extra)
+        assert r.status_code == 200, (extra, r.text)
+
+
+async def test_with_the_setting_off_a_link_that_names_a_hidden_type_is_enough(client, session, shop, comp, monkeypatch):
+    monkeypatch.setattr(settings, "HIDDEN_TYPES_REQUIRE_TOKEN", False)
+    page = (await _public(client, shop.paid, ticket_type=comp.speaker)).json()
+    assert [t["name"] for t in page["types"]] == ["General", "Speaker"]
+    # Not listed unless named, as before.
+    assert [t["name"] for t in (await _public(client, shop.paid)).json()["types"]] == ["General"]
+    r = await register(client, shop.paid, ticket_type_id=comp.speaker)
+    assert r.status_code == 200 and r.json()["ticket_type"]["name"] == "Speaker"
+    await make_code(client, shop, code="OLDWAY", kind="amount", value=10)
+    check = await client.post(f"{API}/events/{shop.paid.id}/discount-codes/check", json={"code": "OLDWAY", "ticket_type_id": comp.staff})
+    assert check.status_code == 200 and check.json()["amount"] == 90.0
+    # The keys are still made, so links can be sent again before it is switched on.
+    listed = (await client.get(f"{API}/events/{shop.paid.id}/ticketing/types", headers=shop.h)).json()["types"]
+    assert "ticket_key=" in next(t["link"] for t in listed if t["name"] == "Speaker")
+    # A key still works with it off.
+    r = await register(client, shop.paid, ticket_type_id=comp.speaker, ticket_key=_key_of(comp.types["Speaker"]))
+    assert r.status_code == 200
 
 
 # ─── The amount is the server's ─────────────────────────────────────────

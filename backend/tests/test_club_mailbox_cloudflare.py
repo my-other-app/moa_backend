@@ -61,17 +61,25 @@ def _cloudflare_on(monkeypatch):
 
 
 def signed(raw: bytes, to: str, sender: str = "ananya@example.org", auth: str = CF_PASS, *, key: str = KEY,
-           at: float | None = None, size: int | None = None) -> dict:
-    """The headers the Worker sends: each value percent-encoded, then signed."""
+           at: float | None = None, size: int | None = None, v1: bool = True, v2: bool = False) -> dict:
+    """The headers the Worker sends: each value percent-encoded, then signed
+    (v1: the Worker from before; v2: the one that covers the body too)."""
     ts = str(int(at if at is not None else time.time()))
     to_q, from_q, auth_q = quote(to, safe="@"), quote(sender, safe="@"), quote(auth, safe="")
     size_s = str(len(raw) if size is None else size)
-    text = "\n".join(("v1", ts, to_q, from_q, size_s, auth_q))
-    return {
+    headers = {
         "X-Moa-Timestamp": ts, "X-Moa-Envelope-To": to_q, "X-Moa-Envelope-From": from_q, "X-Moa-Size": size_s,
-        "X-Moa-Auth-Results": auth_q, "X-Moa-Signature": hmac.new(key.encode(), text.encode(), hashlib.sha256).hexdigest(),
-        "Content-Type": "message/rfc822",
+        "X-Moa-Auth-Results": auth_q, "Content-Type": "message/rfc822",
     }
+    if v1:
+        text = "\n".join(("v1", ts, to_q, from_q, size_s, auth_q))
+        headers["X-Moa-Signature"] = hmac.new(key.encode(), text.encode(), hashlib.sha256).hexdigest()
+    if v2:
+        body = hashlib.sha256(raw).hexdigest()
+        text = "\n".join(("v2", ts, to_q, from_q, size_s, auth_q, body))
+        headers["X-Moa-Body-Sha256"] = body
+        headers["X-Moa-Signature-V2"] = hmac.new(key.encode(), text.encode(), hashlib.sha256).hexdigest()
+    return headers
 
 
 async def post(client, raw: bytes, to: str = f"yukthi@{DOMAIN}", **kw):
@@ -96,6 +104,58 @@ async def test_unsigned_stale_or_another_keys_delivery_is_refused(client, sessio
     # A body that isn't the signed size.
     assert (await client.post(HOOK, content=raw + b"x", headers=signed(raw, f"yukthi@{DOMAIN}"))).status_code == 400
     assert await threads_of(session, world.club.id) == []
+
+
+async def test_the_body_covering_signature_and_the_older_one(client, session, world, aws, monkeypatch, caplog):
+    from app.api.club_mailbox import router as mailbox_router
+
+    monkeypatch.setattr(mailbox_router, "_signatures_seen", set())
+    await set_up(client, world)
+    to = f"yukthi@{DOMAIN}"
+    raw = mime(to=to, subject="Parking", message_id="<v2@example.org>")
+    # The Worker from now on sends both; the body-covering one is checked.
+    with caplog.at_level("INFO", logger="app.api.club_mailbox.router"):
+        r = await client.post(HOOK, content=raw, headers=signed(raw, to, v2=True))
+    assert r.status_code == 200 and r.json()["kept"] == 1
+    assert "deliveries arrive signed v2" in caplog.text
+    # Another body of the same size under the same signatures: refused, nothing kept.
+    other = mime(to=to, subject="Parkink", message_id="<v3@example.org>")
+    assert len(other) == len(raw)
+    headers = signed(raw, to, v2=True)
+    r = await client.post(HOOK, content=other, headers=headers)
+    assert r.status_code == 400 and r.json()["reason"] == "body"
+    # A v2 that doesn't check out isn't saved by a good v1 beside it.
+    headers = signed(other, to, v2=True)
+    headers["X-Moa-Signature-V2"] = "0" * 64
+    assert (await client.post(HOOK, content=other, headers=headers)).json()["reason"] == "signature"
+    headers = signed(other, to, v2=True)
+    headers["X-Moa-Body-Sha256"] = "not-a-hash"
+    assert (await client.post(HOOK, content=other, headers=headers)).status_code == 401
+    # A header with any bytes in it is a refusal, never an error.
+    headers = signed(other, to, v2=True)
+    headers["X-Moa-Signature-V2"] = "é".encode("latin-1") * 64
+    assert (await client.post(HOOK, content=other, headers=headers)).status_code == 401
+    assert len(await messages_of(session, world.club.id)) == 1
+    # The Worker from before (v1 only) is taken while the setting is off...
+    r = await client.post(HOOK, content=other, headers=signed(other, to))
+    assert r.status_code == 200 and r.json()["kept"] == 1
+    # ... and refused once it is on: the sender's server tries again later.
+    monkeypatch.setattr(settings, "MAILBOX_HOOK_REQUIRE_BODY_SIGNATURE", True)
+    third = mime(to=to, subject="Lunch", message_id="<v4@example.org>")
+    r = await client.post(HOOK, content=third, headers=signed(third, to))
+    assert r.status_code == 401 and r.json()["reason"] == "body_unsigned"
+    r = await client.post(HOOK, content=third, headers=signed(third, to, v2=True, v1=False))
+    assert r.status_code == 200 and r.json()["kept"] == 1
+    assert len(await messages_of(session, world.club.id)) == 3
+
+
+def test_the_signatures_match_the_workers_vectors():
+    # The same vectors as infra/cloudflare/club-mail/test/worker.test.js in the app repo.
+    fields = ("1700000000", "Yukthi%2BEvents%40myotherapp.in", "ananya%40example.org", "1234", "mx.cloudflare.net%3B%20dmarc%3Dpass")
+    assert cloudflare.sign(KEY, *fields) == "a56d9288597c17eed940afd1c06f08f13113a0785a9592fed6d1f9798aa677aa"
+    body = cloudflare.body_sha256(b"hello")
+    assert body == "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+    assert cloudflare.sign_v2(KEY, *fields, body) == "4a917b041982b97a02e938d1083a7a1ef94e304665a01d9993126dcfe9dc62cb"
 
 
 async def test_without_the_key_the_hook_says_try_later(client, world, monkeypatch):

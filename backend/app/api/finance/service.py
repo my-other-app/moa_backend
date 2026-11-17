@@ -18,7 +18,6 @@ event. scripts/ledger_compare.py runs both and expects the same numbers.
 """
 from __future__ import annotations
 
-import csv
 import io
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -34,7 +33,7 @@ from app.api.finance.schemas import CATEGORIES, EXPENSE_CATEGORIES, INCOME_CATEG
 from app.api.ledger import reads as ledger_reads
 from app.api.payments.models import PaymentLogs, PaymentOrders, PaymentStatus
 from app.api.store.models import EventStoreOrders
-from app.core.utils import spreadsheet
+from app.core.utils import csv_safe, spreadsheet
 from app.core.utils.spreadsheet import Bold
 from app.core.utils.time_buckets import utc_trunc
 from app.response import CustomHTTPException
@@ -569,8 +568,9 @@ async def delete_expense(session, x: ClubExpenses) -> None:
 
 
 def _cell(v):
-    """Spreadsheets run a cell that starts like a formula; a name never should."""
-    return f"'{v}" if isinstance(v, str) and v[:1] in ("=", "+", "-", "@") else v
+    """Spreadsheets run a cell that starts like a formula; a name never should
+    (the CSV writer makes every text cell safe as well)."""
+    return csv_safe.cell(v)
 
 
 def _plain(v):
@@ -584,7 +584,7 @@ def _day(dt: datetime) -> date:
 
 def _writer():
     buf = io.StringIO()
-    return buf, csv.writer(buf, lineterminator="\n")
+    return buf, csv_safe.writer(buf, lineterminator="\n")
 
 
 def _totals_rows(f: dict):

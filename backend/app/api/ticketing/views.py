@@ -8,7 +8,7 @@ from typing import Optional
 from sqlalchemy import and_, func, or_, select
 
 from app.api.events.models import EventRegistrationsLink
-from app.api.ticketing import places, waitlist
+from app.api.ticketing import hidden, places, waitlist
 from app.api.ticketing import types as types_mod
 from app.api.ticketing.models import DEFAULT_OFFER_HOURS, DiscountCodes
 from app.core import money
@@ -32,10 +32,13 @@ def type_status(event, ttype, left: Optional[int], now: datetime) -> str:
     return "on_sale"
 
 
-async def public(session, event, *, include_hidden: Optional[int] = None, viewer=None) -> dict:
+async def public(
+    session, event, *, include_hidden: Optional[int] = None, ticket_key: Optional[str] = None, viewer=None,
+) -> dict:
     """The event page's tickets. Hidden types are left out, but for the one
-    a link names (`include_hidden`). Makes the event's default type when it
-    has none (the caller commits).
+    a link names (`include_hidden`) with its key (`ticket_key`,
+    ticketing.hidden). Makes the event's default type when it has none (the
+    caller commits).
 
     `event` is as its caller read it in this request (both pages read it just
     before): its counts are not read again, and the types are read once, as
@@ -48,7 +51,7 @@ async def public(session, event, *, include_hidden: Optional[int] = None, viewer
     settings_row = await waitlist.settings_for(session, event.id) if wl_on else None
     shown = []
     for t in types:
-        if t.is_hidden and t.id != include_hidden:
+        if t.is_hidden and (t.id != include_hidden or not hidden.may_sell(t, ticket_key)):
             continue
         left = room.for_type(t.id)
         status = type_status(event, t, left, now)
@@ -110,8 +113,10 @@ async def entry_public(session, entry) -> dict:
     }
 
 
-async def club_types(session, event) -> dict:
-    """The editor's list: every live type, hidden ones too, with what sold."""
+async def club_types(session, event, *, links: bool = True) -> dict:
+    """The editor's list: every live type, hidden ones too, with what sold,
+    and each one's link to the event page (a hidden type's with its key,
+    ticketing.hidden). `links=False` (door staff) leaves the links out."""
     from app.api.subscriptions import gates
 
     await types_mod.ensure(session, event)
@@ -134,6 +139,7 @@ async def club_types(session, event) -> dict:
                 "offered": lines_.get(t.id, places.Line()).offered - lines_.get(t.id, places.Line()).held,
                 "held": lines_.get(t.id, places.Line()).held,
                 "has_registrations": held.get(t.id, False),
+                "link": hidden.link_for(event, t) if links else None,
             }
             for t in types
         ],

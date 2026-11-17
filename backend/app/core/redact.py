@@ -19,7 +19,12 @@
   is enough to answer as that player: `key`, `player` and, beside them,
   `last_event_id` -- and any `...token...` parameter -- are written as
   [Filtered] wherever a URL is logged (the access line, JSON or not, and
-  Sentry's events through observability.scrub_event).
+  Sentry's events through observability.scrub_event). So are the signed
+  parameters of emailed links (`s`, `k`, `t`, `sig`), the secret segment of
+  a link's path (an invite, a request, an offer, a cancel link...), and a
+  ticket id, wherever it appears in a logged path.
+- A hidden ticket type's link carries the key that sells it
+  (`ticket_key`, app/api/ticketing/hidden.py): filtered the same way.
 """
 import logging
 import re
@@ -28,9 +33,25 @@ import traceback
 _CLUB_WEBHOOK = re.compile(r"(/payments/webhook/club/|/hooks/whatsapp/club/)([A-Za-z0-9_-]{0,6})[A-Za-z0-9_-]*")
 _SENSITIVE_BODIES = re.compile(r"^/api/v1/(?:clubs/(?:payments/gateway|ai/key|whatsapp|mailbox)|hooks/(?:whatsapp/club|mailbox)|admin/mail)(?:/|$)")
 #: A query parameter whose value must not be logged, and its value (up to
-#: the next parameter, fragment, space or quote).
-SECRET_QUERY = re.compile(r"(?i)([?&;](?:key|player|last_event_id|\w*token\w*)=)[^&;#\s\"']*")
+#: the next parameter, fragment, space or quote). Besides the live room's:
+#: the short signed parameters of the links people get -- `s` (a ticket or
+#: certificate file), `k` (the missing-answers and feedback pages), `t` (the
+#: recap unsubscribe and developer docs links) and `sig` (a partner's QR
+#: image).
+SECRET_QUERY = re.compile(r"(?i)([?&;](?:key|ticket_key|player|last_event_id|s|k|t|sig|\w*token\w*)=)[^&;#\s\"']*")
 FILTERED = "[Filtered]"
+#: The routes whose next path segment is the link's own secret: a club
+#: invite, an assistant's pending action, a registration request, a speaker
+#: claim, a support survey, a ticket's cancel link, a waiting-list offer, a
+#: profile's QR code, a data deletion's status code. ("mine" is a route.)
+_PATH_TOKEN = re.compile(
+    r"(/(?:clubs/access/invite|clubs/pending-actions|registration-requests|speakers/claim|support/survey"
+    r"|tickets/cancel|waitlist/offers|profiles/by-code|social/data-deletion)/)(?!mine(?:[/?#\s\"']|$))[^/?#\s\"']+"
+)
+#: A ticket id (MOA-XXXXX-XXXXX, and the older MOA-<hex time>-XXXXX): what
+#: the door accepts, in the ticket, certificate and file routes' paths.
+TICKET_ID = re.compile(r"\bMOA-[0-9A-Z]{4,16}-[0-9A-Z]{4,6}\b")
+TICKET = "[ticket]"
 
 
 def query(value: str) -> str:
@@ -51,10 +72,16 @@ _OAUTH_CALLBACK = {
 }
 
 
+def path_tokens(value: str) -> str:
+    """`value` with a link's secret path segment filtered (an invite, an offer, a cancel link...)."""
+    return _PATH_TOKEN.sub(lambda m: m.group(1) + FILTERED, value)
+
+
 def path(value: str) -> str:
     value = _INBOX_SEARCH.sub(lambda m: m.group(1) + FILTERED, value)
     for rx in _OAUTH_CALLBACK.values():
         value = rx.sub(lambda m: m.group(1) + FILTERED, value)
+    value = TICKET_ID.sub(TICKET, path_tokens(value))
     return query(_CLUB_WEBHOOK.sub(lambda m: f"{m.group(1)}{m.group(2)}…", value))
 
 

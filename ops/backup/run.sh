@@ -4,6 +4,7 @@
 #
 #   sudo /bin/bash /var/www/myotherapp-production/ops/backup/run.sh backup
 #   sudo /bin/bash /var/www/myotherapp-production/ops/backup/run.sh drill --standalone
+#   sudo /bin/bash /srv/moa/ops/backup/run.sh media-sync [--dry-run]
 #
 # backup: scripts/backup.py -- pg_dump (compressed custom format) into
 #   /var/backups/myotherapp, uploaded to S3 with server-side encryption
@@ -12,7 +13,12 @@
 #   runs ops/backup/alert.sh, which alerts once whatever went wrong --
 #   including a container that is not running, which the script cannot see.
 # drill: scripts/restore_drill.py -- the newest dump in S3 restored into a
-#   scratch database, checked, and dropped. Extra arguments go to it.
+#   scratch database, checked, and dropped. Extra arguments go to it. On
+#   the Oracle box it runs in a one-off `migrate` container, as the
+#   database's owner (it creates and drops that scratch database), whatever
+#   role the API uses.
+# media-sync: scripts/media_sync.py -- the media bucket copied to the
+#   off-site backup bucket (copy only; off until APP_MEDIA_SYNC=true).
 # deliver: the ops bot (ops/server/ops-bot, /srv/moa/ops-bot on the box)
 #   encrypts the newest dump with age and sends it to the owner's Telegram.
 #   The unit runs it after `backup` succeeded (ExecStartPost=). No bot here,
@@ -23,6 +29,8 @@
 #                     (default /var/www/myotherapp-production)
 #   MOA_COMPOSE_FILE  default docker-compose.prod.yml (staging: docker-compose.yml)
 #   MOA_SERVICE       the backend's compose service (default backend)
+# On the Oracle box ($MOA_PROJECT_DIR/dc exists) docker compose is that
+# wrapper, which also loads images.env: the pinned images, never :latest.
 #
 # Never prints a credential: the scripts scrub what they print, and nothing
 # here reads a secret.
@@ -48,7 +56,11 @@ if [ "$what" = "deliver" ]; then
   exit 0
 fi
 
-if command -v docker-compose > /dev/null 2>&1; then
+OWNER_TOOL=no
+if [ -x "$PROJECT_DIR/dc" ]; then
+  DC=("$PROJECT_DIR/dc")
+  OWNER_TOOL=yes
+elif command -v docker-compose > /dev/null 2>&1; then
   DC=(docker-compose -f "$COMPOSE_FILE")
 elif docker compose version > /dev/null 2>&1; then
   DC=(docker compose -f "$COMPOSE_FILE")
@@ -64,10 +76,17 @@ case "$what" in
     ;;
   drill)
     echo "run.sh: restore drill starting $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    if [ "$OWNER_TOOL" = "yes" ] && "${DC[@]}" --profile tools config --services < /dev/null 2> /dev/null | grep -qx migrate; then
+      exec "${DC[@]}" run --rm --no-deps -T migrate python scripts/restore_drill.py "$@" < /dev/null
+    fi
     exec "${DC[@]}" exec -T "$SERVICE" python scripts/restore_drill.py "$@" < /dev/null
     ;;
+  media-sync)
+    echo "run.sh: media sync starting $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    exec "${DC[@]}" exec -T "$SERVICE" python scripts/media_sync.py "$@" < /dev/null
+    ;;
   *)
-    echo "usage: run.sh backup [--keep-local N] | drill [restore_drill.py arguments] | deliver" >&2
+    echo "usage: run.sh backup [--keep-local N] | drill [restore_drill.py arguments] | media-sync [--dry-run] | deliver" >&2
     exit 64
     ;;
 esac

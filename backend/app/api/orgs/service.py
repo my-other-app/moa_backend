@@ -1,8 +1,10 @@
+import asyncio
 import io
 import logging
 from sqlalchemy import func, literal_column, select, update
 from sqlalchemy.exc import IntegrityError
 from app.response import CustomHTTPException
+from app.core.utils import excel
 from app.api.orgs import search
 from app.api.orgs.models import Organizations, OrgTypes
 from app.api.clubs.models import Clubs, ClubUsersLink
@@ -123,13 +125,10 @@ async def import_organizations(file: UploadFile, session: AsyncSession):
     if not file.filename.endswith(('.csv', '.xlsx')):
         raise CustomHTTPException(status_code=400, message="Only CSV and XLSX files are supported")
         
-    content = await file.read()
+    # Capped, and parsed on a worker thread (app/core/utils/excel.py).
+    content = await excel.read_upload(file)
     try:
-        if file.filename.endswith('.csv'):
-            df = pd.read_csv(io.BytesIO(content))
-        else:
-            df = pd.read_excel(io.BytesIO(content))
-            
+        df = await asyncio.to_thread(excel.parse, content, file.filename)
         df = df.fillna('')
         
         imported_count = 0
@@ -150,6 +149,8 @@ async def import_organizations(file: UploadFile, session: AsyncSession):
             
         await session.commit()
         return {"message": f"Successfully imported {imported_count} organizations"}
+    except CustomHTTPException:
+        raise
     except Exception as e:
         raise CustomHTTPException(status_code=400, message=f"Failed to parse file: {str(e)}")
 

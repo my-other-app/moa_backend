@@ -158,6 +158,8 @@ def cfg(tmp_path) -> Config:
         backup_dir=tmp_path / "backups",
         work_dir=tmp_path / "work",
         dc="/srv/moa/dc",
+        # The backup-age alert has tests of its own (test_watcher.py).
+        backup_max_age_hours=0,
     )
 
 

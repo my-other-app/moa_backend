@@ -465,6 +465,8 @@ the hash of what you set.
 | `POSTGRES_PASSWORD` | you | see below: the database must change first |
 | `APP_SECRET_KEY` | `openssl rand -hex 32` | signs every token: everyone is signed out. While `APP_LINK_SIGNING_KEYS` is unset it also signs the links in emails, and rotating it breaks every one already sent: set the link keys first (below) |
 | `APP_LINK_SIGNING_KEYS` | `openssl rand -hex 32` (each) | a list: the new key **first**, the old kept after it for 90 days; see below |
+| `APP_SIGNING_KEYS` | `openssl rand -hex 32` (each) | signs sign-in tokens and short signed payloads (kiosk QR, assistant consent, partner QR images) once set; a list, the new key **first**. `APP_SECRET_KEY` always verifies too, so setting it signs nobody out. Once it has been set for longer than `APP_REFRESH_TOKEN_EXPIRE_DAYS` (and 7 days, the partner QR images), rotating `APP_SECRET_KEY` no longer signs anyone out (it still resets authenticator recovery codes and the codes being mailed) |
+| `APP_TOTP_KEYS_SECRET` | as `APP_PAYMENT_KEYS_SECRET` | seals admin two-factor secrets (unset: `APP_PAYMENT_KEYS_SECRET` does). Secrets sealed with the payment key keep opening while that key is set, and move to this one at the admin's next sign-in with a code; keep the payment key until every admin has signed in once |
 | `APP_RAZORPAY_KEY_ID` / `_SECRET` | Razorpay dashboard -> API keys | regenerate, update, recreate |
 | `APP_RAZORPAY_WEBHOOK_SECRET` | Razorpay dashboard -> Webhooks | set the same value in both, then recreate at once: webhooks fail in between (Razorpay retries) |
 | `APP_PAYMENT_KEYS_SECRET` | `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` | a comma-separated list: put the new key **first**, keep the old after it; drop the old once every saved club key has been re-saved |
@@ -2837,9 +2839,22 @@ sender -> MX myotherapp.in (route1/2/3.mx.cloudflare.net) -> Email Routing
 - **The signature** (`app/api/club_mailbox/cloudflare.py`): HMAC-SHA256 with
   `APP_MAILBOX_HOOK_SECRET` (the Worker's `MAILBOX_HOOK_SECRET` secret, the
   same value) over `v1`, the time, the envelope's recipient and sender, the
-  size and Cloudflare's Authentication-Results, as the Worker sent them. Older
-  than five minutes, another key's, or a body that isn't the signed size: 401
-  or 400, nothing read. Without the setting: 503.
+  size and Cloudflare's Authentication-Results, as the Worker sent them
+  (`X-Moa-Signature`). The Worker also sends `v2` (`X-Moa-Signature-V2`): the
+  same values plus the body's SHA-256 (`X-Moa-Body-Sha256`), so the body is
+  covered too; when it is there, it is the one checked. Older than five
+  minutes, another key's, a body that isn't the signed size, or (v2) not the
+  signed body: 401 or 400, nothing kept. Without the setting: 503.
+  - `APP_MAILBOX_HOOK_REQUIRE_BODY_SIGNATURE` (default `false`): on, a
+    delivery signed only with v1 is refused (401 `body_unsigned`) and the
+    sender's server tries again later.
+  - **The order, so no mail is refused on the way:** (1) deploy this API
+    (it takes v1 and v2); (2) deploy the Worker (`./deploy.sh`; it sends
+    both); send a test mail and check the backend's log says once
+    `deliveries arrive signed v2`; (3) set
+    `APP_MAILBOX_HOOK_REQUIRE_BODY_SIGNATURE=true` in `.env` and recreate the
+    backend. Rolling back: set it to `false` (or leave the old Worker) and
+    everything is as before.
 - **Refused in the session, not bounced.** No such address, a closed mailbox,
   mailboxes off, too large, unreadable: the API answers `{"action":
   "reject", "text"}` and the Worker calls `setReject(text)`: the *sender's own
@@ -2962,9 +2977,10 @@ suppression list, through the platform's own SES hook (step 8 below).
 - **The rule:** the letters and digits of the club's name (accents dropped,
   NFKD to ASCII), lower case, cut to 30: "GDG Cloud Trivandrum" ->
   `gdgcloudtrivandrum`. Fewer than three left (a name only in Malayalam,
-  say): `club<id>`. Taken (by a club's current address, or an old one still
-  forwarding) or reserved: `gdgcloudtrivandrum2`, `...3`, each cut so it
-  fits 30. "Support" gets `support2`.
+  say), or a name that reads as the platform ("Support", "MyOtherApp Fans"):
+  `club<id>`. Taken (any address a club ever had, or the address of an
+  account or a team member on the domain) or reserved: `gdgcloudtrivandrum2`,
+  `...3`, each cut so it fits 30. "Info" gets `info2`.
 - **When:** as the club is created (`app/api/clubs/service.py`
   `create_club`: the public application, the admin's "create club", the
   partner API), **whatever its plan and whatever `APP_CLUB_MAILBOX` says**
@@ -3016,10 +3032,26 @@ digit, no two dots or hyphens in a row, lower case. Reserved for no club:
 admin, administrator, postmaster, abuse, support, info, noreply, no-reply,
 billing, security, hostmaster, webmaster, mailer-daemon, root and the others in
 `app/api/club_mailbox/handles.py` (422 `HANDLE_RESERVED`). Unique across every
-club and every old address still forwarding (409 `HANDLE_TAKEN`). The owner and
-admins change it **at most once a month** (429 `HANDLE_CHANGED_RECENTLY`,
-`errors.next_change_at`); the old address goes on delivering into the same
-mailbox for **90 days**, then the sweep lets it go and another club may take it.
+club, for good (409 `HANDLE_TAKEN`). The owner and admins change it **at most
+once a month** (429 `HANDLE_CHANGED_RECENTLY`, `errors.next_change_at`); the old
+address goes on delivering into the same mailbox for **90 days**, then receives
+nothing and stays the club's: no other club is ever given it (the club itself
+may take it back).
+
+A new or changed address (the club's, the admin's, the automatic one) must
+also:
+
+- not read as the platform: no `LOOKALIKE` word in it (myotherapp, support,
+  security, verif..., noreply, billing, payment, admin, postmaster, helpdesk,
+  password, refund, ...), dots, hyphens and look-alike digits aside
+  (`supp0rt`, `my-other-app`); "badminton" is fine. 422 `HANDLE_RESERVED`.
+- not be the address of an account or a team member on the domain
+  (`x@myotherapp.in`, `x+tag@myotherapp.in`), the club's own account aside.
+  409 `HANDLE_TAKEN`.
+
+Addresses clubs already have keep working as they are: these checks apply
+only when a handle is given. The "Sends as" name likewise refuses a new name
+that reads as the platform's ("MyOtherApp ...": 422 `DISPLAY_NAME_RESERVED`).
 
 ### Who sees what
 
@@ -3099,6 +3131,7 @@ never lapses: it is only reserved (above), and nobody is told anything.
 | `APP_CLUB_MAILBOX` | `false` | the switch: Mail in the dashboard, setting up, sending, receiving |
 | `APP_MAILBOX_DOMAIN` | `myotherapp.in` | the domain every address is on |
 | `APP_MAILBOX_HOOK_SECRET` | empty | the club-mail Worker's key (`openssl rand -hex 32`); the same value is the Worker's `MAILBOX_HOOK_SECRET` secret |
+| `APP_MAILBOX_HOOK_REQUIRE_BODY_SIGNATURE` | `false` | every Cloudflare delivery must carry the Worker's body-covering signature (v2); turn on only after the Worker that sends it is deployed |
 | `APP_MAILBOX_INBOUND_BUCKET` | empty | the private bucket the receipt rule writes to |
 | `APP_MAILBOX_SNS_TOPIC_ARN` | empty | the topic the rule tells; any other topic is refused |
 | `APP_MAILBOX_RECEIVING_REGION` | `ap-south-1` | where SES receives, and where the bucket is read |

@@ -66,6 +66,7 @@ from app.api.message_quota.models import (
 )
 from app.config import settings
 from app.response import CustomHTTPException
+from app.core.auth.compare import same
 
 logger = logging.getLogger(__name__)
 
@@ -474,7 +475,7 @@ def signature_ok(order_id: str, payment_id: str, signature: str) -> bool:
     expected = hmac.new(
         (settings.RAZORPAY_KEY_SECRET or "").encode(), f"{order_id}|{payment_id}".encode(), hashlib.sha256
     ).hexdigest()
-    return hmac.compare_digest(expected, (signature or "").strip())
+    return same((signature or "").strip(), expected)
 
 
 async def _locked(session, purchase_id: int) -> Optional[MessageCreditPurchases]:

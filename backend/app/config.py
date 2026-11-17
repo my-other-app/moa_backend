@@ -137,13 +137,24 @@ class AppConfig(BaseSettings):
     # BACKUP_S3_SECRET_KEY: a user that may put, list and read backups/ and
     # nothing else (no delete: the lifecycle rule expires them); unset, the
     # media bucket's S3_ACCESS_KEY and S3_SECRET_KEY.
+    # BACKUP_S3_ENDPOINT_URL: an S3-compatible store other than AWS (its
+    # https:// address, e.g. Backblaze B2 or Cloudflare R2), path-style;
+    # empty, AWS S3 as before. BACKUP_S3_SSE=none only for a store that
+    # encrypts at rest by itself and refuses the header.
     BACKUP_S3_BUCKET: str = ""
     BACKUP_S3_PREFIX: str = "backups/"
     BACKUP_S3_REGION: str = "ap-south-1"
+    BACKUP_S3_ENDPOINT_URL: str = ""
     BACKUP_S3_SSE: str = "AES256"
     BACKUP_S3_KMS_KEY_ID: str = ""
     BACKUP_S3_ACCESS_KEY: str = ""
     BACKUP_S3_SECRET_KEY: str = ""
+    # The media bucket copied off the box (scripts/media_sync.py, nightly
+    # from ops/backup when its timer is on): every object not yet in the
+    # backup bucket (above) under MEDIA_SYNC_PREFIX, copied, never deleted.
+    # Off unless MEDIA_SYNC is true and BACKUP_S3_BUCKET is set.
+    MEDIA_SYNC: bool = False
+    MEDIA_SYNC_PREFIX: str = "media/"
     # How many dumps scripts/backup.py leaves in BACKUP_DIR (the newest),
     # deleting older ones only after a good off-site upload. 0 keeps every one.
     BACKUP_KEEP_LOCAL: int = 0
@@ -165,8 +176,8 @@ class AppConfig(BaseSettings):
     S3_BASE_PATH: str = ""
     # A store of our own that speaks S3 (Garage on the production server),
     # for the media bucket only; all unset, AWS S3 as before. Off-site
-    # backups (BACKUP_S3_*), the club mailbox's inbound bucket (MAILBOX_*)
-    # and SES stay on AWS whatever these say.
+    # backups (BACKUP_S3_*, which have their own endpoint setting), the club
+    # mailbox's inbound bucket (MAILBOX_*) and SES do not follow these.
     #   S3_ENDPOINT_URL  where the API reaches the store: uploads, reads,
     #                    deletes, listings (e.g. http://media:3900 inside
     #                    Docker). Set, every media client is path-style SigV4.
@@ -184,7 +195,7 @@ class AppConfig(BaseSettings):
     S3_PUBLIC_URL: str = ""
     S3_REGION: str = ""
 
-    @field_validator("S3_ENDPOINT_URL", "S3_PUBLIC_URL", "S3_REGION")
+    @field_validator("S3_ENDPOINT_URL", "S3_PUBLIC_URL", "S3_REGION", "BACKUP_S3_ENDPOINT_URL")
     @classmethod
     def _trimmed(cls, value: str) -> str:
         """Without spaces, and an address without its trailing slash. Its
@@ -295,11 +306,17 @@ class AppConfig(BaseSettings):
     # (info@, support@, ...) are never a club's (club_mailbox/handles.py).
     MAILBOX_DOMAIN: str = "myotherapp.in"
     # The key the club-mail Worker signs each delivery with (HMAC-SHA256 over
-    # the time, the envelope and the size; app/api/club_mailbox/cloudflare.py).
+    # the time, the envelope, the size and, v2, the body's SHA-256;
+    # app/api/club_mailbox/cloudflare.py).
     # The same value is the Worker's MAILBOX_HOOK_SECRET secret. Empty: the
     # Cloudflare hook answers 503 and the Worker gives the sender a temporary
     # error, so the mail is tried again later, not lost.
     MAILBOX_HOOK_SECRET: str = ""
+    # On: every Cloudflare delivery must carry the Worker's v2 signature, the
+    # one that covers the mail's body too; one signed only the older way (v1)
+    # is refused and its sender tries again later. Turn it on only once the
+    # Worker that sends v2 is deployed (cloudflare.py says the order).
+    MAILBOX_HOOK_REQUIRE_BODY_SIGNATURE: bool = False
     # The private S3 bucket SES's receipt rule writes each mail to (raw MIME),
     # and the SNS topic the rule tells. A notification naming another bucket or
     # topic is refused.
@@ -470,6 +487,28 @@ class AppConfig(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int
     REFRESH_TOKEN_EXPIRE_DAYS: int
 
+    # A refresh token just replaced (app/api/auth/sessions.py): within this
+    # many seconds of its rotation it is answered with its successor again
+    # (two requests or tabs refreshing at once); after that only while the
+    # session has not been used since (the answer was lost). Otherwise the
+    # session ends as reused. 0: answered again whenever, as before.
+    REFRESH_RESEND_GRACE_SECONDS: int = 300
+
+    # Connecting a social account (app/api/social/oauth.py): the platform's
+    # sign-in must come back to the browser that pressed Connect (a cookie
+    # Connect sets). Off: any browser holding the link may finish it, as
+    # before. The cookie's domain: unset, the one PUBLIC_WEB_URL and
+    # PUBLIC_API_URL share (myotherapp.in).
+    SOCIAL_OAUTH_BROWSER_CHECK: bool = True
+    SOCIAL_OAUTH_COOKIE_DOMAIN: str = ""
+
+    # A guest-list or organisation import (app/core/utils/excel.py): the most
+    # an upload may be (MB), what a workbook may unpack to (MB), and the most
+    # rows taken at once. Past any of them the import is refused with 413.
+    IMPORT_MAX_MB: int = 10
+    IMPORT_MAX_UNZIPPED_MB: int = 100
+    IMPORT_MAX_ROWS: int = 20000
+
     DISCORD_ERROR_WEBHOOK: str | None = None
     # Who hears about billing and new club applications (app/api/admin_alerts):
     # a comma-separated list of addresses, each alert one mail to all of them.
@@ -493,6 +532,18 @@ class AppConfig(BaseSettings):
     # signs them, as before this setting. Each at least 32 characters
     # (`openssl rand -hex 32`); a shorter one stops the app at startup.
     LINK_SIGNING_KEYS: str = ""
+    # What signs the sign-in tokens (access and refresh JWTs) and the short
+    # signed payloads (a kiosk's QR and redemptions, an assistant's consent,
+    # a partner's QR image): a comma-separated list, the first signs. Every
+    # one verifies, and so does SECRET_KEY, so whatever was signed before
+    # this was set keeps working until it expires. Unset: SECRET_KEY signs,
+    # as before. Each at least 32 characters (`openssl rand -hex 32`).
+    SIGNING_KEYS: str = ""
+    # The Fernet key admin two-factor secrets are sealed with
+    # (app/api/auth/totp.py); a comma-separated list rotates. Unset:
+    # PAYMENT_KEYS_SECRET seals them, as before. A secret sealed with either
+    # keeps opening while its key is set.
+    TOTP_KEYS_SECRET: str = ""
     # The clubs dashboard, for links a volunteer opens on a phone.
     PUBLIC_WEB_URL: str = "https://club-dashboard.myotherapp.in"
     # The admin portal, for an invited admin's set-password link.
@@ -715,6 +766,27 @@ class AppConfig(BaseSettings):
     def site_tokens(self) -> list[str]:
         return [t.strip() for t in (self.SITE_TOKENS or "").split(",") if t.strip()]
 
+    @field_validator("SIGNING_KEYS")
+    @classmethod
+    def _signing_keys_long_enough(cls, value: str) -> str:
+        """A short key is a guessable one, and with it any sign-in: refused at startup."""
+        keys = [k.strip() for k in (value or "").split(",") if k.strip()]
+        if any(len(k) < 32 for k in keys):
+            raise ValueError("every key in APP_SIGNING_KEYS must be at least 32 characters (openssl rand -hex 32)")
+        return ",".join(keys)
+
+    @property
+    def signing_key(self) -> str:
+        """What signs a token or a signed payload now: the first SIGNING_KEYS, else SECRET_KEY."""
+        keys = [k for k in (self.SIGNING_KEYS or "").split(",") if k]
+        return keys[0] if keys else self.SECRET_KEY
+
+    @property
+    def verifying_keys(self) -> list[str]:
+        """What a token or a signed payload may be signed with: SIGNING_KEYS, then SECRET_KEY."""
+        keys = [k for k in (self.SIGNING_KEYS or "").split(",") if k]
+        return keys + [self.SECRET_KEY] if self.SECRET_KEY not in keys else keys
+
     @field_validator("LINK_SIGNING_KEYS")
     @classmethod
     def _link_keys_long_enough(cls, value: str) -> str:
@@ -730,6 +802,16 @@ class AppConfig(BaseSettings):
         """The emailed links' keys, the one that signs first; SECRET_KEY alone when none is set."""
         keys = [k for k in (self.LINK_SIGNING_KEYS or "").split(",") if k]
         return keys or [self.SECRET_KEY]
+
+    # A hidden ticket type (comp, speaker, staff) is listed and sold only to
+    # a link that carries its signed key, which the dashboard copies
+    # (app/api/ticketing/hidden.py). False (the default until it is switched
+    # on): a link that names a hidden type is enough, as before this setting;
+    # the keys are still made, so organisers can copy and send the new links
+    # first. Switch it on (true) once they have, and once the app sends the
+    # key (apps 1.2.1 and 1.3.0 don't). The organiser, a waiting-list offer
+    # and the club confirming a request need no key.
+    HIDDEN_TYPES_REQUIRE_TOKEN: bool = False
 
     # Club plans (app/api/subscriptions/gates.py). PLAN_ENFORCEMENT=false is
     # the kill switch: every plan gate lets everything through, as before the

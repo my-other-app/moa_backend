@@ -21,9 +21,17 @@ anything older than the generation just before the live one is a spent
 token presented again: two parties hold the session, one of them stole it,
 and the session ends (`rotate` says "reused").
 
-No clock and no extra column is needed: using the successor is what moves
-the live generation on, so "the successor was used" is exactly "the
-presented token is two or more generations old".
+Using the successor to refresh is what moves the live generation on, so
+"the successor was refreshed with" is exactly "the presented token is two or
+more generations old". A session can also be used without a refresh, with
+the access token handed out beside the successor, and someone holding a
+stolen refresh token alongside its owner could keep both going that way. So
+past REFRESH_RESEND_GRACE_SECONDS after the rotation (the window for two
+requests or tabs refreshing at once), the token just replaced is given its
+successor again only while the session has not been seen since the rotation
+(`last_seen_at`, which a request with the session's access token moves on):
+the answer was lost and nobody holds the new tokens, however long after.
+Once someone has used them, it ends the session as reused.
 
 An admin's session as someone else (`impersonated_by`) has a row too, with
 a hard `expires_at` and no refresh token at all.
@@ -138,6 +146,21 @@ def _ended(row) -> bool:
     return bool(row.revoked) or (expires is not None and expires <= _now())
 
 
+def _may_resend(row, now: datetime) -> bool:
+    """Whether the token just replaced may be given its successor again:
+    within the grace window of the rotation, or later while the session has
+    not been seen since it (the answer was lost). REFRESH_RESEND_GRACE_SECONDS
+    at 0: always, as before the window existed."""
+    from app.config import settings
+
+    grace = int(settings.REFRESH_RESEND_GRACE_SECONDS or 0)
+    rotated = _aware(row.rotated_at)
+    if grace <= 0 or rotated is None or (now - rotated).total_seconds() <= grace:
+        return True
+    seen = _aware(row.last_seen_at)
+    return seen is None or seen <= rotated
+
+
 async def rotate(session: AsyncSession, session_id, presented: int) -> tuple[str, int | None]:
     """Spend the refresh token of generation `presented` for this session.
 
@@ -147,7 +170,9 @@ async def rotate(session: AsyncSession, session_id, presented: int) -> tuple[str
                           time, so the session moves on to G+1.
       ("resent", G)    -- `presented` is G-1 and G has never been used (if it
                           had, the session would be at G+1): the answer to it
-                          was lost, so it is given again.
+                          was lost, so it is given again -- within the grace
+                          window, or while the session has not been seen
+                          since the rotation (`_may_resend`).
       ("reused", None) -- older than that (or a generation never issued):
                           the session is revoked now.
       ("ended", None)  -- the session is signed out, expired or gone.
@@ -176,7 +201,7 @@ async def rotate(session: AsyncSession, session_id, presented: int) -> tuple[str
     row = await session.get(UserSessions, key, populate_existing=True)
     if row is None or _ended(row):
         return "ended", None
-    if presented == row.refresh_generation - 1:
+    if presented == row.refresh_generation - 1 and _may_resend(row, now):
         return "resent", int(row.refresh_generation)
     row.revoked = True
     await session.flush()

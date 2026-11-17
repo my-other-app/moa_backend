@@ -145,6 +145,7 @@ async def register_event(
         whatsapp_opt_in=registration.whatsapp_opt_in if "whatsapp_opt_in" in registration.model_fields_set else None,
         ticket_type_id=registration.ticket_type_id,
         discount_code=registration.discount_code,
+        ticket_key=registration.ticket_key,
     )
     if registration.club_updates_whatsapp:
         from app.api.club_whatsapp import consent
@@ -212,6 +213,7 @@ async def _request_instead(session, background_tasks, event: Events, registratio
     done = await approvals.submit(
         session, event, full_name=registration.full_name, email=registration.email, phone=registration.phone,
         user=user, answers=answers or None, ticket_type_id=registration.ticket_type_id,
+        ticket_key=registration.ticket_key,
         discount_code=registration.discount_code, whatsapp_opt_in=bool(registration.whatsapp_opt_in),
         club_updates_whatsapp=bool(registration.club_updates_whatsapp), tracking_ref=registration.ref or ref,
     )

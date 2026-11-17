@@ -12,9 +12,12 @@ would lock out anyone whose authenticator failed to scan.
   is refused: a code read over a shoulder cannot be used again within its
   window. Kept with a conditional UPDATE, so two requests with one code
   cannot both pass.
-- The secret is encrypted at rest with the payment-keys Fernet key
-  (APP_PAYMENT_KEYS_SECRET) when the server has one; a secret saved before
-  that, or on a server without it, is the plain base32, and still works.
+- The secret is encrypted at rest with a Fernet key of its own
+  (APP_TOTP_KEYS_SECRET, "totp:"), or, while that is unset, the payment-keys
+  one (APP_PAYMENT_KEYS_SECRET, "fernet:"), as before it existed. Each opens
+  with its own key while that key is set; a secret saved on a server with
+  neither is the plain base32, and still works. A sign-in with a good code
+  seals a plain or payment-key secret again with the two-factor key.
 - Recovery codes are 64 random bits each, kept as HMAC-SHA256 digests: one
   hash to check a code, where the bcrypt hashes they replace cost eight
   bcrypts (two seconds of CPU) to enable and up to eight per wrong code.
@@ -37,6 +40,8 @@ from sqlalchemy.orm.attributes import set_committed_value
 
 from app.config import settings
 from app.core.auth.authentication import verify_password
+from app.core.auth.compare import same
+from app.core.keyring import Keyring
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +49,24 @@ ISSUER = "MyOtherApp Admin"
 RECOVERY_CODE_COUNT = 8
 STEP_SECONDS = 30
 
-#: A sealed (encrypted) secret starts with this; anything else is plain base32.
+#: A secret sealed with APP_TOTP_KEYS_SECRET starts with this, one sealed
+#: with APP_PAYMENT_KEYS_SECRET (before the two-factor key existed) with
+#: _SEALED; anything else is plain base32.
+_TOTP_SEALED = "totp:"
 _SEALED = "fernet:"
+
+
+class _Unavailable(Exception):
+    """No usable APP_TOTP_KEYS_SECRET, or a secret it cannot open."""
+
+
+_KEYS = Keyring("TOTP_KEYS_SECRET", _Unavailable, what="admin two-factor secrets")
+
+
+def _totp_keys() -> Keyring:
+    return _KEYS
+
+
 #: A recovery code digest starts with this; a bcrypt hash starts with "$2".
 _DIGEST = "hmac-sha256:"
 _LEGACY_SHAPE = re.compile(r"^[0-9a-f]{4}-?[0-9a-f]{4}$")
@@ -56,13 +77,17 @@ def new_secret() -> str:
 
 
 def seal_secret(secret: str) -> str:
-    """What is stored for `secret`: encrypted when the server has a key."""
+    """What is stored for `secret`: encrypted with the two-factor key, else
+    the payment-keys one, when the server has one."""
     from app.api.payment_gateways import crypto
 
+    if _totp_keys().available():
+        return _TOTP_SEALED + _totp_keys().encrypt(secret)
     if crypto.available():
         return _SEALED + crypto.encrypt(secret)
-    # TODO: stored in the clear while APP_PAYMENT_KEYS_SECRET is unset; set
-    # it and the next enrolment (or a sign-in with a code) seals it.
+    # TODO: stored in the clear while neither APP_TOTP_KEYS_SECRET nor
+    # APP_PAYMENT_KEYS_SECRET is set; set the first and the next enrolment
+    # (or a sign-in with a code) seals it.
     return secret
 
 
@@ -71,6 +96,12 @@ def open_secret(stored: str | None) -> str | None:
     (sealed, and the server has no key that opens it)."""
     if not stored:
         return None
+    if stored.startswith(_TOTP_SEALED):
+        try:
+            return _totp_keys().decrypt(stored[len(_TOTP_SEALED):])
+        except _Unavailable:
+            logger.error("A two-factor secret cannot be decrypted with APP_TOTP_KEYS_SECRET")
+            return None
     if not stored.startswith(_SEALED):
         return stored
     from app.api.payment_gateways import crypto
@@ -101,7 +132,7 @@ def matching_step(secret: str | None, code: str | None, now: float | None = None
     totp = pyotp.TOTP(secret)
     current = int((now if now is not None else time.time()) // STEP_SECONDS)
     for step in (current - 1, current, current + 1):
-        if hmac.compare_digest(totp.at(step * STEP_SECONDS), typed):
+        if same(typed, totp.at(step * STEP_SECONDS)):
             return step
     return None
 
@@ -133,10 +164,11 @@ async def accept_code(session, user, code: str | None) -> bool:
         logger.warning("A two-factor code was used again for user %s", user.id)
         return False
     set_committed_value(user, "totp_last_step", step)
-    if user.totp_secret and not user.totp_secret.startswith(_SEALED):
-        sealed = seal_secret(user.totp_secret)
-        if sealed.startswith(_SEALED):
-            # A secret from before the key was set: sealed now it is known good.
+    if user.totp_secret and not user.totp_secret.startswith(_TOTP_SEALED):
+        plain = open_secret(user.totp_secret)
+        sealed = seal_secret(plain) if plain else user.totp_secret
+        if sealed.startswith(_TOTP_SEALED) or (sealed.startswith(_SEALED) and not user.totp_secret.startswith(_SEALED)):
+            # A secret from before the key was set: sealed again now it is known good.
             user.totp_secret = sealed
     return True
 
@@ -174,7 +206,7 @@ async def consume_recovery_code(session, user, code: str | None) -> bool:
         select(Users.totp_recovery_codes).where(Users.id == user.id).with_for_update()
     ) or []
     want = _DIGEST + _digest(typed)
-    match = next((h for h in stored if isinstance(h, str) and h.startswith(_DIGEST) and hmac.compare_digest(h, want)), None)
+    match = next((h for h in stored if isinstance(h, str) and h.startswith(_DIGEST) and same(h, want)), None)
     if match is None:
         lowered = typed.lower()
         if _LEGACY_SHAPE.match(lowered):
