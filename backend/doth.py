@@ -89,6 +89,9 @@ def start_loops() -> list[asyncio.Task]:
     # The team's support desk: the 08:00 digest, follow-ups 3 days overdue to
     # the owners, waiting and resolved cases closed, retention -- every ten minutes.
     from app.api.support.sweep import sweep_loop as support_sweep_loop
+    # Guests' poster photos and renders past their retention (30 days after the
+    # event's end; at once for a ticket removed or revoked) -- hourly, one process.
+    from app.api.guest_posters.sweep import sweep_loop as posters_sweep_loop
 
     return [
         asyncio.create_task(loop())
@@ -99,6 +102,7 @@ def start_loops() -> list[asyncio.Task]:
             social_sweep_loop,
             support_sweep_loop,
             webhooks_sweep_loop,
+            posters_sweep_loop,
         )
     ]
 

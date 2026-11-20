@@ -278,6 +278,8 @@ def test_the_platforms_jobs_have_the_priorities_and_limits_chosen(monkeypatch):
         "social.post_target": (H, 2), "social.share_kit_push": (H, 4), "social.admin_push": (H, 4), "mail.social_notice": (H, 4),
         # Its poster sizes made ahead, and the daily token refresh: nobody waits.
         "social.posters": (L, 1), "social.refresh_tokens": (L, 1),
+        # A guest's "I'm attending" poster (app/api/guest_posters): after everything someone else waits on, one at a time.
+        "guest_posters.render": (L, 1),
         # The answer to STOP or START, inside the window their message just opened.
         "club_whatsapp.auto_reply": (H, 4),
         "clubs.approved_email": (H, 4), "checkins.after": (H, 4),

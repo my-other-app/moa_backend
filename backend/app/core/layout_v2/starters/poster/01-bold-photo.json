@@ -1,0 +1,1078 @@
+{
+ "id": "poster/01-bold-photo",
+ "name": "Bold photo",
+ "use": "A big photo, the phrase in tall letters, the date beside it",
+ "hasPhoto": true,
+ "formats": {
+  "square": {
+   "version": 2,
+   "page": {
+    "widthMm": 285.75,
+    "heightMm": 285.75
+   },
+   "canvas": {
+    "width": 1080,
+    "height": 1080,
+    "background": {
+     "type": "solid",
+     "color": "#F3F0E8"
+    }
+   },
+   "vars": {
+    "accent": "#FF5A36"
+   },
+   "layers": [
+    {
+     "id": "t-hosted",
+     "name": "Hosted by",
+     "x": 64,
+     "y": 60,
+     "width": 620,
+     "height": 20,
+     "kind": "text",
+     "text": "HOSTED BY",
+     "font": {
+      "family": "DM Sans",
+      "weight": 700,
+      "style": "normal"
+     },
+     "size": 14,
+     "color": "#5C5C5C",
+     "letterSpacing": 0.14,
+     "minSize": 10
+    },
+    {
+     "id": "t-club",
+     "name": "Club name",
+     "x": 64,
+     "y": 84,
+     "width": 620,
+     "height": 62.4,
+     "kind": "text",
+     "text": "{{club_name}}",
+     "font": {
+      "family": "DM Sans",
+      "weight": 700,
+      "style": "normal"
+     },
+     "size": 26,
+     "color": "#141414",
+     "lineHeight": 1.15,
+     "textWrap": "balance",
+     "maxLines": 2,
+     "minSize": 16
+    },
+    {
+     "id": "logo-tile",
+     "name": "Logo tile",
+     "x": 920,
+     "y": 56,
+     "width": 96,
+     "height": 96,
+     "showIf": "logo_src",
+     "kind": "shape",
+     "fill": {
+      "type": "solid",
+      "color": "#FFFFFF"
+     },
+     "stroke": {
+      "color": "#141414",
+      "width": 3
+     },
+     "radius": [
+      22,
+      22,
+      22,
+      22
+     ]
+    },
+    {
+     "id": "logo",
+     "name": "Club logo",
+     "x": 933.44,
+     "y": 69.44,
+     "width": 69.12,
+     "height": 69.12,
+     "kind": "image",
+     "source": "org_logo"
+    },
+    {
+     "id": "photo-back",
+     "name": "Photo backing (accent)",
+     "x": 84,
+     "y": 192,
+     "width": 548,
+     "height": 548,
+     "kind": "shape",
+     "fill": {
+      "type": "solid",
+      "color": "var:accent"
+     },
+     "stroke": {
+      "color": "#141414",
+      "width": 4
+     },
+     "radius": [
+      44,
+      44,
+      44,
+      44
+     ]
+    },
+    {
+     "id": "photo",
+     "name": "Guest photo",
+     "x": 64,
+     "y": 172,
+     "width": 548,
+     "height": 548,
+     "kind": "image",
+     "source": "guest_photo",
+     "fit": "cover",
+     "radius": [
+      44,
+      44,
+      44,
+      44
+     ],
+     "border": {
+      "color": "#141414",
+      "width": 4
+     },
+     "placeholder": "initials",
+     "placeholderStyle": {
+      "color": "#FFFFFF",
+      "background": {
+       "type": "solid",
+       "color": "#141414"
+      },
+      "family": "Bebas Neue",
+      "weight": 400
+     }
+    },
+    {
+     "id": "t-phrase",
+     "name": "Moment phrase",
+     "x": 652,
+     "y": 166,
+     "width": 364,
+     "height": 220,
+     "kind": "text",
+     "text": "{{moment_phrase}}",
+     "font": {
+      "family": "Bebas Neue",
+      "weight": 400,
+      "style": "normal"
+     },
+     "size": 108,
+     "color": "#141414",
+     "lineHeight": 0.92,
+     "transform": "upper",
+     "textWrap": "balance",
+     "maxLines": 2,
+     "minSize": 48
+    },
+    {
+     "id": "rule",
+     "name": "Accent rule",
+     "x": 652,
+     "y": 500,
+     "width": 120,
+     "height": 18,
+     "kind": "shape",
+     "fill": {
+      "type": "solid",
+      "color": "var:accent"
+     },
+     "stroke": {
+      "color": "#141414",
+      "width": 3
+     },
+     "radius": [
+      9,
+      9,
+      9,
+      9
+     ]
+    },
+    {
+     "id": "t-date",
+     "name": "Date",
+     "x": 652,
+     "y": 540,
+     "width": 364,
+     "height": 70,
+     "kind": "text",
+     "text": "{{event_date}}",
+     "font": {
+      "family": "Bebas Neue",
+      "weight": 400,
+      "style": "normal"
+     },
+     "size": 60,
+     "color": "#141414",
+     "lineHeight": 1.05,
+     "valign": "bottom",
+     "transform": "upper",
+     "textWrap": "balance",
+     "maxLines": 2,
+     "minSize": 34
+    },
+    {
+     "id": "t-time",
+     "name": "Time",
+     "x": 652,
+     "y": 616,
+     "width": 364,
+     "height": 34,
+     "kind": "text",
+     "text": "{{event_time}}",
+     "font": {
+      "family": "DM Sans",
+      "weight": 700,
+      "style": "normal"
+     },
+     "size": 28,
+     "color": "#141414",
+     "minSize": 18
+    },
+    {
+     "id": "t-city",
+     "name": "City",
+     "x": 652,
+     "y": 654,
+     "width": 364,
+     "height": 34,
+     "kind": "text",
+     "text": "{{city}}",
+     "font": {
+      "family": "DM Sans",
+      "weight": 500,
+      "style": "normal"
+     },
+     "size": 26,
+     "color": "#5C5C5C",
+     "fit": "ellipsis"
+    },
+    {
+     "id": "t-name",
+     "name": "Guest name",
+     "x": 64,
+     "y": 744,
+     "width": 952,
+     "height": 110,
+     "kind": "text",
+     "text": "{{name}}",
+     "font": {
+      "family": "Bebas Neue",
+      "weight": 400,
+      "style": "normal"
+     },
+     "size": 100,
+     "color": "#141414",
+     "letterSpacing": 0.01,
+     "lineHeight": 1.05,
+     "valign": "middle",
+     "transform": "upper",
+     "minSize": 44
+    },
+    {
+     "id": "t-org",
+     "name": "Organisation",
+     "x": 64,
+     "y": 852,
+     "width": 952,
+     "height": 34,
+     "showIf": "organisation",
+     "kind": "text",
+     "text": "{{organisation}}",
+     "font": {
+      "family": "DM Sans",
+      "weight": 500,
+      "style": "normal"
+     },
+     "size": 26,
+     "color": "#5C5C5C",
+     "fit": "ellipsis"
+    },
+    {
+     "id": "t-event",
+     "name": "Event and venue",
+     "x": 64,
+     "y": 898,
+     "width": 800,
+     "height": 106,
+     "kind": "text",
+     "spans": [
+      {
+       "text": "{{event_name}}\n",
+       "weight": 700
+      },
+      {
+       "text": "{{venue}}",
+       "size": 22,
+       "color": "#5C5C5C"
+      }
+     ],
+     "font": {
+      "family": "DM Sans",
+      "weight": 500,
+      "style": "normal"
+     },
+     "size": 30,
+     "color": "#141414",
+     "maxLines": 3,
+     "minSize": 18
+    },
+    {
+     "id": "t-share",
+     "name": "Share link",
+     "x": 64,
+     "y": 986,
+     "width": 800,
+     "height": 30,
+     "kind": "text",
+     "spans": [
+      {
+       "text": "Join me: "
+      },
+      {
+       "text": "{{share_url}}",
+       "weight": 700,
+       "color": "#141414"
+      }
+     ],
+     "font": {
+      "family": "DM Sans",
+      "weight": 500,
+      "style": "normal"
+     },
+     "size": 20,
+     "color": "#5C5C5C",
+     "minSize": 11
+    },
+    {
+     "id": "qr",
+     "name": "QR code (share link)",
+     "x": 900,
+     "y": 900,
+     "width": 116,
+     "height": 116,
+     "kind": "qr",
+     "quietZone": 2,
+     "background": {
+      "type": "solid",
+      "color": "#FFFFFF"
+     }
+    }
+   ]
+  },
+  "portrait": {
+   "version": 2,
+   "page": {
+    "widthMm": 285.75,
+    "heightMm": 357.1875
+   },
+   "canvas": {
+    "width": 1080,
+    "height": 1350,
+    "background": {
+     "type": "solid",
+     "color": "#F3F0E8"
+    }
+   },
+   "vars": {
+    "accent": "#FF5A36"
+   },
+   "layers": [
+    {
+     "id": "t-hosted",
+     "name": "Hosted by",
+     "x": 64,
+     "y": 60,
+     "width": 700,
+     "height": 20,
+     "kind": "text",
+     "text": "HOSTED BY",
+     "font": {
+      "family": "DM Sans",
+      "weight": 700,
+      "style": "normal"
+     },
+     "size": 14,
+     "color": "#5C5C5C",
+     "letterSpacing": 0.14,
+     "minSize": 10
+    },
+    {
+     "id": "t-club",
+     "name": "Club name",
+     "x": 64,
+     "y": 84,
+     "width": 700,
+     "height": 62.4,
+     "kind": "text",
+     "text": "{{club_name}}",
+     "font": {
+      "family": "DM Sans",
+      "weight": 700,
+      "style": "normal"
+     },
+     "size": 26,
+     "color": "#141414",
+     "lineHeight": 1.15,
+     "textWrap": "balance",
+     "maxLines": 2,
+     "minSize": 16
+    },
+    {
+     "id": "logo-tile",
+     "name": "Logo tile",
+     "x": 916,
+     "y": 56,
+     "width": 100,
+     "height": 100,
+     "showIf": "logo_src",
+     "kind": "shape",
+     "fill": {
+      "type": "solid",
+      "color": "#FFFFFF"
+     },
+     "stroke": {
+      "color": "#141414",
+      "width": 3
+     },
+     "radius": [
+      22,
+      22,
+      22,
+      22
+     ]
+    },
+    {
+     "id": "logo",
+     "name": "Club logo",
+     "x": 930,
+     "y": 70,
+     "width": 72,
+     "height": 72,
+     "kind": "image",
+     "source": "org_logo"
+    },
+    {
+     "id": "t-phrase",
+     "name": "Moment phrase",
+     "x": 64,
+     "y": 176,
+     "width": 952,
+     "height": 156,
+     "kind": "text",
+     "text": "{{moment_phrase}}",
+     "font": {
+      "family": "Bebas Neue",
+      "weight": 400,
+      "style": "normal"
+     },
+     "size": 150,
+     "color": "#141414",
+     "lineHeight": 0.9,
+     "valign": "middle",
+     "transform": "upper",
+     "textWrap": "balance",
+     "maxLines": 2,
+     "minSize": 70
+    },
+    {
+     "id": "photo-back",
+     "name": "Photo backing (accent)",
+     "x": 84,
+     "y": 372,
+     "width": 620,
+     "height": 620,
+     "kind": "shape",
+     "fill": {
+      "type": "solid",
+      "color": "var:accent"
+     },
+     "stroke": {
+      "color": "#141414",
+      "width": 4
+     },
+     "radius": [
+      44,
+      44,
+      44,
+      44
+     ]
+    },
+    {
+     "id": "photo",
+     "name": "Guest photo",
+     "x": 64,
+     "y": 352,
+     "width": 620,
+     "height": 620,
+     "kind": "image",
+     "source": "guest_photo",
+     "fit": "cover",
+     "radius": [
+      44,
+      44,
+      44,
+      44
+     ],
+     "border": {
+      "color": "#141414",
+      "width": 4
+     },
+     "placeholder": "initials",
+     "placeholderStyle": {
+      "color": "#FFFFFF",
+      "background": {
+       "type": "solid",
+       "color": "#141414"
+      },
+      "family": "Bebas Neue",
+      "weight": 400
+     }
+    },
+    {
+     "id": "rule",
+     "name": "Accent rule",
+     "x": 724,
+     "y": 352,
+     "width": 120,
+     "height": 18,
+     "kind": "shape",
+     "fill": {
+      "type": "solid",
+      "color": "var:accent"
+     },
+     "stroke": {
+      "color": "#141414",
+      "width": 3
+     },
+     "radius": [
+      9,
+      9,
+      9,
+      9
+     ]
+    },
+    {
+     "id": "t-date",
+     "name": "Date",
+     "x": 724,
+     "y": 390,
+     "width": 292,
+     "height": 166,
+     "kind": "text",
+     "text": "{{event_date}}",
+     "font": {
+      "family": "Bebas Neue",
+      "weight": 400,
+      "style": "normal"
+     },
+     "size": 84,
+     "color": "#141414",
+     "lineHeight": 0.95,
+     "transform": "upper",
+     "textWrap": "balance",
+     "maxLines": 2,
+     "minSize": 40
+    },
+    {
+     "id": "t-time",
+     "name": "Time",
+     "x": 724,
+     "y": 560,
+     "width": 292,
+     "height": 36,
+     "kind": "text",
+     "text": "{{event_time}}",
+     "font": {
+      "family": "DM Sans",
+      "weight": 700,
+      "style": "normal"
+     },
+     "size": 30,
+     "color": "#141414",
+     "minSize": 18
+    },
+    {
+     "id": "t-city",
+     "name": "City",
+     "x": 724,
+     "y": 600,
+     "width": 292,
+     "height": 36,
+     "kind": "text",
+     "text": "{{city}}",
+     "font": {
+      "family": "DM Sans",
+      "weight": 500,
+      "style": "normal"
+     },
+     "size": 28,
+     "color": "#5C5C5C",
+     "fit": "ellipsis"
+    },
+    {
+     "id": "t-name",
+     "name": "Guest name",
+     "x": 64,
+     "y": 1000,
+     "width": 952,
+     "height": 120,
+     "kind": "text",
+     "text": "{{name}}",
+     "font": {
+      "family": "Bebas Neue",
+      "weight": 400,
+      "style": "normal"
+     },
+     "size": 110,
+     "color": "#141414",
+     "letterSpacing": 0.01,
+     "lineHeight": 1.05,
+     "valign": "middle",
+     "transform": "upper",
+     "minSize": 46
+    },
+    {
+     "id": "t-org",
+     "name": "Organisation",
+     "x": 64,
+     "y": 1116,
+     "width": 952,
+     "height": 36,
+     "showIf": "organisation",
+     "kind": "text",
+     "text": "{{organisation}}",
+     "font": {
+      "family": "DM Sans",
+      "weight": 500,
+      "style": "normal"
+     },
+     "size": 27,
+     "color": "#5C5C5C",
+     "fit": "ellipsis"
+    },
+    {
+     "id": "t-event",
+     "name": "Event and venue",
+     "x": 64,
+     "y": 1160,
+     "width": 952,
+     "height": 106,
+     "kind": "text",
+     "spans": [
+      {
+       "text": "{{event_name}}\n",
+       "weight": 700
+      },
+      {
+       "text": "{{venue}}",
+       "size": 22,
+       "color": "#5C5C5C"
+      }
+     ],
+     "font": {
+      "family": "DM Sans",
+      "weight": 500,
+      "style": "normal"
+     },
+     "size": 30,
+     "color": "#141414",
+     "maxLines": 3,
+     "minSize": 18
+    },
+    {
+     "id": "t-share",
+     "name": "Share link",
+     "x": 64,
+     "y": 1272,
+     "width": 952,
+     "height": 30,
+     "kind": "text",
+     "spans": [
+      {
+       "text": "Join me: "
+      },
+      {
+       "text": "{{share_url}}",
+       "weight": 700,
+       "color": "#141414"
+      }
+     ],
+     "font": {
+      "family": "DM Sans",
+      "weight": 500,
+      "style": "normal"
+     },
+     "size": 20,
+     "color": "#5C5C5C",
+     "minSize": 11
+    },
+    {
+     "id": "qr",
+     "name": "QR code (share link)",
+     "x": 724,
+     "y": 822,
+     "width": 150,
+     "height": 150,
+     "kind": "qr",
+     "quietZone": 2,
+     "background": {
+      "type": "solid",
+      "color": "#FFFFFF"
+     }
+    }
+   ]
+  },
+  "story": {
+   "version": 2,
+   "page": {
+    "widthMm": 285.75,
+    "heightMm": 508
+   },
+   "canvas": {
+    "width": 1080,
+    "height": 1920,
+    "background": {
+     "type": "solid",
+     "color": "#F3F0E8"
+    }
+   },
+   "vars": {
+    "accent": "#FF5A36"
+   },
+   "layers": [
+    {
+     "id": "art-top",
+     "name": "Accent band",
+     "x": -40,
+     "y": -40,
+     "width": 1160,
+     "height": 230,
+     "kind": "shape",
+     "fill": {
+      "type": "solid",
+      "color": "var:accent"
+     }
+    },
+    {
+     "id": "art-top-line",
+     "name": "Band edge",
+     "x": 0,
+     "y": 190,
+     "width": 1080,
+     "height": 6,
+     "kind": "shape",
+     "fill": {
+      "type": "solid",
+      "color": "#141414"
+     }
+    },
+    {
+     "id": "t-hosted",
+     "name": "Hosted by",
+     "x": 64,
+     "y": 262,
+     "width": 760,
+     "height": 20,
+     "kind": "text",
+     "text": "HOSTED BY",
+     "font": {
+      "family": "DM Sans",
+      "weight": 700,
+      "style": "normal"
+     },
+     "size": 14,
+     "color": "#5C5C5C",
+     "letterSpacing": 0.14,
+     "minSize": 10
+    },
+    {
+     "id": "t-club",
+     "name": "Club name",
+     "x": 64,
+     "y": 286,
+     "width": 760,
+     "height": 67.2,
+     "kind": "text",
+     "text": "{{club_name}}",
+     "font": {
+      "family": "DM Sans",
+      "weight": 700,
+      "style": "normal"
+     },
+     "size": 28,
+     "color": "#141414",
+     "lineHeight": 1.15,
+     "textWrap": "balance",
+     "maxLines": 2,
+     "minSize": 17
+    },
+    {
+     "id": "logo-tile",
+     "name": "Logo tile",
+     "x": 912,
+     "y": 258,
+     "width": 104,
+     "height": 104,
+     "showIf": "logo_src",
+     "kind": "shape",
+     "fill": {
+      "type": "solid",
+      "color": "#FFFFFF"
+     },
+     "stroke": {
+      "color": "#141414",
+      "width": 3
+     },
+     "radius": [
+      22,
+      22,
+      22,
+      22
+     ]
+    },
+    {
+     "id": "logo",
+     "name": "Club logo",
+     "x": 926.56,
+     "y": 272.56,
+     "width": 74.88,
+     "height": 74.88,
+     "kind": "image",
+     "source": "org_logo"
+    },
+    {
+     "id": "t-phrase",
+     "name": "Moment phrase",
+     "x": 64,
+     "y": 384,
+     "width": 952,
+     "height": 184,
+     "kind": "text",
+     "text": "{{moment_phrase}}",
+     "font": {
+      "family": "Bebas Neue",
+      "weight": 400,
+      "style": "normal"
+     },
+     "size": 168,
+     "color": "#141414",
+     "lineHeight": 0.88,
+     "valign": "middle",
+     "transform": "upper",
+     "textWrap": "balance",
+     "maxLines": 2,
+     "minSize": 80
+    },
+    {
+     "id": "photo-back",
+     "name": "Photo backing (accent)",
+     "x": 84,
+     "y": 610,
+     "width": 932,
+     "height": 620,
+     "kind": "shape",
+     "fill": {
+      "type": "solid",
+      "color": "var:accent"
+     },
+     "stroke": {
+      "color": "#141414",
+      "width": 4
+     },
+     "radius": [
+      48,
+      48,
+      48,
+      48
+     ]
+    },
+    {
+     "id": "photo",
+     "name": "Guest photo",
+     "x": 64,
+     "y": 590,
+     "width": 932,
+     "height": 620,
+     "kind": "image",
+     "source": "guest_photo",
+     "fit": "cover",
+     "radius": [
+      48,
+      48,
+      48,
+      48
+     ],
+     "border": {
+      "color": "#141414",
+      "width": 4
+     },
+     "placeholder": "initials",
+     "placeholderStyle": {
+      "color": "#FFFFFF",
+      "background": {
+       "type": "solid",
+       "color": "#141414"
+      },
+      "family": "Bebas Neue",
+      "weight": 400
+     }
+    },
+    {
+     "id": "t-name",
+     "name": "Guest name",
+     "x": 64,
+     "y": 1232,
+     "width": 952,
+     "height": 122,
+     "kind": "text",
+     "text": "{{name}}",
+     "font": {
+      "family": "Bebas Neue",
+      "weight": 400,
+      "style": "normal"
+     },
+     "size": 112,
+     "color": "#141414",
+     "letterSpacing": 0.01,
+     "lineHeight": 1.05,
+     "valign": "middle",
+     "transform": "upper",
+     "minSize": 46
+    },
+    {
+     "id": "t-org",
+     "name": "Organisation",
+     "x": 64,
+     "y": 1348,
+     "width": 952,
+     "height": 38,
+     "showIf": "organisation",
+     "kind": "text",
+     "text": "{{organisation}}",
+     "font": {
+      "family": "DM Sans",
+      "weight": 500,
+      "style": "normal"
+     },
+     "size": 28,
+     "color": "#5C5C5C",
+     "fit": "ellipsis"
+    },
+    {
+     "id": "t-event",
+     "name": "Event name",
+     "x": 64,
+     "y": 1398,
+     "width": 800,
+     "height": 84,
+     "kind": "text",
+     "text": "{{event_name}}",
+     "font": {
+      "family": "DM Sans",
+      "weight": 700,
+      "style": "normal"
+     },
+     "size": 34,
+     "color": "#141414",
+     "lineHeight": 1.15,
+     "textWrap": "balance",
+     "maxLines": 2,
+     "minSize": 20
+    },
+    {
+     "id": "t-when",
+     "name": "Date, time and venue",
+     "x": 64,
+     "y": 1486,
+     "width": 800,
+     "height": 32,
+     "kind": "text",
+     "text": "{{event_date}} · {{event_time}} · {{venue}}",
+     "font": {
+      "family": "DM Sans",
+      "weight": 500,
+      "style": "normal"
+     },
+     "size": 24,
+     "color": "#5C5C5C",
+     "fit": "ellipsis"
+    },
+    {
+     "id": "t-share",
+     "name": "Share link",
+     "x": 64,
+     "y": 1526,
+     "width": 800,
+     "height": 32,
+     "kind": "text",
+     "spans": [
+      {
+       "text": "Join me: "
+      },
+      {
+       "text": "{{share_url}}",
+       "weight": 700,
+       "color": "#141414"
+      }
+     ],
+     "font": {
+      "family": "DM Sans",
+      "weight": 500,
+      "style": "normal"
+     },
+     "size": 22,
+     "color": "#5C5C5C",
+     "minSize": 11
+    },
+    {
+     "id": "qr",
+     "name": "QR code (share link)",
+     "x": 892,
+     "y": 1408,
+     "width": 124,
+     "height": 124,
+     "kind": "qr",
+     "quietZone": 2,
+     "background": {
+      "type": "solid",
+      "color": "#FFFFFF"
+     }
+    },
+    {
+     "id": "art-bottom-line",
+     "name": "Band edge",
+     "x": 0,
+     "y": 1694,
+     "width": 1080,
+     "height": 6,
+     "kind": "shape",
+     "fill": {
+      "type": "solid",
+      "color": "#141414"
+     }
+    },
+    {
+     "id": "art-bottom",
+     "name": "Accent band",
+     "x": -40,
+     "y": 1700,
+     "width": 1160,
+     "height": 260,
+     "kind": "shape",
+     "fill": {
+      "type": "solid",
+      "color": "var:accent"
+     }
+    }
+   ]
+  }
+ }
+}

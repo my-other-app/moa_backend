@@ -94,7 +94,10 @@ def _key(d, by_month: bool) -> str:
 
 
 async def _links(session, club: Clubs, event: Optional[Events]) -> list[TrackingLinks]:
-    where = [TrackingLinks.club_id == club.id, TrackingLinks.is_deleted == False]  # noqa: E712
+    from app.api.guest_posters.links import GUEST
+
+    # Each guest's poster link counts as its event's "Guest posters" row (_folded), never a row of its own.
+    where = [TrackingLinks.club_id == club.id, TrackingLinks.is_deleted == False, TrackingLinks.kind != GUEST]  # noqa: E712
     if event is not None:
         where.append(TrackingLinks.event_id == event.id)
     return list((await session.scalars(select(TrackingLinks).where(*where).order_by(TrackingLinks.created_at.desc()))).all())
@@ -153,6 +156,22 @@ def _buckets(since: datetime, now: datetime, days: int, by_month: bool) -> list[
     return [b for b in ((since.astimezone(IST) + timedelta(days=i)).date().isoformat() for i in range(days + 1)) if b <= today]
 
 
+async def _folded(session, links: list[TrackingLinks]) -> dict:
+    """{guest poster link id: its event's "Guest posters" link id} (app/api/guest_posters/links.py)."""
+    from app.api.guest_posters.links import fold
+
+    return await fold(session, links)
+
+
+def _fold_ever(ever: dict, fold: dict) -> dict:
+    out = {k: v for k, v in ever.items() if k not in fold}
+    for lid, (n, last) in ever.items():
+        if lid in fold:
+            n0, last0 = out.get(fold[lid], (0, None))
+            out[fold[lid]] = (n0 + n, max((d for d in (last0, last) if d is not None), default=None))
+    return out
+
+
 async def overview(session, club: Clubs, event: Optional[Events], days: int, now: Optional[datetime] = None) -> dict:
     now = now or _now()
     since = now - timedelta(days=days)
@@ -161,9 +180,11 @@ async def overview(session, club: Clubs, event: Optional[Events], days: int, now
     cur = TrackingClicks.created_at >= since
 
     links = await _links(session, club, event)
-    ids = [l.id for l in links]
+    fold = await _folded(session, links)
+    as_row = lambda lid: fold.get(lid, lid)  # noqa: E731
+    ids = [l.id for l in links] + list(fold)
     events = await _events_of(session, links)
-    ever = await _all_time_clicks(session, ids)
+    ever = _fold_ever(await _all_time_clicks(session, ids), fold)
     site_host = await active_host(session, club.id) if event is None else None
 
     # Clicks: per link, in the period and the one before; the period by day; the uniques overall.
@@ -179,7 +200,9 @@ async def overview(session, club: Clubs, event: Optional[Events], days: int, now
                 TrackingClicks.link_id, func.count().filter(cur), func.count(func.distinct(_who())).filter(cur), func.count().filter(~cur),
             ).where(*in_scope).group_by(TrackingClicks.link_id)
         )).all():
-            c_now[lid], uniques[lid], c_prev[lid] = int(n), int(u), int(p)
+            c_now[as_row(lid)] += int(n)
+            uniques[as_row(lid)] += int(u)
+            c_prev[as_row(lid)] += int(p)
         bucket = _bucket(TrackingClicks.created_at, by_month)
         for d, n in (await session.execute(select(bucket, func.count()).where(TrackingClicks.link_id.in_(ids), cur).group_by(bucket))).all():
             series[_key(d, by_month)]["clicks"] += int(n)
@@ -198,8 +221,8 @@ async def overview(session, club: Clubs, event: Optional[Events], days: int, now
         )).all():
             all_follows += int(n)
             if lid is not None:
-                v_now[lid] += int(n)
-                v_prev[lid] += int(p)
+                v_now[as_row(lid)] += int(n)
+                v_prev[as_row(lid)] += int(p)
                 tracked_follows += int(n)
         # Of the period's tracked follows, the ones who then registered for one of the club's events.
         later = exists(
@@ -214,7 +237,7 @@ async def overview(session, club: Clubs, event: Optional[Events], days: int, now
             .where(*_follows_where(club.id, since), ClubUsersLink.tracking_link_id.isnot(None), later)
             .group_by(ClubUsersLink.tracking_link_id)
         )).all():
-            second[lid] += int(n)
+            second[as_row(lid)] += int(n)
         f_bucket = _bucket(ClubUsersLink.created_at, by_month)
         for d, n in (await session.execute(
             select(f_bucket, func.count()).where(*_follows_where(club.id, since), ClubUsersLink.tracking_link_id.isnot(None)).group_by(f_bucket)
@@ -229,9 +252,9 @@ async def overview(session, club: Clubs, event: Optional[Events], days: int, now
     for lid, n, attended, p in (await session.execute(regs)).all():
         all_regs += int(n)
         if lid is not None:
-            v_now[lid] += int(n)
-            v_prev[lid] += int(p)
-            second[lid] += int(attended)
+            v_now[as_row(lid)] += int(n)
+            v_prev[as_row(lid)] += int(p)
+            second[as_row(lid)] += int(attended)
             tracked_regs += int(n)
     r_bucket = _bucket(EventRegistrationsLink.created_at, by_month)
     for d, n in (await session.execute(
@@ -301,7 +324,11 @@ async def detail(session, club: Clubs, event: Optional[Events], link_id: UUID, d
     if link is None or (event is not None and link.event_id != event.id):
         raise CustomHTTPException(404, message="No such link")
     by_month = days > 120
-    scope = [TrackingClicks.link_id == link.id, TrackingClicks.created_at >= since]
+    # "Guest posters" reads every guest's poster link of its event (app/api/guest_posters/links.py).
+    from app.api.guest_posters.links import guest_ids
+
+    folded = await guest_ids(session, link)
+    scope = [TrackingClicks.link_id.in_([link.id, *folded]) if folded else TrackingClicks.link_id == link.id, TrackingClicks.created_at >= since]
     total, uniq, first, last = (await session.execute(
         select(func.count(), func.count(func.distinct(_who())), func.min(TrackingClicks.created_at), func.max(TrackingClicks.created_at)).where(*scope)
     )).one()

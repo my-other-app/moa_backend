@@ -113,6 +113,13 @@ def problems(layout: Union[LayoutV2, dict, Any], kind: str = "ticket") -> list[d
         out.append(_p("page_shape", "canvas",
                       f"The canvas is {c.width:g} × {c.height:g}, which is not the shape of a "
                       f"{page.width_mm:g} × {page.height_mm:g} mm page. Resize it, or change the page."))
+    if kind == "poster":
+        from app.core.layout_v2 import poster
+
+        if poster.format_of(lay) is None:
+            out.append(_p("poster_format", "canvas",
+                          "A poster is 1080 × 1080 (square), 1080 × 1350 (portrait) or 1080 × 1920 (story) "
+                          "pixels, on a page of the same size at 96 dpi."))
     px_per_mm = c.width / page.width_mm
     qrs = [i for i, l in enumerate(lay.layers) if isinstance(l, QrLayer) and not l.bind]
     personal = [i for i, l in enumerate(lay.layers) if isinstance(l, QrLayer) and l.bind]
