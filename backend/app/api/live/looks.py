@@ -127,14 +127,19 @@ async def list_media(session, event: Events) -> list:
 
 
 async def delete_media(session, event: Events, media_id: uuid.UUID) -> None:
-    gone = await session.scalar(delete(LiveMedia).where(LiveMedia.id == media_id, LiveMedia.event_id == event.id).returning(LiveMedia.id))
-    if gone is None:
+    row = await session.scalar(select(LiveMedia).where(LiveMedia.id == media_id, LiveMedia.event_id == event.id))
+    if row is None:
         raise CustomHTTPException(404, message="That picture is not in this event's live room.", error_code="LIVE_MEDIA_NOT_FOUND")
+    image = row.image
+    await session.execute(delete(LiveMedia).where(LiveMedia.id == row.id))
     # A theme that showed it now shows none: its version moves.
     row = await session.get(LiveThemes, event.id)
     if row is not None:
         row.updated_at = now_utc()
     await session.commit()
+    # Its files go once the row has: they are this picture's alone.
+    if image is not None and hasattr(image, "delete"):
+        image.delete()
     changed(event.id)
 
 
