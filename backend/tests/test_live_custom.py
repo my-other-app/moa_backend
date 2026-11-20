@@ -752,7 +752,7 @@ async def test_hidden_results_one_answer_only_and_a_timer(client, session, world
 
 async def test_the_screens_controls_and_what_it_shows(client, session, world):
     control = (await client.get(_u(world, "/screen/control"), headers=world["hv"])).json()
-    assert control == {"mode": "auto", "results": "live", "ticker": False, "idle_slides": [], "slide_seconds": 12, "wall_size": 6}
+    assert control == {"mode": "auto", "results": "hidden", "ticker": False, "idle_slides": [], "slide_seconds": 12, "wall_size": 6}
     assert (await client.get(_u(world, "/screen"), headers=world["hv"])).json()["shows"] == "qa"
     bad = await client.put(_u(world, "/screen/control"), json={"idle_slides": ["agenda", "agenda"]}, headers=world["hv"])
     assert bad.status_code == 422
@@ -763,7 +763,10 @@ async def test_the_screens_controls_and_what_it_shows(client, session, world):
     poll = await _poll(client, world, {"kind": "choice", "prompt": "Tea?", "options": ["Yes", "No"]})
     await _respond(client, world, poll, 1, {"value": "Yes"})
     assert (await client.get(_u(world, "/screen"), headers=world["hv"])).json()["shows"] == "poll"
-    await client.put(_u(world, "/screen/control"), json={"results": "hidden"}, headers=world["hv"])
+    # A poll's results show on the screen as they run, unless the poll says after closing.
+    assert (await client.get(_u(world, "/screen"), headers=world["hv"])).json()["poll"]["results"]["choices"][0]["count"] == 1
+    later = await _poll(client, world, {"kind": "choice", "prompt": "Coffee?", "options": ["Yes", "No"], "settings": {"results": "closed"}})
+    await _respond(client, world, later, 1, {"value": "Yes"})
     assert (await client.get(_u(world, "/screen"), headers=world["hv"])).json()["poll"]["results"] == {"responses": 1}
     await client.put(_u(world, "/screen/control"), json={"mode": "qa"}, headers=world["hv"])
     assert (await client.get(_u(world, "/screen"), headers=world["hv"])).json()["shows"] == "qa"
@@ -943,3 +946,55 @@ async def test_the_poll_that_closed_last_stays_on_this_releases_feed_read_only(c
     await _respond(client, world, hidden, 1, {"value": "A"})
     await client.post(_u(world, f"/polls/{hidden['id']}/status"), json={"status": "closed"}, headers=world["hv"])
     assert (await client.get(_u(world), headers=V2)).json()["poll"]["results"] == {"responses": 1}
+
+
+
+async def test_the_screen_shows_a_questions_tally_from_time_up_unless_set_live(client, session, world):
+    await _add(client, world, {"prompt": "Pick A", "options": _opts(2), "correct_key": "a"})
+    code = (await _start(client, world))["join_code"]
+    p = await _join(client, code, 1)
+    await _next(client, world)
+    await _answer(client, world, p, {"option_key": "a"})
+    running = (await client.get(_u(world, "/screen"), headers=world["hv"])).json()["quiz"]["question"]
+    assert running["answered"] == 1 and [c["count"] for c in running["counts"]] == [0, 0]  # the default: as the screen always was
+    old = (await client.get(_u(world, "/screen"), headers=world["h"])).json()["quiz"]["question"]
+    assert [c["count"] for c in old["counts"]] == [1, 0]  # a console from before: today's body
+    await client.put(_u(world, "/screen/control"), json={"results": "live"}, headers=world["hv"])
+    assert [c["count"] for c in (await client.get(_u(world, "/screen"), headers=world["hv"])).json()["quiz"]["question"]["counts"]] == [1, 0]
+    await client.put(_u(world, "/screen/control"), json={"results": "hidden"}, headers=world["hv"])
+    quiz = await service.quiz_of(session, _event(world))
+    quiz.question_opened_at = quiz.question_opened_at - timedelta(seconds=19.5)  # the clock at 0, in the grace
+    await session.commit()
+    room.quizzes.forget(("quiz", world["eid"]))
+    at_zero = (await client.get(_u(world, "/screen"), headers=world["hv"])).json()["quiz"]["question"]
+    assert at_zero["time_left"] == 0 and [c["count"] for c in at_zero["counts"]] == [1, 0] and at_zero["correct_key"] is None
+
+
+async def test_an_ended_round_stays_on_the_screen_until_something_else_goes_up(client, session, world):
+    await _add(client, world, {"prompt": "Pick A", "options": _opts(2), "correct_key": "a"})
+    code = (await _start(client, world))["join_code"]
+    p = await _join(client, code, 1)
+    await _next(client, world)
+    await _answer(client, world, p, {"option_key": "a"})
+    await client.post(_u(world, "/quiz/host/end"), headers=world["hv"])
+    screen = (await client.get(_u(world, "/screen"), headers=world["hv"])).json()
+    assert screen["shows"] == "quiz" and screen["quiz"]["status"] == "ended" and screen["quiz"]["leaderboard"][0]["name"] == "Player 1"
+    assert (await client.get(_u(world, "/screen"), headers=world["h"])).json()["quiz"] is None  # a console from before: as today
+    # A poll launched now takes its place.
+    await _poll(client, world, {"kind": "choice", "prompt": "Tea?", "options": ["Yes", "No"]})
+    assert (await client.get(_u(world, "/screen"), headers=world["hv"])).json()["shows"] == "poll"
+    # A question pinned after the end, or the controls changed, does too.
+    await client.post(_u(world, "/quiz/host/start"), json={"notify": False, "restart": True}, headers=world["hv"])
+    await client.post(_u(world, "/quiz/host/end"), headers=world["hv"])
+    for poll in (await client.get(_u(world, "/polls"), headers=world["hv"])).json():
+        await client.post(_u(world, f"/polls/{poll['id']}/status"), json={"status": "closed"}, headers=world["hv"])
+    assert (await client.get(_u(world, "/screen"), headers=world["hv"])).json()["shows"] == "quiz"
+    await client.put(_u(world, "/screen/control"), json={"idle_slides": ["join"]}, headers=world["hv"])
+    assert (await client.get(_u(world, "/screen"), headers=world["hv"])).json()["shows"] == "idle"
+    await client.patch(_u(world, "/questions/settings"), json={"approve_first": False, "notify": False}, headers=world["hv"])
+    asked = (await client.post(_u(world, "/questions"), json={"text": "When is lunch?"}, headers=_key(4))).json()
+    await client.post(_u(world, "/quiz/host/start"), json={"notify": False}, headers=world["hv"])
+    await client.post(_u(world, "/quiz/host/end"), headers=world["hv"])
+    assert (await client.get(_u(world, "/screen"), headers=world["hv"])).json()["shows"] == "quiz"
+    await client.post(_u(world, f"/questions/{asked['id']}"), json={"action": "pin", "notify": False}, headers=world["hv"])
+    assert (await client.get(_u(world, "/screen"), headers=world["hv"])).json()["shows"] == "qa"

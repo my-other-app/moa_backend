@@ -685,7 +685,7 @@ async def delete_media(session: SessionDep, user: ClubAuth, event_id: int, media
 @router.get("/screen/control", summary="The big screen's controls")
 async def get_screen_control(session: SessionDep, user: ClubAuth, event_id: int) -> ScreenControl:
     event = await deliveries.event_for_club(session, user, event_id)
-    return ScreenControl(**await looks.get_control(session, event.id))
+    return ScreenControl(**looks.public_control(await looks.get_control(session, event.id)))
 
 
 @router.put("/screen/control", summary="Change the big screen's controls (any of them)")
@@ -705,7 +705,8 @@ async def public_theme(session: SessionDep, event_id: int) -> Response:
 @router.get("/screen", summary="The big screen")
 async def screen(request: Request, session: SessionDep, user: ClubAuth, event_id: int) -> Screen:
     event = await deliveries.event_for_club(session, user, event_id)
-    return _club(request, Screen(**await service.screen(session, event)), compat.screen)
+    data = await service.screen(session, event)
+    return _club(request, Screen(**(service.screen_shown(data) if _v2(request) else data)), compat.screen)
 
 
 # --- the room, pushed ----------------------------------------------------------------------

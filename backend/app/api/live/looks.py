@@ -250,7 +250,9 @@ async def public_theme(session, event_id: int) -> dict:
 
 # ─── The big screen's controls ───────────────────────────────────────────
 
-SCREEN_DEFAULTS = {"mode": "auto", "results": "live", "ticker": False, "idle_slides": [], "slide_seconds": 12, "wall_size": 6}
+#: `results: hidden` is the screen as it always was: an open question's tally
+#: from time-up (service.screen_shown). An organiser may show it live.
+SCREEN_DEFAULTS = {"mode": "auto", "results": "hidden", "ticker": False, "idle_slides": [], "slide_seconds": 12, "wall_size": 6}
 SLIDES = ("agenda", "sponsors", "join")
 
 
@@ -263,7 +265,7 @@ def _sc_bad(field: str, message: str) -> CustomHTTPException:
 
 
 def clean_control(c: dict) -> dict:
-    unknown = set(c) - set(SCREEN_DEFAULTS)
+    unknown = set(c) - set(SCREEN_DEFAULTS) - {"_set_at"}
     if unknown:
         raise _sc_bad(sorted(unknown)[0], f"Unknown control: {sorted(unknown)[0]}.")
     if c["mode"] not in ("auto", "quiz", "poll", "qa", "idle", "leaderboard"):
@@ -283,13 +285,20 @@ def clean_control(c: dict) -> dict:
 
 
 async def get_control(session, event_id: int) -> dict:
+    """The controls, with `_set_at` (when they were last changed) for the
+    screen's own use; strip it before sending (public_control)."""
     row = await session.get(LiveThemes, event_id)
     return screen_control(row.screen if row is not None else None)
+
+
+def public_control(c: dict) -> dict:
+    return {k: v for k, v in c.items() if not k.startswith("_")}
 
 
 async def put_control(session, event: Events, change: dict) -> dict:
     row = await session.get(LiveThemes, event.id)
     merged = clean_control(screen_control({**((row.screen if row is not None else None) or {}), **change}))
+    merged["_set_at"] = now_utc().isoformat()
     if row is None:
         row = LiveThemes(event_id=event.id)
         session.add(row)
@@ -297,7 +306,7 @@ async def put_control(session, event: Events, change: dict) -> dict:
     await session.commit()
     themes.forget(("theme", event.id))
     room.room_changed(event.id)
-    return merged
+    return public_control(merged)
 
 
 async def agenda(session, event_id: int, now: Optional[datetime] = None, limit: int = 6) -> list:

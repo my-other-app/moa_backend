@@ -2375,6 +2375,46 @@ async def shift_schedule(session, event: Events, item_id: UUID, minutes: int, by
 # --- what the room sees ----------------------------------------------------------------------
 
 
+async def _round_just_ended(session, event: Events, quiz, pinned, control: dict, live_poll=None) -> bool:
+    """Whether the event's current round has ended with nothing put up since:
+    no poll launched, no question pinned, the screen's controls untouched,
+    no round started (it would be the current one). The big screen keeps its
+    final board until then."""
+    if quiz is None or quiz.status is not QuizStatus.ended or quiz.ended_at is None:
+        return False
+    ended = quiz.ended_at
+    launched = await session.scalar(select(func.max(LivePolls.launched_at)).where(LivePolls.event_id == event.id))
+    if launched is not None and launched > ended:
+        return False
+    if live_poll is not None and live_poll.updated_at is not None and live_poll.updated_at > ended:
+        return False  # launched again since
+    if pinned is not None and pinned.updated_at is not None and pinned.updated_at > ended:
+        return False
+    set_at = control.get("_set_at")
+    if set_at and datetime.fromisoformat(set_at) > ended:
+        return False
+    return True
+
+
+def screen_shown(data: dict, now: Optional[datetime] = None) -> dict:
+    """The big screen's body as a console of this release draws it, at `now`:
+    with the screen's `results: hidden` (the default, as the screen always
+    was) an open question's tally stays at zero while its clock runs and
+    shows from time-up; a poll whose results come after closing shows its
+    count of answers only while it runs. Applied when sent (the clock moves
+    without a rebuild); a console from before gets the body as it was."""
+    out = dict(data)
+    quiz = out.get("quiz")
+    q = quiz.get("question") if isinstance(quiz, dict) else None
+    if isinstance(q, dict) and (out.get("control") or {}).get("results", "hidden") == "hidden" and not q.get("revealed") and int(q.get("time_left") or 0) > 0:
+        q = {**q, "counts": [{**c, "count": 0} for c in q.get("counts") or []], "texts": None, "answered": q.get("answered")}
+        out["quiz"] = {**quiz, "question": q}
+    poll = out.get("poll")
+    if isinstance(poll, dict) and poll.get("status") == "live" and (poll.get("settings") or {}).get("results") == "closed":
+        out["poll"] = {**poll, "results": {"responses": (poll.get("results") or {}).get("responses", 0)}}
+    return out
+
+
 async def screen(session, event: Events, now: Optional[datetime] = None) -> dict:
     """The big screen: the pinned question, the board, the poll up now, the
     quiz if it runs, the last update -- and, with this release, the theme,
@@ -2405,15 +2445,16 @@ async def screen(session, event: Events, now: Optional[datetime] = None) -> dict
     custom, resolved, version = await looks.state(session, event.id)
     quiz_live = quiz is not None and quiz.status is QuizStatus.live
     if control["mode"] == "auto":
-        shows = "quiz" if quiz_live else "poll" if live_poll is not None else "qa" if pinned is not None else "idle" if control["idle_slides"] else "qa"
+        if quiz_live or await _round_just_ended(session, event, quiz, pinned, control, live_poll):
+            # A round that ended stays (its final board) until something else goes up.
+            shows = "quiz"
+        else:
+            shows = "poll" if live_poll is not None else "qa" if pinned is not None else "idle" if control["idle_slides"] else "qa"
     else:
         shows = control["mode"]
     show_quiz = quiz is not None and (quiz_live or shows in ("quiz", "leaderboard"))
-    hide = control["results"] == "hidden"
     poll = await poll_out(session, shown_poll) if shown_poll else None
-    if poll is not None and hide and poll["status"] == "live":
-        poll["results"] = {"responses": poll["results"]["responses"]}
-    quiz_state = await host_state(session, quiz, now, for_screen=True, hide_results=hide) if show_quiz else None
+    quiz_state = await host_state(session, quiz, now, for_screen=True) if show_quiz else None
     overall_rows = None
     if shows == "leaderboard" and quiz is not None:
         overall_rows = await overall(session, event.id, top=10, anonymous=bool(quiz_state and quiz_state["settings"]["players"]["anonymous_screen"]))
@@ -2427,7 +2468,7 @@ async def screen(session, event: Events, now: Optional[datetime] = None) -> dict
         "quiz": quiz_state if (quiz_live or shows in ("quiz", "leaderboard")) else None,
         "update": update_out(fresh[0]) if fresh else None,
         "theme": resolved, "theme_custom": custom, "theme_version": version,
-        "control": control, "shows": shows,
+        "control": {k: v for k, v in control.items() if not k.startswith("_")}, "shows": shows,
         "wall": [_question_row_out(r) for r in rows[:wall_size]],
         "updates": [update_out(u) for u in fresh],
         "agenda": await looks.agenda(session, event.id, now) if "agenda" in control["idle_slides"] else [],

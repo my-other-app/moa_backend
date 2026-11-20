@@ -56,9 +56,12 @@ def quiz(d: dict) -> dict:
 
 
 def screen(d: dict) -> dict:
+    """Today's screen: the poll that is up and the round that runs, nothing
+    a console of this release may keep on it (a closed poll, an ended round)."""
     out = _pick(d, SCREEN_KEYS, extra=())
-    out["poll"] = poll(d.get("poll"))
-    out["quiz"] = host(d.get("quiz"))
+    p, q = d.get("poll"), d.get("quiz")
+    out["poll"] = poll(p) if isinstance(p, dict) and p.get("status") == "live" else None
+    out["quiz"] = host(q) if isinstance(q, dict) and q.get("status") == "live" else None
     return out
 
 

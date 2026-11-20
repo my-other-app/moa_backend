@@ -580,7 +580,12 @@ class Feed:
             return v, shows, frame("snapshot", orjson.dumps(data, default=str), v)
         data = self.club[view]
         if listener.v2:
-            return v, data, frame("snapshot", orjson.dumps(_with_clock(view, data, _now()), default=str), v)
+            from app.api.live import service
+
+            clocked = _with_clock(view, data, _now())
+            if view == "screen":
+                clocked = service.screen_shown(clocked)
+            return v, data, frame("snapshot", orjson.dumps(clocked, default=str), v)
         # A console from before this release: today's fields (compat.py).
         made = self._club_v1.get(view)
         if made is None or made[0] is not data:
