@@ -151,7 +151,11 @@ async def calendar(
 @limiter.limit(LIMIT, key_func=_visitor)
 async def event_page(request: Request, session: SessionDep, user: OptionalAuth, ref: str = Path(..., max_length=160, description="The event's slug, or its id")) -> EventPage:
     """404 for anything the public cannot see: a draft, a deleted event, an unverified club's."""
-    return EventPage(**await service.event_page(session, ref))
+    page = await service.event_page(session, ref)
+    from app.api.quests import public as quests_public
+
+    page["quest"] = await quests_public.flag(session, (page.get("event") or {}).get("id"), per_viewer=False)
+    return EventPage(**page)
 
 
 @router.get("/clubs", summary="Clubs to find: by words, topic, interest and distance")

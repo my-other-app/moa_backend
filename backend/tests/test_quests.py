@@ -26,10 +26,14 @@ NEW = {"X-Gate-Features": "quests"}
 @pytest.fixture(autouse=True)
 def _at_once(monkeypatch):
     """Evaluations run when the request's jobs settle (nothing waits for a bucket here)."""
+    from app.api.quests import guest
+
     monkeypatch.setattr(signals, "BUCKET_SECONDS", 0)
     switch.forget()
+    guest._looked.clear()
     yield
     switch.forget()
+    guest._looked.clear()
 
 
 @pytest.fixture
@@ -216,12 +220,20 @@ async def test_a_qr_save_at_the_event_sets_the_task_off_for_both_people(client, 
         w["g"][k][1].is_attended = True
         session.add(UserProfiles(user_id=w["g"][k][0].id, full_name=w["g"][k][0].full_name))
     await session.commit()
-    (t,) = await setup(client, w, milestones=(), tasks=[{"kind": "network", "config": {"count": 1, "direction": "either"}}])
+    (t,) = await setup(client, w, milestones=(), tasks=[{"kind": "network", "config": {"count": 2, "direction": "either"}}])
     code = await code_of(client, w["g"]["b"][2])
     r = await save(client, w["g"]["a"][2], code=code, method="qr", event_id=w["event"].id)
     assert r.status_code in (200, 201), r.text
-    assert task_me(await card(client, w, "a"), t["id"])["done"] is True
-    assert task_me(await card(client, w, "b"), t["id"])["done"] is True
+    # The save answers with the saver's count at once ("1 of 2 met").
+    assert r.json()["quest"] == {"event_id": w["event"].id, "tasks": [{"task_id": t["id"], "title": t["title"], "count": 1, "target": 2, "done": False}]}
+    assert task_me(await card(client, w, "a"), t["id"])["count"] == 1
+    assert task_me(await card(client, w, "b"), t["id"])["count"] == 1
+    # The same scan again: no new meeting, the same count.
+    again = await save(client, w["g"]["a"][2], code=code, method="qr", event_id=w["event"].id)
+    assert again.json()["new_encounter"] is False and again.json()["quest"]["tasks"][0]["count"] == 1
+    # A save with no event, or at an event without a quest: no quest block.
+    plain = await save(client, w["g"]["b"][2], code=await code_of(client, w["g"]["a"][2]), method="qr")
+    assert plain.json()["quest"] is None
 
 
 # ─── The live room, feedback, posters, follows, the profile ─────────────
@@ -854,3 +866,21 @@ async def test_the_five_minute_sweep_looks_at_follows_for_events_on_now(client, 
     assert await sweep.sweep(session) >= 1
     p = await session.scalar(select(QuestProgress).where(QuestProgress.task_id == uuid.UUID(t["id"]), QuestProgress.registration_id == w["g"]["b"][1].id))
     assert p is not None and p.done_at is not None
+
+
+async def test_the_event_says_whether_it_has_a_quest_and_reading_the_card_writes_nothing(client, session, world, make_user, mint_token):
+    from app.api.quests import public as quests_public
+
+    w = world
+    info = await ok(await client.get(f"{API}/events/info/{w['event'].id}", headers=w["g"]["a"][2]))
+    assert info["quest"] == {"enabled": False, "can_take_part": False}
+    await setup(client, w, milestones=(), tasks=[{"kind": "follow_club"}])
+    info = await ok(await client.get(f"{API}/events/info/{w['event'].id}", headers=w["g"]["a"][2]))
+    assert info["quest"] == {"enabled": True, "can_take_part": True}
+    outsider = await make_user(email="q-info@example.com")
+    info = await ok(await client.get(f"{API}/events/info/{w['event'].id}", headers=auth_header(await mint_token(outsider))))
+    assert info["quest"] == {"enabled": True, "can_take_part": False}
+    assert await quests_public.flag(session, w["event"].id, per_viewer=False) == {"enabled": True, "can_take_part": None}
+    # Opening the card with nothing done makes no row; the first progress does.
+    await card(client, w, "c")
+    assert not await session.scalar(select(func.count()).select_from(QuestEntries))

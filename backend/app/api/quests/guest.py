@@ -145,23 +145,28 @@ async def _rank(session, quest, entry) -> Optional[int]:
     return int(higher) + 1
 
 
+#: When this process last looked, per (quest, registration): no write on a read.
+_looked: dict = {}
+_LOOKED_MAX = 20_000
+
+
 async def _maybe_refresh(session, event, quest, d, reg, entry) -> None:
-    """Posters' links, the profile and the follow: no event says when they change, so the card looks (≤ once a minute)."""
+    """Posters' links, the profile and the follow: no event says when they
+    change, so the card looks (at most once a minute per guest and process).
+    Nothing is written unless something is now done (the guest's entry row
+    is made by their first progress, never by a read)."""
+    import time
+
     if not any(t.kind in K.POLLED for t in d.tasks) or not _open(quest, _now()):
         return
-    if entry is not None and entry.refreshed_at is not None and _now() - entry.refreshed_at < REFRESH_EVERY:
+    key = (quest.id, reg.id)
+    now = time.monotonic()
+    if now - _looked.get(key, -1e9) < REFRESH_EVERY.total_seconds():
         return
+    if len(_looked) >= _LOOKED_MAX:
+        _looked.clear()
+    _looked[key] = now
     await engine.evaluate(session, event.id, kinds=K.POLLED, reg_ids=[reg.id])
-    import uuid
-
-    from sqlalchemy.dialects.postgresql import insert as pg_insert
-
-    now = _now()
-    stmt = pg_insert(QuestEntries).values(
-        id=uuid.uuid4(), quest_id=quest.id, registration_id=reg.id, user_id=reg.user_id, refreshed_at=now, created_at=now, updated_at=now
-    )
-    await session.execute(stmt.on_conflict_do_update(constraint="uq_quest_entries_quest_registration", set_={"refreshed_at": now}))
-    await session.commit()
 
 
 async def card(session, event, user, *, view_all: bool = False, reg=None) -> dict:

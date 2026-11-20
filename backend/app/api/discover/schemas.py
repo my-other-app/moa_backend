@@ -337,6 +337,9 @@ class EventPage(BaseModel):
     cohosts: list[CohostRefUrl] = []
     more_from_club: list[EventCard]
     similar: list[EventCard]
+    #: The event's quest: {"enabled", "can_take_part": null} -- the page is the
+    #: same for everyone; ask GET /events/{id}/quest when enabled (app/api/quests).
+    quest: Optional[dict] = None
 
 
 class SitemapEntry(BaseModel):

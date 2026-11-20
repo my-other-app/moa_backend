@@ -152,7 +152,6 @@ def upgrade() -> None:
         _at("score_at"),
         sa.Column("code_fails", sa.Integer(), nullable=False, server_default="0"),
         _at("code_window_at"),
-        _at("refreshed_at"),
         *_stamps(),
         sa.UniqueConstraint("quest_id", "registration_id", name="uq_quest_entries_quest_registration"),
     )

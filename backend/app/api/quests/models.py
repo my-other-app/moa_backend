@@ -179,8 +179,6 @@ class QuestEntries(AbstractSQLModel):
     #: Wrong codes since `code_window_at` (an hour from the first of them).
     code_fails = Column(Integer, nullable=False, default=0, server_default="0")
     code_window_at = _at()
-    #: When the card last looked at the kinds it refreshes itself (§5.1).
-    refreshed_at = _at()
     created_at, updated_at = _stamps()
 
     __table_args__ = (
