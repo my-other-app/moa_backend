@@ -459,14 +459,24 @@ async def test_achievements_show_what_the_person_chose(client, session, world, m
             event=e, user=owner, is_attended=True, certificate_issued_at=datetime.now(timezone.utc), certificate_public_id=f"pub{e.id}x",
         )
     session.add(ClubUsersLink(club_id=club.id, user_id=owner.id, is_following=True))
+    _, makers = await make_club(name="Makers Guild", email="makers-host@example.com")
+    makers.logo = "clubs/logos/v-makers.png"
+    session.add(ClubUsersLink(club_id=makers.id, user_id=owner.id, is_following=True))
     await session.commit()
+    # Read back as the API reads it: the stored key, as links by size.
+    session.expire(makers, ["logo"])
     a = (await client.get(f"{API}/profiles/asha")).json()["achievements"]
     assert a["events_attended"] is None and a["clubs"] is None
     # Only the public event's certificate: a private event's name never shows.
     assert a["certificates"] == [{"event_name": "Hack Night", "url": f"https://myotherapp.in/certificates/pub{held.id}x"}]
     await client.patch(f"{API}/me/profile", json={"show_events": True, "show_clubs": True, "show_certificates": False}, headers=oh)
     a = (await client.get(f"{API}/profiles/asha")).json()["achievements"]
-    assert a["events_attended"] == 2 and a["clubs"] == [{"name": "Hack Club", "slug": club.slug}] and a["certificates"] is None
+    assert a["events_attended"] == 2 and a["certificates"] is None
+    # Each club with its logo, for the row's picture; null without one.
+    hack, guild = a["clubs"]
+    assert hack == {"name": "Hack Club", "slug": club.slug, "logo": None}
+    assert (guild["name"], guild["slug"]) == ("Makers Guild", makers.slug)
+    assert guild["logo"].startswith("http") and "v-makers" in guild["logo"]
 
 
 async def test_the_owners_user_id_is_given_only_to_a_signed_in_reader(client, session, make_user, world):

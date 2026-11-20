@@ -60,8 +60,26 @@ is linked (`speakers.links.link_event_speakers`):
    profile from the row, and a merge candidate against profiles of the same
    name at other clubs.
 
-`talk_title` is the row's when sent. A club's edit changes only its event
-copy; `POST /clubs/speakers/{id}/apply-to-upcoming` copies the profile's name,
+`talk_title` is the row's when sent. A club's edit changes its event copy,
+and also the profile when that profile is the club's alone: active,
+unclaimed, and on no other club's event (`links.follow_club_edits`). Only
+what the edit changed is copied: the name, the designation (as the headline),
+the bio, the photo and the link, with a history line `edited_from_event`. The
+event page's speaker card opens the profile, so an edit that stopped at the
+copy left the speaker's page showing what the club had just put right. A
+claimed profile is the speaker's and one shared with another club's events is
+not one club's: their profile stays as it is. A new name that is plainly
+another person (the profile has other talks, and the names are not one name
+with a word more) moves the row to the club's profile of exactly that name,
+else a new one; a spelling put right on a speaker's only talk renames the
+profile in place (its address stays).
+
+Edits made before this: `python -m scripts.speakers_resync` (a dry run with
+the counts), then `--apply`. It copies, for each such profile, the row its
+club changed last, when that was after the profile last changed (an admin's
+later edit stands); a different name is counted, not copied.
+
+`POST /clubs/speakers/{id}/apply-to-upcoming` copies the profile's name,
 headline, bio, photo and first link onto the club's rows on events not over
 yet (never a past one, never another club's).
 
