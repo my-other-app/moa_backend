@@ -916,3 +916,30 @@ async def test_the_rooms_quiz_card_follows_the_live_round(client, world):
     assert (await client.get(_u(world))).json()["quiz"] == {"live": False, "title": "The Final"}
     await _start(client, world, path=f"/quizzes/{first['id']}/host/start")
     assert (await client.get(_u(world))).json()["quiz"] == {"live": True, "title": first["title"]}
+
+
+async def test_the_poll_that_closed_last_stays_on_this_releases_feed_read_only(client, session, world):
+    poll = await _poll(client, world, {"kind": "choice", "prompt": "Tea?", "options": ["Yes", "No"], "settings": {"results": "closed"}})
+    await _respond(client, world, poll, 1, {"value": "Yes"})
+    assert (await client.get(_u(world), headers={**_key(1), **V2})).json()["poll"]["results"] == {"responses": 1}  # hidden while it runs
+    await client.post(_u(world, f"/polls/{poll['id']}/status"), json={"status": "closed"}, headers=world["hv"])
+    assert (await client.get(_u(world), headers=_key(1))).json()["poll"] is None  # today's feed: gone, as always
+    shown = (await client.get(_u(world), headers={**_key(1), **V2})).json()["poll"]
+    assert shown["id"] == poll["id"] and shown["status"] == "closed" and shown["results_hidden"] is False
+    assert [c["count"] for c in shown["results"]["choices"]] == [1, 0] and shown["my_response"] == "Yes" and shown["my_values"] == ["Yes"]
+    assert (await _respond(client, world, poll, 2, {"value": "No"})).status_code == 409  # never answerable
+    # The next launch takes its place.
+    other = await _poll(client, world, {"kind": "words", "prompt": "One word?"})
+    assert (await client.get(_u(world), headers=V2)).json()["poll"]["id"] == other["id"]
+    await client.post(_u(world, f"/polls/{other['id']}/status"), json={"status": "closed"}, headers=world["hv"])
+    assert (await client.get(_u(world), headers=V2)).json()["poll"]["id"] == other["id"]
+    # Half an hour after it closed, it goes.
+    await session.execute(text("UPDATE live_polls SET closed_at = now() - interval '31 minutes' WHERE event_id = :e"), {"e": world["eid"]})
+    await session.commit()
+    room.forget_room(world["eid"])
+    assert (await client.get(_u(world), headers=V2)).json()["poll"] is None
+    # A poll hidden from guests stays hidden once closed.
+    hidden = await _poll(client, world, {"kind": "choice", "prompt": "Secret?", "options": ["A", "B"], "settings": {"hide_results": True}})
+    await _respond(client, world, hidden, 1, {"value": "A"})
+    await client.post(_u(world, f"/polls/{hidden['id']}/status"), json={"status": "closed"}, headers=world["hv"])
+    assert (await client.get(_u(world), headers=V2)).json()["poll"]["results"] == {"responses": 1}

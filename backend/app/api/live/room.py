@@ -85,6 +85,9 @@ FEED_QUESTIONS = 200
 BANNER_FOR = timedelta(hours=3)
 #: The words a word cloud shows.
 CLOUD_WORDS = 40
+#: How long the poll that closed last stays on this release's feed (with its
+#: results, as its settings say), unless another is launched first.
+CLOSED_POLL_FOR = timedelta(minutes=30)
 
 #: How long the players of a quiz run met by this process are kept (board mode).
 ROSTER_SECONDS = 3 * 3600.0
@@ -352,6 +355,11 @@ class Room:
     #: Its settings, resolved, and when its timer runs out.
     poll_settings: dict = field(default_factory=dict)
     poll_closes_at: Optional[datetime] = None
+    #: The poll this release's feed shows: the one up, or with none up the one
+    #: that closed last (CLOSED_POLL_FOR). Never answerable: answers go by
+    #: `poll_id`, the poll that is up. Its kind, options and settings are the
+    #: poll_* fields above.
+    shown_poll_id: Optional[str] = None
     #: The feed as a client of this release reads it (X-Live-Version: 2):
     #: the poll with its settings, and the theme.
     body_v2: bytes = b""
@@ -409,6 +417,16 @@ async def _build_room(session, event_id: int):
     if qa_open and not await gates.allows_for_feed(session, event.club_id, "qa", event=event):
         qa_open = False
     full = await poll_full(session, poll, console=False) if poll else None
+    shown, shown_full = poll, full
+    if poll is None:
+        # The poll that closed last, read-only with its results, on this release's feed only.
+        shown = await session.scalar(
+            select(LivePolls).where(
+                LivePolls.event_id == event.id, LivePolls.status == PollStatus.closed, LivePolls.launched_at.isnot(None),
+                LivePolls.closed_at >= now - CLOSED_POLL_FOR,
+            ).order_by(LivePolls.closed_at.desc()).limit(1)
+        )
+        shown_full = await poll_full(session, shown, console=False) if shown else None
     public = {
         "event": {"id": event.id, "name": event.name, "status": (event.lifecycle or EventStatus.published).value},
         "banner": update_out(banner) if banner else None,
@@ -420,7 +438,9 @@ async def _build_room(session, event_id: int):
     }
     data = Feed(**public).model_dump(mode="json")
     custom, resolved, version = await looks.state(session, event.id)
-    data_v2 = FeedV2(**{**public, "poll": {**guest_poll(full), "my_response": None} if poll else None, "theme": {"custom": custom, "theme": resolved, "version": version}}).model_dump(mode="json")
+    data_v2 = FeedV2(**{
+        **public, "poll": {**guest_poll(shown_full), "my_response": None} if shown else None, "theme": {"custom": custom, "theme": resolved, "version": version},
+    }).model_dump(mode="json")
     strip = BannerFeed(
         event={**public["event"], "starts_at": event.event_datetime, "ends_at": event.event_datetime + timedelta(hours=event.duration or 0)},
         banner=public["banner"],
@@ -434,8 +454,9 @@ async def _build_room(session, event_id: int):
     return Room(
         event_id=event.id, club_id=event.club_id, lifecycle=event.lifecycle, approve_first=bool(event.qa_approve_first),
         body=orjson.dumps(data), data=data, question_ids=frozenset(str(q.id) for q, _ in rows), asked_by=asked_by,
-        poll_id=str(poll.id) if poll else None, poll_kind=poll.kind if poll else None, poll_options=tuple(poll.options or ()) if poll else (),
-        poll_settings=full["settings"] if full else {}, poll_closes_at=poll.closes_at if poll else None,
+        poll_id=str(poll.id) if poll else None, poll_kind=shown.kind if shown else None, poll_options=tuple(shown.options or ()) if shown else (),
+        poll_settings=shown_full["settings"] if shown_full else {}, poll_closes_at=poll.closes_at if poll else None,
+        shown_poll_id=str(shown.id) if shown else None,
         strip=strip, strip_body=orjson.dumps(strip), body_v2=orjson.dumps(data_v2), data_v2=data_v2,
     )
 
@@ -573,7 +594,7 @@ def flags_of(room: Room, key: Optional[str], voter: Optional[Voter]) -> Optional
         return None
     voted = frozenset(voter.voted & room.question_ids)
     mine = frozenset(room.asked_by.get(key, ()))
-    answer = voter.answers.get(room.poll_id) if room.poll_id else None
+    answer = voter.answers.get(room.shown_poll_id) if room.shown_poll_id else None
     if not voted and not mine and answer is None:
         return None
     return voted, mine, answer
