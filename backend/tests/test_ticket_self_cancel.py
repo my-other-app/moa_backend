@@ -49,9 +49,15 @@ async def world(session, make_club, make_event, make_user, make_registration, mi
     )
 
 
-async def _places_left(client, event_id: int):
-    """What the ticket picker says is left (ticketing.places, as the public form counts it)."""
-    r = await client.get(f"{API}/events/{event_id}/ticket-types")
+async def _places_left(client, session, event):
+    """What the ticket picker says is left (ticketing.places, as the public form counts it).
+
+    The requests share the test's session, whose copy of the event keeps
+    the counts it was read with, while the database's triggers keep the
+    real ones; the picker reads the event once and takes its counts as read.
+    A request of its own would read them fresh, so they are expired first."""
+    session.expire(event, ["going_count", "paid_count"])
+    r = await client.get(f"{API}/events/{event.id}/ticket-types")
     assert r.status_code == 200, r.text
     return r.json()["available"]
 
@@ -95,7 +101,7 @@ async def test_a_bad_link_says_invalid(client, world):
 
 
 async def test_a_free_ticket_is_given_back_and_its_seat_freed_as_the_club_would(client, session, world, mail):
-    assert await _places_left(client, world.event.id) == 0
+    assert await _places_left(client, session, world.event) == 0
     page = (await client.get(f"{API}/tickets/cancel/{world.token}")).json()
     assert page["cancellable"] is True and page["reason"] is None
     assert page["event"]["id"] == world.event.id and page["event"]["slug"] == world.event.slug and page["event"]["starts_at"]
@@ -107,7 +113,7 @@ async def test_a_free_ticket_is_given_back_and_its_seat_freed_as_the_club_would(
     reg = await _reg(session, world.reg.id)
     assert reg.is_deleted and reg.deleted_at is not None
     # The place is free.
-    assert await _places_left(client, world.event.id) == 1
+    assert await _places_left(client, session, world.event) == 1
     row = await session.scalar(select(TicketCancellations))
     assert (row.registration_id, row.reason, row.email) == (world.reg.id, "Exams that week", world.reg.email)
     alert = await session.scalar(select(ClubAlerts).where(ClubAlerts.club_id == world.club.id))
@@ -145,9 +151,9 @@ async def test_both_ways_off_the_list_are_one_path_and_free_the_seat(client, ses
         f"{API}/events/registration/{world.event.id}/info/{world.reg2.id}", params={"confirm_slug": world.event.slug}, headers=world.h,
     )
     assert r.status_code == 200, r.text
-    assert taken == [world.reg2.id] and await _places_left(client, world.event.id) == 1
+    assert taken == [world.reg2.id] and await _places_left(client, session, world.event) == 1
     assert (await client.post(f"{API}/tickets/cancel/{world.token}", json={})).status_code == 200
-    assert taken == [world.reg2.id, world.reg.id] and await _places_left(client, world.event.id) == 2
+    assert taken == [world.reg2.id, world.reg.id] and await _places_left(client, session, world.event) == 2
     assert (await _reg(session, world.reg2.id)).is_deleted and (await _reg(session, world.reg.id)).is_deleted
 
 

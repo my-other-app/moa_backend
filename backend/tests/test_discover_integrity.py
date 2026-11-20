@@ -261,10 +261,12 @@ async def test_the_apps_club_list_reads_the_counter_and_follows_are_upserts(clie
     assert not [s for s in seen if "count(DISTINCT" in s or "count(distinct" in s], seen  # no count over every follow
     info = (await client.get(f"/api/v1/clubs/info/{club.id}", headers=fan_h[0])).json()
     assert info["followers_count"] == 4 and info["user_data"]["is_following"] is True
-    # The followers, a page at a time by cursor: every follower once, newest first.
-    first = (await client.get(f"/api/v1/clubs/followers/{club.id}?limit=2", headers=fan_h[0])).json()
+    # The followers, a page at a time by cursor: every follower once, newest
+    # first. The club's own list: a follower is refused it.
+    assert (await client.get(f"/api/v1/clubs/followers/{club.id}?limit=2", headers=fan_h[0])).status_code == 403
+    first = (await client.get(f"/api/v1/clubs/followers/{club.id}?limit=2", headers=world["h"])).json()
     assert len(first["items"]) == 2 and first["total"] == 4 and "after=" in first["next"]
-    second = (await client.get(first["next"], headers=fan_h[0])).json()
+    second = (await client.get(first["next"], headers=world["h"])).json()
     assert len(second["items"]) == 2 and second["next"] is None
     assert len({i["user"]["id"] for i in first["items"] + second["items"]}) == 4
 
