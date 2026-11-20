@@ -481,11 +481,14 @@ async def update_event(
         # Track IDs to keep
         keep_ids = set()
         pairs = []
+        # Rows as they were, for the profiles that follow the club's edits.
+        edited = []
         
         for idx, speaker in enumerate(speakers_data):
             if speaker.id and speaker.id in existing_speakers_map:
                 # Update existing speaker
                 db_speaker = existing_speakers_map[speaker.id]
+                edited.append((db_speaker, speaker_links.snapshot(db_speaker)))
                 db_speaker.name = speaker.name
                 db_speaker.designation = speaker.designation
                 # Only when sent: a client that predates them would otherwise wipe them.
@@ -547,9 +550,13 @@ async def update_event(
         # Each row to its profile in the speakers directory (app/api/speakers).
         from app.api.speakers import service as speaker_service
 
+        speaker_actor = speaker_service.club_actor(actor or SimpleNamespace(id=user_id), db_event.club_id)
         await speaker_links.link_event_speakers(
-            session, event_id=event_id, club_id=db_event.club_id, pairs=pairs,
-            actor=speaker_service.club_actor(actor or SimpleNamespace(id=user_id), db_event.club_id),
+            session, event_id=event_id, club_id=db_event.club_id, pairs=pairs, actor=speaker_actor,
+        )
+        # A profile that is the club's alone shows what the club just changed.
+        await speaker_links.follow_club_edits(
+            session, event_id=event_id, club_id=db_event.club_id, edited=edited, actor=speaker_actor,
         )
 
     if store_item_ids is not None:
