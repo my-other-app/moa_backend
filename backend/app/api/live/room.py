@@ -51,7 +51,7 @@ from datetime import datetime, timedelta, timezone
 from typing import NamedTuple, Optional
 
 import orjson
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select, text, update
 
 from app.api.closeout.models import EventStatus
 from app.api.clubs.models import Clubs
@@ -148,29 +148,186 @@ async def counts_of(session, poll_id) -> tuple[int, list[tuple[str, int]]]:
     return sum(int(c) for _, c, _ in rows), [(v, int(c)) for v, c, _ in rows]
 
 
-def results_of(poll: LivePolls, total: int, counts: list[tuple[str, int]]) -> dict:
+#: Open-text answers a poll's results carry.
+POLL_TEXTS = 50
+#: What a client from before the poll kinds shows for one it cannot answer.
+POLL_NEEDS_UPDATE = "This kind of poll needs an update: reload the page or update the app to answer it."
+
+
+def _indexes(value: str) -> list[int]:
+    try:
+        return [int(x) for x in value.split(",") if x != ""]
+    except ValueError:
+        return []
+
+
+def results_of(poll: LivePolls, total: int, counts: list[tuple[str, int]], st: Optional[dict] = None) -> dict:
+    """A poll's results from its counts by value (and its settings: a
+    multiple-choice poll's values are option indexes, a rating's scale)."""
+    st = st if st is not None else live_settings.poll_settings(poll.kind.value, poll.settings)
     out: dict = {"responses": total}
     by = dict(counts)
+    options = list(poll.options or [])
     if poll.kind is PollKind.choice:
-        out["choices"] = [{"label": o, "count": by.get(o, 0), "pct": round(100 * by.get(o, 0) / total) if total else 0} for o in poll.options]
+        if int(st.get("max_choices") or 1) > 1:
+            picked: dict[int, int] = {}
+            for v, k in counts:
+                for i in set(_indexes(v)):
+                    picked[i] = picked.get(i, 0) + k
+            out["choices"] = [{"label": o, "count": picked.get(i, 0), "pct": round(100 * picked.get(i, 0) / total) if total else 0} for i, o in enumerate(options)]
+        else:
+            out["choices"] = [{"label": o, "count": by.get(o, 0), "pct": round(100 * by.get(o, 0) / total) if total else 0} for o in options]
     elif poll.kind is PollKind.words:
         out["words"] = [{"word": w, "count": k} for w, k in counts[:CLOUD_WORDS]]
-    else:
+    elif poll.kind is PollKind.rating:
+        scale = int(st.get("scale") or 5)
         nums = {int(v): k for v, k in counts if v.isdigit()}
         rated = sum(nums.values())
         out["rating"] = {
             "average": round(sum(v * k for v, k in nums.items()) / rated, 2) if rated else None,
-            "histogram": [{"value": v, "count": nums.get(v, 0), "pct": round(100 * nums.get(v, 0) / total) if total else 0} for v in range(1, 6)],
+            "histogram": [{"value": v, "count": nums.get(v, 0), "pct": round(100 * nums.get(v, 0) / total) if total else 0} for v in range(1, scale + 1)],
         }
+    elif poll.kind is PollKind.ranking:
+        n = len(options)
+        pos_sum = [0] * n
+        points = [0] * n
+        first = [0] * n
+        voters = 0
+        for v, k in counts:
+            order = _indexes(v)
+            if sorted(order) != list(range(n)):
+                continue
+            voters += k
+            for place, i in enumerate(order):
+                pos_sum[i] += (place + 1) * k
+                points[i] += (n - place - 1) * k
+            first[order[0]] += k
+        rows = [
+            {"label": o, "average": round(pos_sum[i] / voters, 2) if voters else None, "points": points[i], "first": first[i], "_i": i}
+            for i, o in enumerate(options)
+        ]
+        rows.sort(key=lambda r: (-r["points"], r["_i"]))
+        for r in rows:
+            r.pop("_i")
+        out["ranking"] = rows
     return out
 
 
-async def poll_public(session, poll: LivePolls) -> dict:
+async def _texts(session, poll: LivePolls, st: dict, *, pending: bool = False) -> dict:
+    """An open-text poll's answers the room may see: approved (or, unmoderated,
+    every one), newest first."""
+    q = select(LivePollResponses.id, LivePollResponses.value, LivePollResponses.author_name, LivePollResponses.created_at).where(LivePollResponses.poll_id == poll.id)
+    q = q.where(LivePollResponses.status == "approved")
+    rows = (await session.execute(q.order_by(LivePollResponses.created_at.desc()).limit(POLL_TEXTS))).all()
+    out = {"texts": [{"id": rid, "text": v, "name": (name if not st.get("anonymous", True) else None), "at": at} for rid, v, name, at in rows]}
+    if pending:
+        out["pending"] = int(await session.scalar(
+            select(func.count()).select_from(LivePollResponses).where(LivePollResponses.poll_id == poll.id, LivePollResponses.status == "pending")
+        ) or 0)
+    return out
+
+
+async def _option_images(session, poll: LivePolls, st: dict) -> list:
+    ids = [i for i in (st.get("option_images") or []) if i]
+    if not ids:
+        return []
+    from app.api.live import looks
+
+    media = await looks.media_of(session, poll.event_id, ids)
+    return [({k: media[i][k] for k in ("thumbnail", "medium", "large")} if i and i in media else None) for i in st.get("option_images") or []]
+
+
+async def poll_full(session, poll: LivePolls, *, console: bool = True) -> dict:
+    """The poll as the console and the big screen see it (v2): today's fields,
+    every result, its settings, and whether guests are shown the results."""
+    st = live_settings.poll_settings(poll.kind.value, poll.settings)
     total, counts = await counts_of(session, poll.id)
+    results = results_of(poll, total, counts, st)
+    if poll.kind is PollKind.rating:
+        results["scale"] = int(st["scale"])
+    if poll.kind is PollKind.text:
+        results.update(await _texts(session, poll, st, pending=console))
     return {
         "id": poll.id, "kind": poll.kind.value, "prompt": poll.prompt, "options": list(poll.options or []), "status": poll.status.value,
-        "launched_at": poll.launched_at, "closed_at": poll.closed_at, "sort_order": poll.sort_order, "results": results_of(poll, total, counts),
+        "launched_at": poll.launched_at, "closed_at": poll.closed_at, "sort_order": poll.sort_order, "results": results,
+        "settings": st, "closes_at": poll.closes_at, "option_images": await _option_images(session, poll, st),
+        "results_hidden": live_settings.poll_results_hidden(st, poll.status.value), "my_values": None,
     }
+
+
+def guest_poll(full: dict) -> dict:
+    """The v2 poll as a guest sees it: the results only while they are shown."""
+    out = dict(full)
+    if full["results_hidden"]:
+        out["results"] = {"responses": full["results"]["responses"]}
+    elif "pending" in full["results"]:
+        out["results"] = {k: v for k, v in full["results"].items() if k != "pending"}
+    return out
+
+
+def legacy_poll(full: dict) -> dict:
+    """The poll as a client from before the poll kinds reads it: today's
+    fields with today's meanings. A multiple-choice poll is a single choice
+    (one tap is a one-option answer); a kind it cannot answer is its prompt
+    with a line asking to update and nothing to answer; hidden results are
+    empty."""
+    st = full["settings"]
+    kind = full["kind"]
+    total = full["results"]["responses"]
+    out = {k: full[k] for k in ("id", "kind", "prompt", "options", "status", "launched_at", "closed_at", "sort_order")}
+    if live_settings.poll_needs_update(kind, st):
+        out.update(kind="choice", prompt=f"{full['prompt']}\n\n{POLL_NEEDS_UPDATE}", options=[], results={"responses": total, "choices": []})
+        return out
+    results = full["results"]
+    if full["results_hidden"]:
+        if kind == "choice":
+            results = {"responses": total, "choices": [{"label": o, "count": 0, "pct": 0} for o in full["options"]]}
+        elif kind == "words":
+            results = {"responses": total, "words": []}
+        else:
+            results = {"responses": total, "rating": {"average": None, "histogram": [{"value": v, "count": 0, "pct": 0} for v in range(1, 6)]}}
+    else:
+        results = {k: v for k, v in results.items() if k in ("responses", "choices", "words", "rating")}
+    out["results"] = results
+    return out
+
+
+def my_fields(kind: str, options, st: dict, value: Optional[str], v2: bool) -> dict:
+    """A browser's own answer on the poll, as each client reads it."""
+    if value is None:
+        return {"my_response": None, **({"my_values": None} if v2 else {})}
+    options = list(options or [])
+    if kind == "choice" and int(st.get("max_choices") or 1) > 1:
+        labels = [options[i] for i in _indexes(value) if 0 <= i < len(options)]
+    elif kind == "ranking":
+        labels = [options[i] for i in _indexes(value) if 0 <= i < len(options)]
+    else:
+        labels = [value]
+    if v2:
+        return {"my_response": value, "my_values": labels}
+    if live_settings.poll_needs_update(kind, st):
+        return {"my_response": None}
+    return {"my_response": labels[0] if labels else None}
+
+
+async def poll_public(session, poll: LivePolls) -> dict:
+    """The poll as a client from before the kinds reads it (legacy_poll)."""
+    return legacy_poll(await poll_full(session, poll, console=False))
+
+
+async def close_due(session, event_id: int, now: Optional[datetime] = None) -> bool:
+    """Polls whose timer ran out, closed (whoever reads the room first does
+    it; the others find them closed). True when one closed."""
+    now = now or now_utc()
+    gone = (await session.execute(
+        update(LivePolls).where(LivePolls.event_id == event_id, LivePolls.status == PollStatus.live, LivePolls.closes_at.isnot(None), LivePolls.closes_at <= now)
+        .values(status=PollStatus.closed, closed_at=LivePolls.closes_at).returning(LivePolls.id)
+    )).all()
+    if gone:
+        await session.commit()
+        bus.changed(event_id, "room", now=True)
+        return True
+    return False
 
 
 # ─── The room ─────────────────────────────────────────────────────────────
@@ -192,6 +349,13 @@ class Room:
     poll_id: Optional[str] = None
     poll_kind: Optional[PollKind] = None
     poll_options: tuple = ()
+    #: Its settings, resolved, and when its timer runs out.
+    poll_settings: dict = field(default_factory=dict)
+    poll_closes_at: Optional[datetime] = None
+    #: The feed as a client of this release reads it (X-Live-Version: 2):
+    #: the poll with its settings, and the theme.
+    body_v2: bytes = b""
+    data_v2: dict = field(default_factory=dict)
     #: The event page's strip (BannerFeed, view=banner), JSON-safe, and as
     #: it is sent (GET .../live/banner and the stream's frames).
     strip: Optional[dict] = None
@@ -210,13 +374,15 @@ def question_out(r, voted: bool = False, mine: bool = False) -> dict:
 
 
 async def _build_room(session, event_id: int):
-    from app.api.live.schemas import BannerFeed, Feed
+    from app.api.live import looks
+    from app.api.live.schemas import BannerFeed, Feed, FeedV2
     from app.api.subscriptions import gates
 
     event = await session.scalar(select(Events).join(Clubs, Clubs.id == Events.club_id).where(Events.id == event_id, *visible()))
     if event is None:
         return _NONE
     now = now_utc()
+    await close_due(session, event.id, now)
     updates = list((await session.scalars(select(LiveUpdates).where(LiveUpdates.event_id == event.id).order_by(LiveUpdates.sent_at.desc()).limit(10))).all())
     banner = updates[0] if updates and now - updates[0].sent_at <= BANNER_FOR else None
     poll = await session.scalar(select(LivePolls).where(LivePolls.event_id == event.id, LivePolls.status == PollStatus.live).order_by(LivePolls.launched_at.desc()).limit(1))
@@ -232,16 +398,19 @@ async def _build_room(session, event_id: int):
     # is not grandfathered), so the ask box never appears only to refuse.
     if qa_open and not await gates.allows_for_feed(session, event.club_id, "qa", event=event):
         qa_open = False
+    full = await poll_full(session, poll, console=False) if poll else None
     public = {
         "event": {"id": event.id, "name": event.name, "status": (event.lifecycle or EventStatus.published).value},
         "banner": update_out(banner) if banner else None,
         "updates": [update_out(u) for u in updates],
-        "poll": {**await poll_public(session, poll), "my_response": None} if poll else None,
+        "poll": {**legacy_poll(full), "my_response": None} if poll else None,
         "questions": [question_out(q) for q, _ in rows],
         "qa": {"approve_first": bool(event.qa_approve_first), "open": qa_open},
         "quiz": {"live": bool(quiz and quiz[0] is QuizStatus.live), "title": quiz[1] if quiz else None},
     }
     data = Feed(**public).model_dump(mode="json")
+    custom, resolved, version = await looks.state(session, event.id)
+    data_v2 = FeedV2(**{**public, "poll": {**guest_poll(full), "my_response": None} if poll else None, "theme": {"custom": custom, "theme": resolved, "version": version}}).model_dump(mode="json")
     strip = BannerFeed(
         event={**public["event"], "starts_at": event.event_datetime, "ends_at": event.event_datetime + timedelta(hours=event.duration or 0)},
         banner=public["banner"],
@@ -256,7 +425,8 @@ async def _build_room(session, event_id: int):
         event_id=event.id, club_id=event.club_id, lifecycle=event.lifecycle, approve_first=bool(event.qa_approve_first),
         body=orjson.dumps(data), data=data, question_ids=frozenset(str(q.id) for q, _ in rows), asked_by=asked_by,
         poll_id=str(poll.id) if poll else None, poll_kind=poll.kind if poll else None, poll_options=tuple(poll.options or ()) if poll else (),
-        strip=strip, strip_body=orjson.dumps(strip),
+        poll_settings=full["settings"] if full else {}, poll_closes_at=poll.closes_at if poll else None,
+        strip=strip, strip_body=orjson.dumps(strip), body_v2=orjson.dumps(data_v2), data_v2=data_v2,
     )
 
 
@@ -369,13 +539,14 @@ def shown_key(request, client_key: Optional[str]) -> Optional[str]:
     return account_key(uid) if uid is not None else valid_key(client_key)
 
 
-async def feed_body(session, event_id: int, key: Optional[str]) -> bytes:
+async def feed_body(session, event_id: int, key: Optional[str], v2: bool = False) -> bytes:
     """The feed for one browser (or one account: `key` is person_key's or
-    shown_key's): the room's body, or a copy with its own flags."""
+    shown_key's): the room's body, or a copy with its own flags. `v2`: the
+    body of this release (X-Live-Version: 2)."""
     room = await room_of(session, event_id)
     if not key:
-        return room.body
-    return body_for(room, key, await voter_of(session, event_id, key))
+        return room.body_v2 if v2 else room.body
+    return body_for(room, key, await voter_of(session, event_id, key), v2=v2)
 
 
 async def banner_body(session, event_id: int) -> bytes:
@@ -398,21 +569,23 @@ def flags_of(room: Room, key: Optional[str], voter: Optional[Voter]) -> Optional
     return voted, mine, answer
 
 
-def body_for(room: Room, key: Optional[str], voter: Optional[Voter], flags: Optional[tuple] = None) -> bytes:
+def body_for(room: Room, key: Optional[str], voter: Optional[Voter], flags: Optional[tuple] = None, v2: bool = False) -> bytes:
     """The room's body as one browser sees it: as it stands, or a copy with
     its own flags (what it voted for, what it asked, its answer to the poll)."""
     flags = flags if flags is not None else flags_of(room, key, voter)
     if flags is None:
-        return room.body
+        return room.body_v2 if v2 else room.body
     voted, mine, answer = flags
-    data = dict(room.data)
+    base = room.data_v2 if v2 else room.data
+    data = dict(base)
     if voted or mine:
         data["questions"] = [
             dict(q, voted=q["id"] in voted, mine=q["id"] in mine) if (q["id"] in voted or q["id"] in mine) else q
-            for q in room.data["questions"]
+            for q in base["questions"]
         ]
     if answer is not None and data.get("poll"):
-        data["poll"] = dict(data["poll"], my_response=answer)
+        kind = room.poll_kind.value if room.poll_kind is not None else "choice"
+        data["poll"] = dict(data["poll"], **my_fields(kind, room.poll_options, room.poll_settings, answer, v2))
     return orjson.dumps(data)
 
 

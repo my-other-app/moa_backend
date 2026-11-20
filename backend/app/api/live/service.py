@@ -1357,22 +1357,26 @@ async def vote(session, event_id: int, question_id: UUID, voter_key: str) -> dic
 
 
 async def poll_out(session, poll: LivePolls, voter_key: Optional[str] = None) -> dict:
-    out = await room.poll_public(session, poll)
+    """The poll as the console sees it (every result, its settings)."""
+    out = await room.poll_full(session, poll)
     if voter_key is not None:
-        out["my_response"] = await session.scalar(select(LivePollResponses.value).where(LivePollResponses.poll_id == poll.id, LivePollResponses.voter_key == voter_key))
+        value = await session.scalar(select(LivePollResponses.value).where(LivePollResponses.poll_id == poll.id, LivePollResponses.voter_key == voter_key))
+        out.update(room.my_fields(poll.kind.value, poll.options, out["settings"], value, True))
     return out
 
 
 async def list_polls(session, event: Events) -> list:
+    await room.close_due(session, event.id)
     rows = list((await session.scalars(select(LivePolls).where(LivePolls.event_id == event.id).order_by(LivePolls.sort_order, LivePolls.created_at))).all())
     return [await poll_out(session, p) for p in rows]
 
 
 def _check_poll(kind: PollKind, options: list) -> list:
     opts = [" ".join(o.split())[:120] for o in options if o and o.strip()]
-    if kind is PollKind.choice:
+    if kind in (PollKind.choice, PollKind.ranking):
         if not (2 <= len(opts) <= 8) or len(set(opts)) != len(opts):
-            raise CustomHTTPException(422, message="A multiple-choice poll needs two to eight different answers.")
+            noun = "A multiple-choice poll" if kind is PollKind.choice else "A ranking"
+            raise CustomHTTPException(422, message=f"{noun} needs two to eight different answers.")
         return opts
     return []
 
@@ -1380,7 +1384,11 @@ def _check_poll(kind: PollKind, options: list) -> list:
 async def create_poll(session, event: Events, body) -> dict:
     kind = PollKind(body.kind)
     top = await session.scalar(select(func.max(LivePolls.sort_order)).where(LivePolls.event_id == event.id))
-    row = LivePolls(event_id=event.id, kind=kind, prompt=" ".join(body.prompt.split())[:300], options=_check_poll(kind, body.options), sort_order=(top if top is not None else -1) + 1)
+    options = _check_poll(kind, body.options)
+    row = LivePolls(
+        event_id=event.id, kind=kind, prompt=" ".join(body.prompt.split())[:300], options=options, sort_order=(top if top is not None else -1) + 1,
+        settings=live_settings.poll_settings_saved(kind.value, options, None, body.settings) if body.settings else None,
+    )
     if not row.prompt:
         raise CustomHTTPException(422, message="Ask the room something.")
     session.add(row)
@@ -1397,10 +1405,15 @@ async def _poll_in(session, event_id: int, poll_id: UUID) -> LivePolls:
     return row
 
 
+#: What only a draft may change: the poll's answers and how they are counted.
+_DRAFT_ONLY = ("max_choices", "scale")
+
+
 async def update_poll(session, event: Events, poll_id: UUID, body) -> dict:
     row = await _poll_in(session, event.id, poll_id)
     data = body.model_dump(exclude_unset=True)
-    if row.status is not PollStatus.draft and ("options" in data or "kind" in data):
+    change = data.get("settings") or {}
+    if row.status is not PollStatus.draft and ("options" in data or "kind" in data or any(k in change for k in _DRAFT_ONLY)):
         raise CustomHTTPException(409, message="A poll that has run keeps its answers; make a new one.")
     if "kind" in data and data["kind"]:
         row.kind = PollKind(data["kind"])
@@ -1408,6 +1421,8 @@ async def update_poll(session, event: Events, poll_id: UUID, body) -> dict:
         row.options = _check_poll(row.kind, data["options"])
     if "prompt" in data and data["prompt"]:
         row.prompt = " ".join(data["prompt"].split())[:300]
+    if "settings" in data and data["settings"] is not None or "kind" in data or "options" in data:
+        row.settings = live_settings.poll_settings_saved(row.kind.value, list(row.options or []), row.settings, change)
     await session.commit()
     room.room_changed(event.id)
     return await poll_out(session, row)
@@ -1423,6 +1438,8 @@ async def set_poll_status(session, event: Events, poll_id: UUID, status: str) ->
             other.status, other.closed_at = PollStatus.closed, now
         row.status, row.closed_at = PollStatus.live, None
         row.launched_at = row.launched_at or now
+        seconds = live_settings.poll_settings(row.kind.value, row.settings).get("seconds")
+        row.closes_at = now + timedelta(seconds=int(seconds)) if seconds else None
     elif new is PollStatus.closed:
         row.status, row.closed_at = PollStatus.closed, now
     else:
@@ -1439,14 +1456,34 @@ async def delete_poll(session, event: Events, poll_id: UUID) -> None:
     room.room_changed(event.id)
 
 
-def _clean_value(kind: PollKind, options, value: str) -> str:
+def _clean_value(kind: PollKind, options, value, st: Optional[dict] = None, values=None, order=None) -> str:
+    """The stored form of an answer (CONTRACT 7.2): a single choice's label
+    (as always), a word, a rating, a text; a multiple choice's or a ranking's
+    option indexes joined by commas."""
+    st = st or {}
+    options = list(options or [])
     v = " ".join((value or "").split())
     if kind is PollKind.choice:
+        if int(st.get("max_choices") or 1) > 1:
+            picked = values if values is not None else ([v] if v else [])
+            if not picked or len(set(picked)) != len(picked) or any(p not in options for p in picked):
+                raise CustomHTTPException(422, message="Pick from the answers, each once.")
+            if len(picked) > int(st["max_choices"]):
+                raise CustomHTTPException(422, message=f"Pick up to {int(st['max_choices'])}.")
+            return ",".join(str(i) for i in sorted(options.index(p) for p in picked))
         if v not in options:
             raise CustomHTTPException(422, message="Pick one of the answers.")
     elif kind is PollKind.rating:
-        if v not in {"1", "2", "3", "4", "5"}:
-            raise CustomHTTPException(422, message="A rating is 1 to 5.")
+        scale = int(st.get("scale") or 5)
+        if v not in {str(i) for i in range(1, scale + 1)}:
+            raise CustomHTTPException(422, message=f"A rating is 1 to {scale}.")
+    elif kind is PollKind.ranking:
+        if order is None or sorted(order) != sorted(options) or len(set(order)) != len(order):
+            raise CustomHTTPException(422, message="Put every answer in order, each once.")
+        return ",".join(str(options.index(o)) for o in order)
+    elif kind is PollKind.text:
+        if not (1 <= len(v) <= 120):
+            raise CustomHTTPException(422, message="Write an answer of up to 120 characters.")
     else:
         v = v.lower()[:40]
         if len(v) < 2:
@@ -1454,34 +1491,72 @@ def _clean_value(kind: PollKind, options, value: str) -> str:
     return v
 
 
-async def respond(session, event_id: int, poll_id: UUID, voter_key: str, value: str) -> dict:
+async def respond(session, event_id: int, poll_id: UUID, voter_key: str, value, now: Optional[datetime] = None, *, values=None, order=None, name=None, v2: bool = False) -> dict:
     """Answer the poll that is up, or change the answer: one upsert. What
     comes back is the room's view of the poll (its counts at most a second
-    old) with this browser's answer on it."""
+    old) with this browser's answer on it. A poll whose settings say no
+    changing is answered once (409 POLL_ANSWERED); one whose timer ran out
+    is closed (409 POLL_CLOSED)."""
+    now = now or now_utc()
     snap = await room.room_of(session, event_id)
     if snap.poll_id == str(poll_id):
-        kind, options = snap.poll_kind, snap.poll_options
+        kind, options, st, closes_at = snap.poll_kind, snap.poll_options, snap.poll_settings, snap.poll_closes_at
     else:  # launched since the snapshot, or not up at all
         row = await _poll_in(session, event_id, poll_id)
         if row.status is not PollStatus.live:
             raise CustomHTTPException(409, message="This poll is not open.")
         # Read afresh below; the streams are told once the answer commits.
         room.forget_room(event_id)
-        kind, options = row.kind, tuple(row.options or ())
-    v = _clean_value(kind, options, value)
+        kind, options, st, closes_at = row.kind, tuple(row.options or ()), live_settings.poll_settings(row.kind.value, row.settings), row.closes_at
+    if closes_at is not None and now >= closes_at:
+        raise CustomHTTPException(409, message="This poll has closed.", error_code="POLL_CLOSED")
+    v = _clean_value(kind, options, value, st, values, order)
+    extra: dict = {}
+    if kind is PollKind.text:
+        extra["status"] = "pending" if st.get("moderate", True) else "approved"
+        extra["author_name"] = None if st.get("anonymous", True) else ((" ".join((name or "").split())[:60]) or None)
     # created_at from the clock, not the transaction: a word cloud's ties go to the word given first.
-    stmt = pg_insert(LivePollResponses).values(poll_id=poll_id, voter_key=voter_key, value=v, created_at=now_utc())
-    await session.execute(stmt.on_conflict_do_update(index_elements=["poll_id", "voter_key"], set_={"value": stmt.excluded.value}))
+    stmt = pg_insert(LivePollResponses).values(poll_id=poll_id, voter_key=voter_key, value=v, created_at=now_utc(), **extra)
+    if st.get("change_vote", True):
+        await session.execute(stmt.on_conflict_do_update(index_elements=["poll_id", "voter_key"], set_={"value": stmt.excluded.value, **{k: getattr(stmt.excluded, k) for k in extra}}))
+    else:
+        took = await session.scalar(stmt.on_conflict_do_nothing(index_elements=["poll_id", "voter_key"]).returning(LivePollResponses.id))
+        if took is None:
+            raise CustomHTTPException(409, message="You've answered this poll.", error_code="POLL_ANSWERED")
     await session.commit()
     kept = room.voter_kept(event_id, voter_key)
     if kept is not None:
         kept.answers[str(poll_id)] = v
     bus.changed(event_id, "room", delta=["r", voter_key, str(poll_id), v])
     snap = await room.room_of(session, event_id)
-    poll = snap.data.get("poll")
-    if poll is None or snap.poll_id != str(poll_id):
-        return {**await poll_out(session, await _poll_in(session, event_id, poll_id)), "my_response": v}
-    return {**poll, "my_response": v}
+    mine = room.my_fields(kind.value, options, st, v, v2)
+    if snap.poll_id == str(poll_id):
+        poll = (snap.data_v2 if v2 else snap.data).get("poll")
+        if poll is not None:
+            return {**poll, **mine}
+    full = await room.poll_full(session, await _poll_in(session, event_id, poll_id), console=False)
+    return {**(room.guest_poll(full) if v2 else room.legacy_poll(full)), **mine}
+
+
+async def poll_responses(session, event: Events, poll_id: UUID, status: Optional[str], limit: int = 100) -> list:
+    """An open-text poll's answers for the console to moderate, newest first."""
+    row = await _poll_in(session, event.id, poll_id)
+    q = select(LivePollResponses).where(LivePollResponses.poll_id == row.id)
+    if status:
+        q = q.where(LivePollResponses.status == status)
+    rows = (await session.scalars(q.order_by(LivePollResponses.created_at.desc()).limit(limit))).all()
+    return [{"id": r.id, "text": r.value, "name": r.author_name, "status": r.status, "at": r.created_at} for r in rows]
+
+
+async def moderate_response(session, event: Events, poll_id: UUID, response_id: UUID, action: str) -> dict:
+    row = await _poll_in(session, event.id, poll_id)
+    resp = await session.get(LivePollResponses, response_id)
+    if resp is None or resp.poll_id != row.id or row.kind is not PollKind.text:
+        raise CustomHTTPException(404, message="That answer could not be found.")
+    resp.status = "approved" if action == "approve" else "rejected"
+    await session.commit()
+    room.room_changed(event.id)
+    return {"id": resp.id, "text": resp.value, "name": resp.author_name, "status": resp.status, "at": resp.created_at}
 
 
 # --- feedback ----------------------------------------------------------------------
@@ -2278,22 +2353,61 @@ async def shift_schedule(session, event: Events, item_id: UUID, minutes: int, by
 
 
 async def screen(session, event: Events, now: Optional[datetime] = None) -> dict:
-    """The big screen: the pinned question, the board, the poll up now, the quiz if it runs, the last update."""
+    """The big screen: the pinned question, the board, the poll up now, the
+    quiz if it runs, the last update -- and, with this release, the theme,
+    the screen's controls and what it shows (`shows`), the Q&A wall, the
+    updates for a ticker, the agenda and sponsors for idle slides, and the
+    board across rounds."""
+    from app.api.live import looks
+
     now = now or now_utc()
+    control = await looks.get_control(session, event.id)
+    wall_size = int(control["wall_size"])
     rows = list((await session.scalars(
         select(LiveQuestions).where(LiveQuestions.event_id == event.id, LiveQuestions.status == QuestionStatus.approved)
-        .order_by(LiveQuestions.pinned.desc(), LiveQuestions.votes.desc(), LiveQuestions.created_at).limit(6)
+        .order_by(LiveQuestions.pinned.desc(), LiveQuestions.votes.desc(), LiveQuestions.created_at).limit(max(6, wall_size))
     )).all())
     pinned = next((r for r in rows if r.pinned), None)
     board = [r for r in rows if not r.pinned][:5]
+    await room.close_due(session, event.id, now)
     live_poll = await session.scalar(select(LivePolls).where(LivePolls.event_id == event.id, LivePolls.status == PollStatus.live).limit(1))
+    shown_poll = live_poll
+    if control["mode"] == "poll" and live_poll is None:
+        shown_poll = await session.scalar(
+            select(LivePolls).where(LivePolls.event_id == event.id, LivePolls.status == PollStatus.closed).order_by(LivePolls.closed_at.desc().nullslast()).limit(1)
+        )
     quiz = await quiz_of(session, event, create=False)
-    latest = await session.scalar(select(LiveUpdates).where(LiveUpdates.event_id == event.id).order_by(LiveUpdates.sent_at.desc()).limit(1))
+    latest = list((await session.scalars(select(LiveUpdates).where(LiveUpdates.event_id == event.id).order_by(LiveUpdates.sent_at.desc()).limit(5))).all())
+    fresh = [u for u in latest if now - u.sent_at <= BANNER_FOR]
+    custom, resolved, version = await looks.state(session, event.id)
+    quiz_live = quiz is not None and quiz.status is QuizStatus.live
+    if control["mode"] == "auto":
+        shows = "quiz" if quiz_live else "poll" if live_poll is not None else "qa" if pinned is not None else "idle" if control["idle_slides"] else "qa"
+    else:
+        shows = control["mode"]
+    show_quiz = quiz is not None and (quiz_live or shows in ("quiz", "leaderboard"))
+    hide = control["results"] == "hidden"
+    poll = await poll_out(session, shown_poll) if shown_poll else None
+    if poll is not None and hide and poll["status"] == "live":
+        poll["results"] = {"responses": poll["results"]["responses"]}
+    quiz_state = await host_state(session, quiz, now, for_screen=True, hide_results=hide) if show_quiz else None
+    overall_rows = None
+    if shows == "leaderboard" and quiz is not None:
+        overall_rows = await overall(session, event.id, top=10, anonymous=bool(quiz_state and quiz_state["settings"]["players"]["anonymous_screen"]))
+    want_sponsors = bool(resolved["screen"]["sponsors"]) if custom else False
+    want_sponsors = want_sponsors or "sponsors" in control["idle_slides"]
     return {
         "event": {"id": event.id, "name": event.name},
         "pinned": _question_row_out(pinned) if pinned else None,
         "board": [_question_row_out(r) for r in board],
-        "poll": await poll_out(session, live_poll) if live_poll else None,
-        "quiz": await host_state(session, quiz, now, for_screen=True) if quiz and quiz.status is QuizStatus.live else None,
-        "update": update_out(latest) if latest and now - latest.sent_at <= BANNER_FOR else None,
+        "poll": poll if (live_poll is not None or shows == "poll") else None,
+        "quiz": quiz_state if (quiz_live or shows in ("quiz", "leaderboard")) else None,
+        "update": update_out(fresh[0]) if fresh else None,
+        "theme": resolved, "theme_custom": custom, "theme_version": version,
+        "control": control, "shows": shows,
+        "wall": [_question_row_out(r) for r in rows[:wall_size]],
+        "updates": [update_out(u) for u in fresh],
+        "agenda": await looks.agenda(session, event.id, now) if "agenda" in control["idle_slides"] else [],
+        "sponsors": await looks.sponsors(session, event.id) if want_sponsors else [],
+        "overall": overall_rows,
     }
