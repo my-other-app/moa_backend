@@ -798,6 +798,25 @@ def _joined(quiz: LiveQuizzes, player_id, player_key: str, name: str, team: Opti
     }
 
 
+async def lookup_quiz(session, code: str) -> dict:
+    """The round running with `code`, as a guest sees it before joining: its
+    title, its teams (for a team picker) and the rules a join meets. The code
+    off the screen is the proof of being in the room, as for joining."""
+    quiz = await session.scalar(
+        select(LiveQuizzes).join(Events, Events.id == LiveQuizzes.event_id).join(Clubs, Clubs.id == Events.club_id)
+        .where(LiveQuizzes.join_code == code.strip(), LiveQuizzes.status == QuizStatus.live, *room.visible())
+    )
+    if quiz is None:
+        raise CustomHTTPException(404, message="No quiz is running with that code. Check the screen and try again.")
+    st = live_settings.quiz_settings(quiz.settings)
+    teams = st["teams"]
+    return {
+        "event_id": quiz.event_id, "quiz_id": quiz.id, "title": quiz.title, "started": quiz.current_index >= 0,
+        "teams": {"mode": teams["mode"], "score": teams["score"], "list": [dict(t) for t in teams["list"]] if teams["mode"] != "off" else []},
+        "players": {"names": st["players"]["names"], "late_join": st["players"]["late_join"]},
+    }
+
+
 async def join_quiz(session, code: str, name: str, registration_id=None, person: Optional[str] = None, team: Optional[str] = None, user=None) -> dict:
     """Into the quiz running with `code`. `person` -- the account
     (`u:<id>`) or the client's own key -- makes it the same player however
@@ -990,6 +1009,7 @@ def player_body(view: "room.QuizView", player: "room.Player", standing: tuple, n
                 correct_keys=f["correct_keys"] if shown else None,
                 accepted=f["accepted"] if shown else None,
                 correct_order=[o["key"] for o in q["options"]] if (shown and kind == scoring.ORDER) else None,
+                counts=view.counts() if (shown and kind == scoring.POLL) else None,
             )
         out["question"] = question
         if mine and not shown:
@@ -1006,6 +1026,8 @@ def player_body(view: "room.QuizView", player: "room.Player", standing: tuple, n
             quiz_id=view.quiz_id, round={"index": view.round[0], "count": view.round[1]}, phase=phase, paused=view.paused_at is not None,
             board_now=board_now, next_at=view.next_at(), team=_team_out(st, player.team) if st["teams"]["mode"] != "off" else None,
             teams=view.teams if board_now else None, tag=scoring.tag_of(player.id), streak=player.streak, theme_version=view.theme_version,
+            ties=st["ties"], anonymous_screen=bool(st["players"]["anonymous_screen"]),
+            overall=view.overall if phase == "ended" else None,
         )
     return out
 

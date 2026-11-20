@@ -374,6 +374,14 @@ async def join_quiz(request: Request, session: SessionDep, body: JoinIn, user: O
     return JSONResponse(JoinOut(**out).model_dump(mode="json", exclude={"team", "tag"}), status_code=201)
 
 
+@public_router.get("/live/quiz/lookup", summary="The round running with a code: its title and teams, before joining")
+async def lookup_quiz(request: Request, session: SessionDep, code: str = Query(..., min_length=4, max_length=8)) -> dict:
+    """For a team picker: the round's teams (when it plays in teams) and the
+    rules a join meets. Limited as joining is (per address)."""
+    limits.check(request, "join", None)
+    return await service.lookup_quiz(session, code)
+
+
 @public_router.get("/events/{event_id}/live/quiz/play", response_model=PlayerState, summary="The player's view of the quiz right now")
 async def play_state(request: Request, session: SessionDep, event_id: int) -> Response:
     """Polled every two seconds by every player: read from the quiz snapshot

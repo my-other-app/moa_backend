@@ -395,7 +395,14 @@ async def _build_room(session, event_id: int):
         .order_by(LiveQuestions.pinned.desc(), LiveQuestions.votes.desc(), LiveQuestions.created_at)
         .limit(FEED_QUESTIONS)
     )).all()
-    quiz = (await session.execute(select(LiveQuizzes.status, LiveQuizzes.title).where(LiveQuizzes.event_id == event.id))).first()
+    # The event's current round (current_round: the live one, else the one
+    # that ended last, else the first): with several rounds, the live one.
+    rounds = (await session.execute(
+        select(LiveQuizzes.id, LiveQuizzes.status, LiveQuizzes.ended_at, LiveQuizzes.title)
+        .where(LiveQuizzes.event_id == event.id).order_by(LiveQuizzes.sort_order, LiveQuizzes.created_at)
+    )).all()
+    picked = current_round(rounds)
+    quiz = (picked[1], picked[3]) if picked is not None else None
     qa_open = event.lifecycle not in (EventStatus.closed, EventStatus.archived)
     # The floor shows as closed when the club's plan has no Q&A (and the event
     # is not grandfathered), so the ask box never appears only to refuse.
@@ -652,6 +659,10 @@ class QuizView:
     theme_version: Optional[str] = None
     #: The theme's `leaderboard.own_rank`: a player sees their rank without the board.
     own_rank: bool = True
+    #: The board across the event's rounds, once this round ended (2+ rounds).
+    overall: Optional[list] = None
+    #: The open question's tally (poll questions), made once per count of answers.
+    _tally: Optional[tuple] = None
     #: The board's players' ids (as text), row for row.
     board_ids: list = field(default_factory=list)
     #: The teams of board rows whose players this process has not met (Redis board).
@@ -714,6 +725,20 @@ class QuizView:
             return False
         n = int(self.settings["flow"]["board_every"])
         return (self.current_index + 1) % n == 0 or self.current_index == len(self.questions) - 1
+
+    def counts(self) -> Optional[list]:
+        """A poll question's tally, from the snapshot's answers: made once per
+        number of answers, so every player's body shares one."""
+        q = self.current()
+        if q is None or q.get("kind") != scoring.POLL:
+            return None
+        n = len(self.answers)
+        if self._tally is None or self._tally[0] != (q["id"], n):
+            by: dict = {}
+            for mine in self.answers.values():
+                by[mine.option_key] = by.get(mine.option_key, 0) + 1
+            self._tally = ((q["id"], n), [{"key": o["key"], "label": o["label"], "count": by.get(o["key"], 0), "correct": False} for o in q["options"]])
+        return self._tally[1]
 
     def next_at(self) -> Optional[datetime]:
         """When an auto-advancing round opens its next question (None: the host moves it)."""
@@ -864,6 +889,10 @@ async def build_view(session, quiz, rows: Optional[list] = None) -> "QuizView":
             view.board_teams = {str(k): v for k, v in found.items()}
     from app.api.live import looks
 
+    if quiz.status is QuizStatus.ended and len(rows) >= 2:
+        from app.api.live import service
+
+        view.overall = await service.overall(session, event_id, top=10)
     custom, resolved, view.theme_version = await looks.state(session, event_id)
     view.own_rank = bool(resolved["leaderboard"]["own_rank"]) if custom else True
     return view

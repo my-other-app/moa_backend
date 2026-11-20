@@ -860,3 +860,59 @@ async def test_the_screen_shows_the_agenda_and_the_sponsors_for_idle_slides(clie
     assert (await client.get(_u(world, "/screen"), headers=world["hv"])).json()["sponsors"] == []
     await client.put(_u(world, "/theme"), json={"preset": "meridian_dark", "screen": {"sponsors": True}}, headers=world["hv"])
     assert [s["name"] for s in (await client.get(_u(world, "/screen"), headers=world["hv"])).json()["sponsors"]] == ["Acme"]
+
+
+async def test_a_guest_sees_the_teams_before_joining(client, world):
+    teams = [{"key": "red", "name": "Red Rockets", "color": "#E11D48"}, {"key": "blue", "name": "Blue Jays", "color": "#2563EB"}]
+    await _settings(client, world, {"teams": {"mode": "pick", "list": teams}, "players": {"late_join": False}})
+    await _add(client, world, {"prompt": "Pick A", "options": _opts(2), "correct_key": "a"})
+    code = (await _start(client, world))["join_code"]
+    got = (await client.get("/api/v1/live/quiz/lookup", params={"code": code})).json()
+    assert got["teams"]["mode"] == "pick" and [t["key"] for t in got["teams"]["list"]] == ["red", "blue"]
+    assert got["started"] is False and got["players"] == {"names": "nickname", "late_join": False} and got["event_id"] == world["eid"]
+    assert (await client.get("/api/v1/live/quiz/lookup", params={"code": "000000"})).status_code == 404
+
+
+async def test_the_play_state_carries_ties_anonymity_the_overall_board_and_a_poll_questions_counts(client, session, world):
+    await _settings(client, world, {"ties": "time", "players": {"anonymous_screen": True}})
+    await _add(client, world, {"kind": "poll", "prompt": "Tea or coffee?", "options": _opts(2)})
+    code = (await _start(client, world))["join_code"]
+    a, b = await _join(client, code, 1), await _join(client, code, 2)
+    await _next(client, world)
+    await _answer(client, world, a, {"option_key": "a"})
+    await _answer(client, world, b, {"option_key": "a"})
+    body = await _play(client, world, a)
+    assert body["ties"] == "time" and body["anonymous_screen"] is True and body["question"]["counts"] is None  # not before the reveal
+    await _close(session, world)
+    counts = (await _play(client, world, a))["question"]["counts"]
+    assert [(c["key"], c["count"]) for c in counts] == [("a", 2), ("b", 0)]
+    old = await _play(client, world, a, v2=False)
+    assert "counts" not in old["question"] and "ties" not in old
+    # A second round, played and ended: the board across both on the phone.
+    await client.post(_u(world, "/quiz/host/end"), headers=world["hv"])
+    second = (await client.post(_u(world, "/quizzes"), json={"title": "Round 2"}, headers=world["hv"])).json()
+    await _add(client, world, {"prompt": "Pick A", "options": _opts(2), "correct_key": "a"}, path=f"/quizzes/{second['id']}/questions")
+    code2 = (await _start(client, world, path=f"/quizzes/{second['id']}/host/start"))["join_code"]
+    a2 = await _join(client, code2, 1)
+    await _next(client, world, path=f"/quizzes/{second['id']}/host/next")
+    await _answer(client, world, a2, {"option_key": "a"})
+    assert (await _play(client, world, a2))["overall"] is None
+    await client.post(_u(world, f"/quizzes/{second['id']}/host/end"), headers=world["hv"])
+    ended = await _play(client, world, a2)
+    assert ended["phase"] == "ended" and ended["overall"][0]["name"] == "Player 1" and ended["overall"][0]["rounds"] == 2
+
+
+async def test_the_rooms_quiz_card_follows_the_live_round(client, world):
+    await _add(client, world, {"prompt": "Round one?", "options": _opts(2), "correct_key": "a"})
+    first = (await client.get(_u(world, "/quiz"), headers=world["hv"])).json()
+    second = (await client.post(_u(world, "/quizzes"), json={"title": "The Final"}, headers=world["hv"])).json()
+    await _add(client, world, {"prompt": "Round two?", "options": _opts(2), "correct_key": "a"}, path=f"/quizzes/{second['id']}/questions")
+    assert (await client.get(_u(world))).json()["quiz"] == {"live": False, "title": first["title"]}
+    await _start(client, world, path=f"/quizzes/{second['id']}/host/start")
+    assert (await client.get(_u(world))).json()["quiz"] == {"live": True, "title": "The Final"}
+    assert (await client.get(_u(world, "/banner"))).json()["quiz"] == {"live": True, "title": "The Final"}
+    await client.post(_u(world, f"/quizzes/{second['id']}/host/end"), headers=world["hv"])
+    # Ended, the card shows the round that ended last; then round one, live again.
+    assert (await client.get(_u(world))).json()["quiz"] == {"live": False, "title": "The Final"}
+    await _start(client, world, path=f"/quizzes/{first['id']}/host/start")
+    assert (await client.get(_u(world))).json()["quiz"] == {"live": True, "title": first["title"]}
