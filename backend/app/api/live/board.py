@@ -32,7 +32,13 @@ down) marks the set dirty in this process, which builds it again when Redis
 answers.
 
 One set per run of a quiz: its key ends with the run's join code while it is
-live, and with the moment it ended once it has. Starting or resetting a quiz
+live, and with the moment it ended once it has. A round whose equal scores
+go to the faster player (`ties: time`, app/api/live/settings.py) keys its
+set with a trailing `t` and stores each player's score and saved time as one
+number (packed: score * 10^8 + saved ms), so the set orders and ranks them
+as the database's ix_live_quiz_players_rank does; both only grow, so ZADD GT
+still holds. A round with negative marking has no set at all (a score that
+falls breaks GT): it ranks from its snapshot (app/api/live/room.py). Starting or resetting a quiz
 deletes its players; the next run has a new key, so nothing of the last
 run's can linger, and the old keys expire (KEEP).
 """
@@ -58,6 +64,8 @@ LOCK_MS = 15_000
 #: Players written per ZADD while building.
 CHUNK = 1000
 _LATEST = 10**16 - 1
+#: Saved milliseconds a packed score leaves room for (300 s x 200 questions is 6e7).
+PACK = 10**8
 
 _STANDINGS = """
 if not redis.call('ZSCORE', KEYS[1], ARGV[1]) then return {0} end
@@ -107,11 +115,29 @@ def key(quiz_id, run: str) -> str:
     return f"{PREFIX}{quiz_id}:{run}"
 
 
+def timed(k: str) -> bool:
+    """Whether the set's scores are packed with the saved time (`ties: time`)."""
+    return k.endswith("t")
+
+
+def packed(score: int, saved_ms: int, is_timed: bool) -> int:
+    return int(score) * PACK + min(int(saved_ms or 0), PACK - 1) if is_timed else int(score)
+
+
+def unpacked(value, is_timed: bool) -> int:
+    v = int(float(value))
+    return v // PACK if is_timed else v
+
+
 def member(player_id, created_at: Optional[datetime], name: str) -> str:
     """The player in the set: the join time counted down (ties to the earlier
     joiner), the id (unique), the name (for the board)."""
     us = int(created_at.timestamp() * 1_000_000) if created_at is not None else _LATEST
     return f"{_LATEST - us:016d}|{player_id}|{name}"
+
+
+def id_of(m: str) -> str:
+    return m.split("|", 2)[1] if m.count("|") >= 2 else ""
 
 
 def name_of(m: str) -> str:
@@ -157,14 +183,15 @@ async def rebuild(session, quiz_id, run: str) -> bool:
     if not got:
         return False
     rows = (await session.execute(
-        select(LiveQuizPlayers.id, LiveQuizPlayers.created_at, LiveQuizPlayers.name, LiveQuizPlayers.score)
+        select(LiveQuizPlayers.id, LiveQuizPlayers.created_at, LiveQuizPlayers.name, LiveQuizPlayers.score, LiveQuizPlayers.saved_ms)
         .where(LiveQuizPlayers.quiz_id == quiz_id)
     )).all()
+    is_timed = timed(k)
 
     async def write(c) -> bool:
         pipe = c.pipeline(transaction=False)
         for i in range(0, len(rows), CHUNK):
-            pipe.zadd(k, {member(pid, at, name): int(score) for pid, at, name, score in rows[i:i + CHUNK]}, gt=True)
+            pipe.zadd(k, {member(pid, at, name): packed(score, saved, is_timed) for pid, at, name, score, saved in rows[i:i + CHUNK]}, gt=True)
         pipe.zadd(k, {SENTINEL: float("-inf")})
         pipe.expire(k, KEEP)
         await pipe.execute()
@@ -178,15 +205,23 @@ async def rebuild(session, quiz_id, run: str) -> bool:
     return bool(done)
 
 
+async def drop(k: str) -> None:
+    """The run's set forgotten (scores went down: a question voided): the
+    next process that needs it builds it again from the database."""
+    if await redis.run(lambda c: c.delete(k), "failed", what="quiz board") == "failed":
+        _dirty.add(k)
+
+
 async def joined(k: str, m: str) -> None:
     """A new player, at 0 (NX: never lowers a score already there)."""
     if await redis.run(lambda c: c.zadd(k, {m: 0}, nx=True), "failed", what="quiz board") == "failed":
         _dirty.add(k)
 
 
-async def scored(k: str, m: str, total: int) -> None:
+async def scored(k: str, m: str, total: int, saved_ms: int = 0) -> None:
     """The player's total after a scored answer (GT: only ever raises it)."""
-    if await redis.run(lambda c: c.zadd(k, {m: int(total)}, gt=True), "failed", what="quiz board") == "failed":
+    value = packed(total, saved_ms, timed(k))
+    if await redis.run(lambda c: c.zadd(k, {m: value}, gt=True), "failed", what="quiz board") == "failed":
         _dirty.add(k)
 
 
@@ -204,7 +239,7 @@ async def top(k: str, n: int = 10) -> Optional[list[dict]]:
         m = _text(pairs[i])
         if m == SENTINEL:
             continue
-        out.append({"rank": len(out) + 1, "name": name_of(m), "score": int(float(pairs[i + 1]))})
+        out.append({"rank": len(out) + 1, "name": name_of(m), "score": unpacked(pairs[i + 1], timed(k)), "_id": id_of(m)})
         if len(out) == n:
             break
     return out
@@ -224,7 +259,7 @@ async def standings(k: str, members: Iterable[str]) -> Optional[dict[str, tuple[
     for i, m in enumerate(members):
         s, above = got[1 + 2 * i], int(got[2 + 2 * i])
         s = _text(s)
-        out[m] = (None, None) if above < 0 or s == "" else (int(float(s)), 1 + above)
+        out[m] = (None, None) if above < 0 or s == "" else (unpacked(s, timed(k)), 1 + above)
     return out
 
 
