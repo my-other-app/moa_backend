@@ -1,5 +1,6 @@
 """What the quest routes take. What they answer is documented field by field
 in feature-register/quests/CONTRACT.md (§2, §3, §4, §7, §8, §9)."""
+
 from datetime import datetime
 from typing import Literal, Optional
 from uuid import UUID

@@ -1,6 +1,7 @@
 """The organiser's side: settings, tasks, milestones, rewards, stations, the
 live dashboard, guests, grants and revokes, the audit and the export
 (CONTRACT §9)."""
+
 from __future__ import annotations
 
 import uuid
@@ -59,17 +60,31 @@ def _changed(event_id: int) -> None:
 
 def settings_out(q: Quests) -> dict:
     return {
-        "id": q.id, "event_id": q.event_id, "enabled": q.enabled, "title": q.title, "intro": q.intro, "mode": q.mode,
-        "starts_at": q.starts_at, "ends_at": q.ends_at, "leaderboard": q.leaderboard, "leaderboard_names": q.leaderboard_names,
-        "code_attempts_per_hour": q.code_attempts_per_hour, "updated_at": q.updated_at,
+        "id": q.id,
+        "event_id": q.event_id,
+        "enabled": q.enabled,
+        "title": q.title,
+        "intro": q.intro,
+        "mode": q.mode,
+        "starts_at": q.starts_at,
+        "ends_at": q.ends_at,
+        "leaderboard": q.leaderboard,
+        "leaderboard_names": q.leaderboard_names,
+        "code_attempts_per_hour": q.code_attempts_per_hour,
+        "updated_at": q.updated_at,
     }
 
 
 async def _done_counts(session, quest) -> dict:
     P = QuestProgress
     rows = await session.execute(
-        select(P.task_id, func.count().filter(P.done_at.isnot(None), P.revoked_at.is_(None)), func.count().filter(P.done_at.is_(None), P.revoked_at.is_(None), P.count > 0))
-        .where(P.quest_id == quest.id).group_by(P.task_id)
+        select(
+            P.task_id,
+            func.count().filter(P.done_at.isnot(None), P.revoked_at.is_(None)),
+            func.count().filter(P.done_at.is_(None), P.revoked_at.is_(None), P.count > 0),
+        )
+        .where(P.quest_id == quest.id)
+        .group_by(P.task_id)
     )
     return {t: (int(d), int(i)) for t, d, i in rows.all()}
 
@@ -79,11 +94,22 @@ def task_admin(t: QuestTasks, stations: dict, counts: dict) -> dict:
     st = stations.get(t.door_id) if t.door_id else None
     done, doing = counts.get(t.id, (0, 0))
     return {
-        "id": t.id, "kind": t.kind, "title": t.title, "description": t.description, "points": t.points, "required": t.required,
-        "starts_at": t.starts_at, "ends_at": t.ends_at, "config": t.config or {}, "sort_order": t.sort_order,
-        "target": K.target(t.kind, t.config), "action": kind.action if kind else None,
+        "id": t.id,
+        "kind": t.kind,
+        "title": t.title,
+        "description": t.description,
+        "points": t.points,
+        "required": t.required,
+        "starts_at": t.starts_at,
+        "ends_at": t.ends_at,
+        "config": t.config or {},
+        "sort_order": t.sort_order,
+        "target": K.target(t.kind, t.config),
+        "action": kind.action if kind else None,
         "station": {"door_id": st["id"], "name": st["name"]} if st else None,
-        "done_count": done, "in_progress": doing, "archived": t.archived_at is not None,
+        "done_count": done,
+        "in_progress": doing,
+        "archived": t.archived_at is not None,
     }
 
 
@@ -91,7 +117,9 @@ async def _claim_counts(session, quest) -> dict:
     C = QuestClaims
     out: dict = {}
     rows = await session.execute(
-        select(C.reward_id, C.status, func.count(), func.count().filter(C.holds == True, C.variant_id.is_(None))).where(C.quest_id == quest.id).group_by(C.reward_id, C.status)  # noqa: E712
+        select(C.reward_id, C.status, func.count(), func.count().filter(C.holds == True, C.variant_id.is_(None)))
+        .where(C.quest_id == quest.id)
+        .group_by(C.reward_id, C.status)  # noqa: E712
     )
     for reward_id, status, n, unsized in rows.all():
         row = out.setdefault(reward_id, {s: 0 for s in CLAIM_STATUSES} | {"needs_size": 0})
@@ -108,22 +136,48 @@ def stock_out(st: stock.Stock) -> dict:
     else:
         total, reserved = (m.stock or 0), (m.reserved_count or 0)
     return {
-        "total": total, "reserved": reserved, "collected": m.collected_count + (m.manual_handed_out or 0), "free": max(0, st.pool()),
-        "variants": [{"id": v.id, "label": v.label, "total": v.stock, "reserved": v.reserved_count or 0, "collected": v.collected_count, "free": max(0, st.size_free(v))} for v in st.variants],
+        "total": total,
+        "reserved": reserved,
+        "collected": m.collected_count + (m.manual_handed_out or 0),
+        "free": max(0, st.pool()),
+        "variants": [
+            {"id": v.id, "label": v.label, "total": v.stock, "reserved": v.reserved_count or 0, "collected": v.collected_count, "free": max(0, st.size_free(v))}
+            for v in st.variants
+        ],
     }
 
 
 async def _station_rows(session, event) -> list:
-    doors = list((await session.scalars(select(Doors).where(Doors.event_id == event.id, Doors.purpose.isnot(None)).order_by(Doors.sort_order, Doors.created_at))).all())
-    visits = dict((await session.execute(
-        select(QuestStationVisits.door_id, func.count()).where(QuestStationVisits.event_id == event.id).group_by(QuestStationVisits.door_id)
-    )).all())
-    last = dict((await session.execute(
-        select(QuestStationVisits.door_id, func.max(QuestStationVisits.visited_at)).where(QuestStationVisits.event_id == event.id).group_by(QuestStationVisits.door_id)
-    )).all())
+    doors = list(
+        (await session.scalars(select(Doors).where(Doors.event_id == event.id, Doors.purpose.isnot(None)).order_by(Doors.sort_order, Doors.created_at))).all()
+    )
+    visits = dict(
+        (
+            await session.execute(
+                select(QuestStationVisits.door_id, func.count()).where(QuestStationVisits.event_id == event.id).group_by(QuestStationVisits.door_id)
+            )
+        ).all()
+    )
+    last = dict(
+        (
+            await session.execute(
+                select(QuestStationVisits.door_id, func.max(QuestStationVisits.visited_at))
+                .where(QuestStationVisits.event_id == event.id)
+                .group_by(QuestStationVisits.door_id)
+            )
+        ).all()
+    )
     return [
-        {"id": d.id, "door_id": d.id, "name": d.name, "purpose": d.purpose, "active": d.active, "link": doors_mod._link_row(d),
-         "visits": int(visits.get(d.id, 0)), "last_visit_at": last.get(d.id)}
+        {
+            "id": d.id,
+            "door_id": d.id,
+            "name": d.name,
+            "purpose": d.purpose,
+            "active": d.active,
+            "link": doors_mod._link_row(d),
+            "visits": int(visits.get(d.id, 0)),
+            "last_visit_at": last.get(d.id),
+        }
         for d in doors
     ]
 
@@ -140,7 +194,11 @@ async def view(session, event) -> dict:
     claims = await _claim_counts(session, quest)
     items = list((await session.scalars(select(MerchItems).where(MerchItems.event_id == event.id).order_by(MerchItems.created_at, MerchItems.id))).all())
     variants: dict = {}
-    for v in (await session.scalars(select(MerchVariants).where(MerchVariants.item_id.in_([m.id for m in items] or [uuid.uuid4()])).order_by(MerchVariants.created_at, MerchVariants.id))).all():
+    for v in (
+        await session.scalars(
+            select(MerchVariants).where(MerchVariants.item_id.in_([m.id for m in items] or [uuid.uuid4()])).order_by(MerchVariants.created_at, MerchVariants.id)
+        )
+    ).all():
         variants.setdefault(v.item_id, []).append(v)
     stocks = {m.id: stock.Stock(m, variants.get(m.id, [])) for m in items}
     used = {r.merch_item_id: r.id for rs in d.rewards.values() for r in rs}
@@ -151,11 +209,18 @@ async def view(session, event) -> dict:
             st = stocks.get(r.merch_item_id)
             if st is None:
                 continue
-            rewards.append({
-                "id": r.id, "merch_item_id": r.merch_item_id, "name": st.item.name, "photo_url": objects.photo_url(st.item.photo_key),
-                "sold_out_mode": r.sold_out_mode, "sizes": st.sized, "stock": stock_out(st),
-                "claims": claims.get(r.id, {s: 0 for s in CLAIM_STATUSES} | {"needs_size": 0}),
-            })
+            rewards.append(
+                {
+                    "id": r.id,
+                    "merch_item_id": r.merch_item_id,
+                    "name": st.item.name,
+                    "photo_url": objects.photo_url(st.item.photo_key),
+                    "sold_out_mode": r.sold_out_mode,
+                    "sizes": st.sized,
+                    "stock": stock_out(st),
+                    "claims": claims.get(r.id, {s: 0 for s in CLAIM_STATUSES} | {"needs_size": 0}),
+                }
+            )
         milestones.append({"id": m.id, "title": m.title, "threshold": m.threshold, "sort_order": m.sort_order, "rewards": rewards})
     return {
         **settings_out(quest),
@@ -212,7 +277,9 @@ async def _station_door(session, event, door_id) -> Doors:
         did = None
     door = await session.get(Doors, did) if did else None
     if door is None or door.event_id != event.id or door.purpose != STATION:
-        raise CustomHTTPException(422, message="Pick one of the event's stations.", error_code="QUEST_STATION_NOT_FOUND", errors={"fields": {"door_id": "A station of this event."}})
+        raise CustomHTTPException(
+            422, message="Pick one of the event's stations.", error_code="QUEST_STATION_NOT_FOUND", errors={"fields": {"door_id": "A station of this event."}}
+        )
     return door
 
 
@@ -228,7 +295,9 @@ async def _code_free(session, quest, code: Optional[str], task_id=None) -> None:
     if task_id is not None:
         q = q.where(QuestTasks.id != task_id)
     if await session.scalar(q) is not None:
-        raise CustomHTTPException(409, message="Another code task already uses that code.", error_code="QUEST_CODE_TAKEN", errors={"fields": {"code": "Pick another code."}})
+        raise CustomHTTPException(
+            409, message="Another code task already uses that code.", error_code="QUEST_CODE_TAKEN", errors={"fields": {"code": "Pick another code."}}
+        )
 
 
 async def _save(session) -> None:
@@ -236,7 +305,9 @@ async def _save(session) -> None:
         async with session.begin_nested():
             await session.flush()
     except IntegrityError:
-        raise CustomHTTPException(409, message="Another code task already uses that code.", error_code="QUEST_CODE_TAKEN", errors={"fields": {"code": "Pick another code."}})
+        raise CustomHTTPException(
+            409, message="Another code task already uses that code.", error_code="QUEST_CODE_TAKEN", errors={"fields": {"code": "Pick another code."}}
+        )
 
 
 async def create_task(session, event, body) -> dict:
@@ -248,10 +319,20 @@ async def create_task(session, event, body) -> dict:
     await _code_free(session, quest, code)
     count = await session.scalar(select(func.count()).select_from(QuestTasks).where(QuestTasks.quest_id == quest.id, QuestTasks.archived_at.is_(None))) or 0
     t = QuestTasks(
-        id=uuid.uuid4(), quest_id=quest.id, event_id=event.id, kind=body.kind,
+        id=uuid.uuid4(),
+        quest_id=quest.id,
+        event_id=event.id,
+        kind=body.kind,
         title=(" ".join((body.title or "").split()) or K.default_title(body.kind, config, door.name if door else None))[:80],
-        description=(" ".join((body.description or "").split()) or None), points=body.points, required=body.required,
-        starts_at=body.starts_at, ends_at=body.ends_at, config=config, door_id=door.id if door else None, code=code, sort_order=count,
+        description=(" ".join((body.description or "").split()) or None),
+        points=body.points,
+        required=body.required,
+        starts_at=body.starts_at,
+        ends_at=body.ends_at,
+        config=config,
+        door_id=door.id if door else None,
+        code=code,
+        sort_order=count,
     )
     session.add(t)
     await _save(session)
@@ -380,7 +461,9 @@ async def update_milestone(session, event, milestone_id, body) -> dict:
 async def _release_reward(session, quest, event, reward_ids: list) -> None:
     if not reward_ids:
         return
-    claims = list((await session.scalars(select(QuestClaims).where(QuestClaims.reward_id.in_(reward_ids), QuestClaims.status.notin_((COLLECTED, RELEASED))))).all())
+    claims = list(
+        (await session.scalars(select(QuestClaims).where(QuestClaims.reward_id.in_(reward_ids), QuestClaims.status.notin_((COLLECTED, RELEASED))))).all()
+    )
     d = await engine.definition(session, quest)
     await engine.release_claims(session, d, event, claims)
 
@@ -422,7 +505,9 @@ async def add_reward(session, event, milestone_id, body) -> dict:
     if taken is not None:
         raise CustomHTTPException(409, message="That item is already a reward of this quest.", error_code="QUEST_ITEM_ALREADY_A_REWARD")
     count = await session.scalar(select(func.count()).select_from(QuestRewards).where(QuestRewards.milestone_id == m.id)) or 0
-    r = QuestRewards(id=uuid.uuid4(), quest_id=quest.id, event_id=event.id, milestone_id=m.id, merch_item_id=item.id, sold_out_mode=body.sold_out_mode, sort_order=count)
+    r = QuestRewards(
+        id=uuid.uuid4(), quest_id=quest.id, event_id=event.id, milestone_id=m.id, merch_item_id=item.id, sold_out_mode=body.sold_out_mode, sort_order=count
+    )
     session.add(r)
     try:
         async with session.begin_nested():
@@ -462,7 +547,9 @@ async def reoffer(session, event, reward_id, user, by_name: str) -> dict:
     for c in held:
         await signals.held(session, c.id)
     left = await session.scalar(select(func.count()).select_from(QuestClaims).where(QuestClaims.reward_id == r.id, QuestClaims.status == "sold_out")) or 0
-    session.add(QuestAudit(quest_id=quest.id, reward_id=r.id, action="reoffer", by_user_id=getattr(user, "id", None), by_name=by_name, detail={"held": len(held)}))
+    session.add(
+        QuestAudit(quest_id=quest.id, reward_id=r.id, action="reoffer", by_user_id=getattr(user, "id", None), by_name=by_name, detail={"held": len(held)})
+    )
     await session.commit()
     return {"held": len(held), "still_sold_out": int(left)}
 
@@ -479,7 +566,11 @@ async def create_station(session, event, body) -> dict:
     if body.purpose == STATION and body.task is not None:
         from app.api.quests.schemas import TaskIn
 
-        task = await create_task(session, event, TaskIn(kind=K.STATION, title=body.task.title, points=body.task.points, required=body.task.required, config={"door_id": str(door.id)}))
+        task = await create_task(
+            session,
+            event,
+            TaskIn(kind=K.STATION, title=body.task.title, points=body.task.points, required=body.task.required, config={"door_id": str(door.id)}),
+        )
     link = None
     if body.link is not None:
         link = LinkOut(**await doors_mod.issue_link(session, event, door.id, can_walkup=False, days=body.link.days)).model_dump()
@@ -498,40 +589,78 @@ async def live(session, event) -> dict:
 
     v = await view(session, event)
     quest = await engine.quest_of(session, event.id)
-    participants = await session.scalar(select(func.count()).select_from(QuestEntries).where(QuestEntries.quest_id == quest.id, or_(QuestEntries.tasks_done > 0, QuestEntries.points > 0))) or 0
+    participants = (
+        await session.scalar(
+            select(func.count()).select_from(QuestEntries).where(QuestEntries.quest_id == quest.id, or_(QuestEntries.tasks_done > 0, QuestEntries.points > 0))
+        )
+        or 0
+    )
     checked_in = await session.scalar(select(func.count()).select_from(CheckIns).where(CheckIns.event_id == event.id)) or 0
-    unlocked = dict((await session.execute(
-        select(QuestUnlocks.milestone_id, func.count()).where(QuestUnlocks.quest_id == quest.id, QuestUnlocks.revoked_at.is_(None)).group_by(QuestUnlocks.milestone_id)
-    )).all())
-    recent_unlocks = (await session.execute(
-        select(QuestUnlocks.unlocked_at, R.full_name, QuestMilestones.title).join(R, R.id == QuestUnlocks.registration_id)
-        .join(QuestMilestones, QuestMilestones.id == QuestUnlocks.milestone_id)
-        .where(QuestUnlocks.quest_id == quest.id, QuestUnlocks.revoked_at.is_(None)).order_by(QuestUnlocks.unlocked_at.desc()).limit(20)
-    )).all()
-    recent_handovers = (await session.execute(
-        select(QuestClaims.collected_at, R.full_name, MerchItems.name).join(R, R.id == QuestClaims.registration_id)
-        .join(MerchItems, MerchItems.id == QuestClaims.merch_item_id)
-        .where(QuestClaims.quest_id == quest.id, QuestClaims.status == COLLECTED, QuestClaims.collected_at.isnot(None))
-        .order_by(QuestClaims.collected_at.desc()).limit(20)
-    )).all()
+    unlocked = dict(
+        (
+            await session.execute(
+                select(QuestUnlocks.milestone_id, func.count())
+                .where(QuestUnlocks.quest_id == quest.id, QuestUnlocks.revoked_at.is_(None))
+                .group_by(QuestUnlocks.milestone_id)
+            )
+        ).all()
+    )
+    recent_unlocks = (
+        await session.execute(
+            select(QuestUnlocks.unlocked_at, R.full_name, QuestMilestones.title)
+            .join(R, R.id == QuestUnlocks.registration_id)
+            .join(QuestMilestones, QuestMilestones.id == QuestUnlocks.milestone_id)
+            .where(QuestUnlocks.quest_id == quest.id, QuestUnlocks.revoked_at.is_(None))
+            .order_by(QuestUnlocks.unlocked_at.desc())
+            .limit(20)
+        )
+    ).all()
+    recent_handovers = (
+        await session.execute(
+            select(QuestClaims.collected_at, R.full_name, MerchItems.name)
+            .join(R, R.id == QuestClaims.registration_id)
+            .join(MerchItems, MerchItems.id == QuestClaims.merch_item_id)
+            .where(QuestClaims.quest_id == quest.id, QuestClaims.status == COLLECTED, QuestClaims.collected_at.isnot(None))
+            .order_by(QuestClaims.collected_at.desc())
+            .limit(20)
+        )
+    ).all()
     recent = sorted(
         [{"at": at, "name": short_name(n), "what": f"unlocked {t}"} for at, n, t in recent_unlocks]
         + [{"at": at, "name": short_name(n), "what": f"collected {i}"} for at, n, i in recent_handovers],
-        key=lambda r: r["at"], reverse=True,
+        key=lambda r: r["at"],
+        reverse=True,
     )[:20]
     rewards = []
     for m in v["milestones"]:
         for r in m["rewards"]:
             c = r["claims"]
-            rewards.append({"id": r["id"], "milestone_id": m["id"], "name": r["name"], "reserved": c.get(RESERVED, 0), "needs_size": c.get("needs_size", 0),
-                            "waitlisted": c.get("waitlisted", 0), "sold_out": c.get("sold_out", 0), "collected": c.get(COLLECTED, 0), "stock": r["stock"]})
+            rewards.append(
+                {
+                    "id": r["id"],
+                    "milestone_id": m["id"],
+                    "name": r["name"],
+                    "reserved": c.get(RESERVED, 0),
+                    "needs_size": c.get("needs_size", 0),
+                    "waitlisted": c.get("waitlisted", 0),
+                    "sold_out": c.get("sold_out", 0),
+                    "collected": c.get(COLLECTED, 0),
+                    "stock": r["stock"],
+                }
+            )
     return {
-        "enabled": v["enabled"], "participants": int(participants), "checked_in": int(checked_in),
+        "enabled": v["enabled"],
+        "participants": int(participants),
+        "checked_in": int(checked_in),
         "tasks": [{"id": t["id"], "title": t["title"], "kind": t["kind"], "done": t["done_count"], "in_progress": t["in_progress"]} for t in v["tasks"]],
         "milestones": [{"id": m["id"], "title": m["title"], "threshold": m["threshold"], "unlocked": int(unlocked.get(m["id"], 0))} for m in v["milestones"]],
         "rewards": rewards,
-        "stations": [{"door_id": s["door_id"], "name": s["name"], "purpose": s["purpose"], "visits": s["visits"], "last_visit_at": s["last_visit_at"]} for s in v["stations"]],
-        "recent": recent, "computed_at": _now(),
+        "stations": [
+            {"door_id": s["door_id"], "name": s["name"], "purpose": s["purpose"], "visits": s["visits"], "last_visit_at": s["last_visit_at"]}
+            for s in v["stations"]
+        ],
+        "recent": recent,
+        "computed_at": _now(),
     }
 
 
@@ -555,34 +684,69 @@ async def guests(session, event, *, q=None, milestone_id=None, task_id=None, cla
         pat = f"%{q.strip()}%"
         base = base.where(or_(R.full_name.ilike(pat), R.email.ilike(pat), R.ticket_id.ilike(pat)))
     if milestone_id is not None:
-        base = base.where(select(QuestUnlocks.id).where(QuestUnlocks.registration_id == R.id, QuestUnlocks.milestone_id == milestone_id, QuestUnlocks.revoked_at.is_(None)).exists())
+        base = base.where(
+            select(QuestUnlocks.id)
+            .where(QuestUnlocks.registration_id == R.id, QuestUnlocks.milestone_id == milestone_id, QuestUnlocks.revoked_at.is_(None))
+            .exists()
+        )
     if task_id is not None:
-        base = base.where(select(QuestProgress.id).where(QuestProgress.registration_id == R.id, QuestProgress.task_id == task_id, QuestProgress.done_at.isnot(None), QuestProgress.revoked_at.is_(None)).exists())
+        base = base.where(
+            select(QuestProgress.id)
+            .where(
+                QuestProgress.registration_id == R.id, QuestProgress.task_id == task_id, QuestProgress.done_at.isnot(None), QuestProgress.revoked_at.is_(None)
+            )
+            .exists()
+        )
     if claim_status:
-        base = base.where(select(QuestClaims.id).where(QuestClaims.registration_id == R.id, QuestClaims.quest_id == quest.id, QuestClaims.status == claim_status).exists())
+        base = base.where(
+            select(QuestClaims.id).where(QuestClaims.registration_id == R.id, QuestClaims.quest_id == quest.id, QuestClaims.status == claim_status).exists()
+        )
     total = await session.scalar(select(func.count()).select_from(base.subquery())) or 0
-    order = {"name": (R.full_name.asc(),), "recent": (E.updated_at.desc().nulls_last(),)}.get(sort, (E.score.desc().nulls_last(), E.score_at.asc().nulls_last()))
+    order = {"name": (R.full_name.asc(),), "recent": (E.updated_at.desc().nulls_last(),)}.get(
+        sort, (E.score.desc().nulls_last(), E.score_at.asc().nulls_last())
+    )
     page, page_size = max(1, page), max(1, min(page_size, 200))
     rows = (await session.execute(base.order_by(*order, R.id).limit(page_size).offset((page - 1) * page_size))).all()
     ids = [r.id for r, _ in rows]
     checked = set((await session.scalars(select(CheckIns.registration_id).where(CheckIns.registration_id.in_(ids or [uuid.uuid4()])))).all())
     unlocks: dict = {}
-    for reg_id, mid in (await session.execute(select(QuestUnlocks.registration_id, QuestUnlocks.milestone_id).where(QuestUnlocks.registration_id.in_(ids or [uuid.uuid4()]), QuestUnlocks.revoked_at.is_(None)))).all():
+    for reg_id, mid in (
+        await session.execute(
+            select(QuestUnlocks.registration_id, QuestUnlocks.milestone_id).where(
+                QuestUnlocks.registration_id.in_(ids or [uuid.uuid4()]), QuestUnlocks.revoked_at.is_(None)
+            )
+        )
+    ).all():
         unlocks.setdefault(reg_id, []).append(mid)
     claims: dict = {}
-    for c, name, label in (await session.execute(
-        select(QuestClaims, MerchItems.name, MerchVariants.label).join(MerchItems, MerchItems.id == QuestClaims.merch_item_id)
-        .outerjoin(MerchVariants, MerchVariants.id == QuestClaims.variant_id).where(QuestClaims.registration_id.in_(ids or [uuid.uuid4()]), QuestClaims.quest_id == quest.id)
-    )).all():
+    for c, name, label in (
+        await session.execute(
+            select(QuestClaims, MerchItems.name, MerchVariants.label)
+            .join(MerchItems, MerchItems.id == QuestClaims.merch_item_id)
+            .outerjoin(MerchVariants, MerchVariants.id == QuestClaims.variant_id)
+            .where(QuestClaims.registration_id.in_(ids or [uuid.uuid4()]), QuestClaims.quest_id == quest.id)
+        )
+    ).all():
         claims.setdefault(c.registration_id, []).append({"claim_id": c.id, "reward_id": c.reward_id, "name": name, "status": c.status, "variant_label": label})
     return {
         "items": [
-            {"registration_id": r.id, "name": r.full_name or "", "email": r.email, "ticket_id": r.ticket_id, "checked_in": r.id in checked,
-             "points": e.points if e else 0, "tasks_done": e.tasks_done if e else 0, "score": e.score if e else 0,
-             "milestones": unlocks.get(r.id, []), "claims": claims.get(r.id, [])}
+            {
+                "registration_id": r.id,
+                "name": r.full_name or "",
+                "email": r.email,
+                "ticket_id": r.ticket_id,
+                "checked_in": r.id in checked,
+                "points": e.points if e else 0,
+                "tasks_done": e.tasks_done if e else 0,
+                "score": e.score if e else 0,
+                "milestones": unlocks.get(r.id, []),
+                "claims": claims.get(r.id, []),
+            }
             for r, e in rows
         ],
-        "total": int(total), "page": page, "page_size": page_size,
+        "total": int(total),
+        "page": page,
+        "page_size": page_size,
     }
 
 
@@ -638,17 +802,27 @@ async def _audit_rows(session, quest, *, registration_id=None, limit=50, offset=
     A = QuestAudit
     q = (
         select(A, R.full_name, QuestTasks.title, MerchItems.name)
-        .outerjoin(R, R.id == A.registration_id).outerjoin(QuestTasks, QuestTasks.id == A.task_id)
-        .outerjoin(QuestRewards, QuestRewards.id == A.reward_id).outerjoin(MerchItems, MerchItems.id == QuestRewards.merch_item_id)
+        .outerjoin(R, R.id == A.registration_id)
+        .outerjoin(QuestTasks, QuestTasks.id == A.task_id)
+        .outerjoin(QuestRewards, QuestRewards.id == A.reward_id)
+        .outerjoin(MerchItems, MerchItems.id == QuestRewards.merch_item_id)
         .where(A.quest_id == quest.id)
     )
     if registration_id is not None:
         q = q.where(A.registration_id == registration_id)
     rows = (await session.execute(q.order_by(A.created_at.desc(), A.id).limit(limit).offset(offset))).all()
     return [
-        {"at": a.created_at, "by": {"id": a.by_user_id, "name": a.by_name}, "action": a.action, "registration_id": a.registration_id, "name": name,
-         "task": {"id": a.task_id, "title": title} if a.task_id else None, "reward": {"id": a.reward_id, "name": item} if a.reward_id else None,
-         "note": a.note, "detail": a.detail}
+        {
+            "at": a.created_at,
+            "by": {"id": a.by_user_id, "name": a.by_name},
+            "action": a.action,
+            "registration_id": a.registration_id,
+            "name": name,
+            "task": {"id": a.task_id, "title": title} if a.task_id else None,
+            "reward": {"id": a.reward_id, "name": item} if a.reward_id else None,
+            "note": a.note,
+            "detail": a.detail,
+        }
         for a, name, title, item in rows
     ]
 
@@ -657,7 +831,12 @@ async def audit(session, event, page: int = 1, page_size: int = 50) -> dict:
     quest = await ensure(session, event)
     total = await session.scalar(select(func.count()).select_from(QuestAudit).where(QuestAudit.quest_id == quest.id)) or 0
     page, page_size = max(1, page), max(1, min(page_size, 200))
-    return {"items": await _audit_rows(session, quest, limit=page_size, offset=(page - 1) * page_size), "total": int(total), "page": page, "page_size": page_size}
+    return {
+        "items": await _audit_rows(session, quest, limit=page_size, offset=(page - 1) * page_size),
+        "total": int(total),
+        "page": page,
+        "page_size": page_size,
+    }
 
 
 async def recompute(session, event) -> dict:
@@ -677,20 +856,37 @@ async def export_rows(session, event) -> tuple[list[str], list[list]]:
     from app.api.merch.models import MerchItems, MerchVariants
 
     quest = await ensure(session, event)
-    tasks = list((await session.scalars(select(QuestTasks).where(QuestTasks.quest_id == quest.id).order_by(QuestTasks.archived_at.nulls_first(), QuestTasks.sort_order, QuestTasks.created_at))).all())
+    tasks = list(
+        (
+            await session.scalars(
+                select(QuestTasks)
+                .where(QuestTasks.quest_id == quest.id)
+                .order_by(QuestTasks.archived_at.nulls_first(), QuestTasks.sort_order, QuestTasks.created_at)
+            )
+        ).all()
+    )
     d = await engine.definition(session, quest)
     rewards = [(r, m) for m in d.milestones for r in d.rewards.get(m.id, [])]
-    items = {i.id: i.name for i in (await session.scalars(select(MerchItems).where(MerchItems.id.in_([r.merch_item_id for r, _ in rewards] or [uuid.uuid4()])))).all()}
+    items = {
+        i.id: i.name
+        for i in (await session.scalars(select(MerchItems).where(MerchItems.id.in_([r.merch_item_id for r, _ in rewards] or [uuid.uuid4()])))).all()
+    }
     headers = ["Name", "Email", "Ticket", "Checked in", "Points", "Tasks done"]
     headers += [t.title + (" (removed)" if t.archived_at else "") for t in tasks]
     headers += ["Milestones reached"]
     for r, m in rewards:
         n = items.get(r.merch_item_id, "Reward")
         headers += [f"{n}: status", f"{n}: size", f"{n}: collected at", f"{n}: desk"]
-    regs = list((await session.execute(
-        select(R, QuestEntries).outerjoin(QuestEntries, (QuestEntries.registration_id == R.id) & (QuestEntries.quest_id == quest.id))
-        .where(R.event_id == event.id, R.is_deleted == False).order_by(R.full_name, R.id)  # noqa: E712
-    )).all())
+    regs = list(
+        (
+            await session.execute(
+                select(R, QuestEntries)
+                .outerjoin(QuestEntries, (QuestEntries.registration_id == R.id) & (QuestEntries.quest_id == quest.id))
+                .where(R.event_id == event.id, R.is_deleted == False)
+                .order_by(R.full_name, R.id)  # noqa: E712
+            )
+        ).all()
+    )
     progress: dict = {}
     for p in (await session.scalars(select(QuestProgress).where(QuestProgress.quest_id == quest.id))).all():
         progress[(p.registration_id, p.task_id)] = p
@@ -698,14 +894,27 @@ async def export_rows(session, event) -> tuple[list[str], list[list]]:
     titles = {m.id: m.title for m in d.milestones}
     for u in (await session.scalars(select(QuestUnlocks).where(QuestUnlocks.quest_id == quest.id, QuestUnlocks.revoked_at.is_(None)))).all():
         unlocks.setdefault(u.registration_id, []).append(titles.get(u.milestone_id, ""))
-    claims = {(c.registration_id, c.reward_id): (c, label) for c, label in (await session.execute(
-        select(QuestClaims, MerchVariants.label).outerjoin(MerchVariants, MerchVariants.id == QuestClaims.variant_id).where(QuestClaims.quest_id == quest.id)
-    )).all()}
+    claims = {
+        (c.registration_id, c.reward_id): (c, label)
+        for c, label in (
+            await session.execute(
+                select(QuestClaims, MerchVariants.label)
+                .outerjoin(MerchVariants, MerchVariants.id == QuestClaims.variant_id)
+                .where(QuestClaims.quest_id == quest.id)
+            )
+        ).all()
+    }
     from app.api.merch.models import MerchCollections
 
-    desks = dict((await session.execute(
-        select(MerchCollections.id, MerchCollections.door_label).where(MerchCollections.id.in_([c.collection_id for c, _ in claims.values() if c.collection_id] or [uuid.uuid4()]))
-    )).all())
+    desks = dict(
+        (
+            await session.execute(
+                select(MerchCollections.id, MerchCollections.door_label).where(
+                    MerchCollections.id.in_([c.collection_id for c, _ in claims.values() if c.collection_id] or [uuid.uuid4()])
+                )
+            )
+        ).all()
+    )
     checked = set((await session.scalars(select(CheckIns.registration_id).where(CheckIns.event_id == event.id))).all())
     rows = []
     for r, e in regs:
@@ -755,6 +964,29 @@ async def export_xlsx(session, event) -> str:
     return await spreadsheet.write_xlsx(rows, title="Quest", headers=headers)
 
 
-__all__ = ["view", "patch", "create_task", "update_task", "delete_task", "order_tasks", "create_milestone", "update_milestone", "delete_milestone",
-           "add_reward", "update_reward", "delete_reward", "reoffer", "create_station", "live", "guests", "guest", "grant", "revoke", "audit",
-           "recompute", "export_csv", "export_xlsx", "PURPOSES"]
+__all__ = [
+    "view",
+    "patch",
+    "create_task",
+    "update_task",
+    "delete_task",
+    "order_tasks",
+    "create_milestone",
+    "update_milestone",
+    "delete_milestone",
+    "add_reward",
+    "update_reward",
+    "delete_reward",
+    "reoffer",
+    "create_station",
+    "live",
+    "guests",
+    "guest",
+    "grant",
+    "revoke",
+    "audit",
+    "recompute",
+    "export_csv",
+    "export_xlsx",
+    "PURPOSES",
+]

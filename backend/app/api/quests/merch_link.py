@@ -8,6 +8,7 @@ eligibility rule, and a collect on the merch tab hands the claim over (the
 same handover as the swag desk), so the stock held for claims is never
 given to someone else.
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -56,8 +57,13 @@ async def status_row(session, event, m, reg) -> dict:
         elif claim.status in (WAITLISTED, SOLD_OUT):
             status, remaining = rules.OUT_OF_STOCK, 0
     return {
-        "item_id": m.id, "name": m.name, "photo_url": objects.photo_url(m.photo_key), "status": status, "variant_label": label,
-        "remaining": remaining, "on_file": rules.field_value(reg, event, m.variant_field) if m.variant_field else None,
+        "item_id": m.id,
+        "name": m.name,
+        "photo_url": objects.photo_url(m.photo_key),
+        "status": status,
+        "variant_label": label,
+        "remaining": remaining,
+        "on_file": rules.field_value(reg, event, m.variant_field) if m.variant_field else None,
         "choices": [{"label": c["label"], "remaining": c["free"]} for c in choices],
     }
 
@@ -72,8 +78,11 @@ async def collect(session, event, m, reg, actor, *, variant_label: Optional[str]
     out = await gate.handover(session, event, claim.id, actor, variant_label=variant_label, door_label=door_label)
     row = out["claim"]
     status = {
-        "HANDED_OVER": rules.COLLECTABLE, "ALREADY_COLLECTED": rules.ALREADY_COLLECTED, "NEEDS_SIZE": rules.NO_VARIANT_VALUE,
-        "SIZE_GONE": rules.OUT_OF_STOCK, "NOT_RESERVED": rules.OUT_OF_STOCK,
+        "HANDED_OVER": rules.COLLECTABLE,
+        "ALREADY_COLLECTED": rules.ALREADY_COLLECTED,
+        "NEEDS_SIZE": rules.NO_VARIANT_VALUE,
+        "SIZE_GONE": rules.OUT_OF_STOCK,
+        "NOT_RESERVED": rules.OUT_OF_STOCK,
     }[out["result"]]
     return {"status": status, "collected": out["result"] == "HANDED_OVER", "variant_label": row["variant_label"], "remaining": out["remaining"]}
 

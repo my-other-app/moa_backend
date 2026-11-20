@@ -14,7 +14,9 @@ event, off until the organiser turns it on.
 - quest_station_visits: a staff scan at a station door.
 - quest_audit: grants, revokes, releases and re-offers, with who and when.
 """
+
 import uuid
+from datetime import datetime, timezone
 
 import sqlalchemy as sa
 from sqlalchemy import Boolean, Column, ForeignKey, Integer, String
@@ -100,8 +102,7 @@ class QuestTasks(AbstractSQLModel):
         sa.Index("ix_quest_tasks_quest", "quest_id", "sort_order"),
         sa.Index("ix_quest_tasks_door", "door_id", postgresql_where=sa.text("door_id IS NOT NULL")),
         # Two live code tasks of one quest never share a code.
-        sa.Index("ux_quest_tasks_code", "quest_id", "code", unique=True,
-                 postgresql_where=sa.text("code IS NOT NULL AND archived_at IS NULL")),
+        sa.Index("ux_quest_tasks_code", "quest_id", "code", unique=True, postgresql_where=sa.text("code IS NOT NULL AND archived_at IS NULL")),
     )
 
 
@@ -276,7 +277,8 @@ class QuestAudit(AbstractSQLModel):
     by_name = Column(String(120), nullable=True)
     note = Column(String(300), nullable=True)
     detail = Column(JSONB, nullable=True)
-    created_at = _at(nullable=False, server_default=NOW, default=sa.func.now())
+    # The clock, not the transaction's start: two entries of one request keep their order.
+    created_at = _at(nullable=False, server_default=NOW, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         sa.Index("ix_quest_audit_quest", "quest_id", sa.text("created_at DESC")),

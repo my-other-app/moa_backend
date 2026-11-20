@@ -7,6 +7,7 @@ just after the switch is turned off only queues an evaluation, which reads
 the switch afresh and does nothing; one that misses the switch being turned
 on is made good by the recompute that turning it on queues.
 """
+
 from __future__ import annotations
 
 import logging

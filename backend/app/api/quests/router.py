@@ -6,6 +6,7 @@
   (GateAuth: the club, volunteers, door links).
 - `public_router`: the guest's, /events/{event_id}/quest/....
 """
+
 from typing import Optional
 from uuid import UUID
 
@@ -153,12 +154,28 @@ async def club_leaderboard(session: SessionDep, user: ClubAuth, event_id: int, l
 
 @router.get("/guests", summary="Guests and what they earned")
 async def guests(
-    session: SessionDep, user: ClubAuth, event_id: int, q: Optional[str] = Query(None, max_length=100), milestone_id: Optional[UUID] = Query(None),
-    task_id: Optional[UUID] = Query(None), claim_status: Optional[str] = Query(None, pattern="^(reserved|waitlisted|sold_out|collected|released)$"),
-    sort: str = Query("points", pattern="^(points|name|recent)$"), page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=200),
+    session: SessionDep,
+    user: ClubAuth,
+    event_id: int,
+    q: Optional[str] = Query(None, max_length=100),
+    milestone_id: Optional[UUID] = Query(None),
+    task_id: Optional[UUID] = Query(None),
+    claim_status: Optional[str] = Query(None, pattern="^(reserved|waitlisted|sold_out|collected|released)$"),
+    sort: str = Query("points", pattern="^(points|name|recent)$"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
 ) -> dict:
-    return await organiser.guests(session, await _event(session, user, event_id), q=q, milestone_id=milestone_id, task_id=task_id,
-                                  claim_status=claim_status, sort=sort, page=page, page_size=page_size)
+    return await organiser.guests(
+        session,
+        await _event(session, user, event_id),
+        q=q,
+        milestone_id=milestone_id,
+        task_id=task_id,
+        claim_status=claim_status,
+        sort=sort,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.get("/guests/{registration_id}", summary="One guest's quest, and what was granted or revoked")

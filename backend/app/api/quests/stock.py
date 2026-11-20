@@ -11,6 +11,7 @@ What is held lives in the item's own counters, beside what the merch page
 already counts: `reserved_count` on the size held, or on the item for a
 claim whose size isn't chosen (and for an item without sizes).
 """
+
 from __future__ import annotations
 
 import logging
@@ -59,8 +60,11 @@ class Stock:
         if not self.sized:
             return (m.stock or 0) - m.collected_count - (m.manual_handed_out or 0) - (m.reserved_count or 0)
         return (
-            sum(v.stock for v in self.variants) - m.collected_count - (m.manual_handed_out or 0)
-            - sum(v.reserved_count or 0 for v in self.variants) - (m.reserved_count or 0)
+            sum(v.stock for v in self.variants)
+            - m.collected_count
+            - (m.manual_handed_out or 0)
+            - sum(v.reserved_count or 0 for v in self.variants)
+            - (m.reserved_count or 0)
         )
 
     def unsized_room(self) -> bool:
@@ -80,15 +84,19 @@ class Stock:
 
 
 async def lock(session, item_id) -> Optional[Stock]:
-    item = await session.scalar(
-        select(MerchItems).where(MerchItems.id == item_id).with_for_update().execution_options(populate_existing=True)
-    )
+    item = await session.scalar(select(MerchItems).where(MerchItems.id == item_id).with_for_update().execution_options(populate_existing=True))
     if item is None:
         return None
-    variants = list((await session.scalars(
-        select(MerchVariants).where(MerchVariants.item_id == item_id).order_by(MerchVariants.created_at, MerchVariants.id)
-        .execution_options(populate_existing=True)
-    )).all())
+    variants = list(
+        (
+            await session.scalars(
+                select(MerchVariants)
+                .where(MerchVariants.item_id == item_id)
+                .order_by(MerchVariants.created_at, MerchVariants.id)
+                .execution_options(populate_existing=True)
+            )
+        ).all()
+    )
     return Stock(item, variants)
 
 
@@ -178,10 +186,16 @@ async def promote(session, st: Stock, event) -> list[QuestClaims]:
     held: list[QuestClaims] = []
     if st.pool() <= 0:
         return held
-    waiting = list((await session.scalars(
-        select(QuestClaims).where(QuestClaims.merch_item_id == st.item.id, QuestClaims.status == WAITLISTED)
-        .order_by(QuestClaims.unlocked_at, QuestClaims.id).with_for_update()
-    )).all())
+    waiting = list(
+        (
+            await session.scalars(
+                select(QuestClaims)
+                .where(QuestClaims.merch_item_id == st.item.id, QuestClaims.status == WAITLISTED)
+                .order_by(QuestClaims.unlocked_at, QuestClaims.id)
+                .with_for_update()
+            )
+        ).all()
+    )
     for claim in waiting:
         if st.pool() <= 0:
             break
@@ -199,10 +213,16 @@ async def reoffer(session, st: Stock, event, reward_id) -> list[QuestClaims]:
     from app.api.events.models import EventRegistrationsLink
 
     held: list[QuestClaims] = []
-    rows = list((await session.scalars(
-        select(QuestClaims).where(QuestClaims.reward_id == reward_id, QuestClaims.status == SOLD_OUT)
-        .order_by(QuestClaims.unlocked_at, QuestClaims.id).with_for_update()
-    )).all())
+    rows = list(
+        (
+            await session.scalars(
+                select(QuestClaims)
+                .where(QuestClaims.reward_id == reward_id, QuestClaims.status == SOLD_OUT)
+                .order_by(QuestClaims.unlocked_at, QuestClaims.id)
+                .with_for_update()
+            )
+        ).all()
+    )
     for claim in rows:
         if st.pool() <= 0:
             break
@@ -249,14 +269,19 @@ def choose_size(st: Stock, claim: QuestClaims, label: str, reg, event) -> None:
     _write_size(reg, event, st, v.label)
 
 
-async def hand_over(session, st: Stock, claim: QuestClaims, reg, event, *, actor_user_id: Optional[int], door=None, door_label: Optional[str] = None) -> Optional[MerchCollections]:
+async def hand_over(
+    session, st: Stock, claim: QuestClaims, reg, event, *, actor_user_id: Optional[int], door=None, door_label: Optional[str] = None
+) -> Optional[MerchCollections]:
     """The reserved unit becomes a handover: the merch log's own row (item,
     size, door, who), the held unit counted as collected. None when the
     guest had already been handed one of this item another way (the claim
     is then marked collected with that handover)."""
     collection = MerchCollections(
-        registration_id=reg.id, item_id=st.item.id, variant_id=claim.variant_id,
-        door_label=door.name if door is not None else (door_label or None), door_id=door.id if door is not None else None,
+        registration_id=reg.id,
+        item_id=st.item.id,
+        variant_id=claim.variant_id,
+        door_label=door.name if door is not None else (door_label or None),
+        door_id=door.id if door is not None else None,
         collected_by=actor_user_id,
     )
     try:

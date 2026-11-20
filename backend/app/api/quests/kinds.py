@@ -1,4 +1,5 @@
 """The task kinds: what each one means, its details and their limits (CONTRACT §3)."""
+
 from __future__ import annotations
 
 import re
@@ -58,34 +59,109 @@ class Kind:
     target_key: Optional[str] = None
 
 
-KINDS: dict[str, Kind] = {k.kind: k for k in (
-    Kind(CHECKED_IN, "Checked in", "Ticked when their ticket is scanned at an entrance (optionally before a time).", "Check in", "ticket",
-         (Field("before", "datetime", label="Before"),)),
-    Kind(NETWORK, "Meet people (Network QR)", "Distinct checked-in guests of this event saved by scanning their QR code in the app's Network section, at the event.",
-         "Meet {count} people", "network_scan",
-         (Field("count", "int", 3, 1, 50, label="People"), Field("direction", "choice", "either", options=DIRECTIONS, label="Who scans"),
-          Field("per_minute", "int", 2, 1, 10, label="At most per minute")), target_key="count"),
-    Kind(QUIZ_PLAYED, "Played the quiz", "Joined the live quiz signed in and answered at least one question.", "Play the quiz", "live_room"),
-    Kind(QUIZ_SCORE, "Quiz score", "Scored at least this many points in the live quiz.", "Score {min_score} in the quiz", "live_room",
-         (Field("min_score", "int", 1000, 1, 1_000_000, required=True, label="Score at least"),)),
-    Kind(QUIZ_TOP, "Quiz top places", "Finished in the top places of the live quiz.", "Finish in the quiz's top {top}", "live_room",
-         (Field("top", "int", 10, 1, 100, required=True, label="Top"),)),
-    Kind(POLLS, "Answered polls", "Answered live polls while signed in.", "Answer {count} polls", "live_room",
-         (Field("count", "int", 1, 1, 50, label="Polls"),), target_key="count"),
-    Kind(QA_QUESTION, "Asked a question", "Asked the speakers a question in the live Q&A.", "Ask a question", "live_room",
-         (Field("count", "int", 1, 1, 20, label="Questions"),), target_key="count"),
-    Kind(FEEDBACK, "Gave feedback", "Sent the event's feedback survey.", "Give feedback", "feedback"),
-    Kind(POSTER_MADE, "Made a poster", "Made their \"I'm attending\" poster.", "Make your poster", "poster"),
-    Kind(POSTER_LINK, "Poster link results", "Their poster's link brought this many visitors or registrations.", "Bring {count} people with your poster", "poster",
-         (Field("metric", "choice", "clicks", options=METRICS, label="Count"), Field("count", "int", 5, 1, 1000, label="At least")), target_key="count"),
-    Kind(FOLLOW_CLUB, "Followed the club", "Follows the club hosting the event.", "Follow the club", "follow"),
-    Kind(PROFILE_COMPLETE, "Completed their profile", "Their public profile has a headline, a photo, a link and a project.", "Complete your profile", "profile"),
-    Kind(STATION, "Visited a station", "Scanned by staff at a station (a booth, a workshop room).", "Visit {station}", "station",
-         (Field("door_id", "door", required=True, label="Station"),)),
-    Kind(CODE, "Secret code", "Typed the code shown on stage, on a slide or around the venue.", "Find the secret code", "code",
-         (Field("code", "text", required=True, label="Code"),)),
-    Kind(MANUAL, "Marked done by the organiser", "For what the platform can't see (a hackathon submission…): you tick it per guest.", "Submit your project", None),
-)}
+KINDS: dict[str, Kind] = {
+    k.kind: k
+    for k in (
+        Kind(
+            CHECKED_IN,
+            "Checked in",
+            "Ticked when their ticket is scanned at an entrance (optionally before a time).",
+            "Check in",
+            "ticket",
+            (Field("before", "datetime", label="Before"),),
+        ),
+        Kind(
+            NETWORK,
+            "Meet people (Network QR)",
+            "Distinct checked-in guests of this event saved by scanning their QR code in the app's Network section, at the event.",
+            "Meet {count} people",
+            "network_scan",
+            (
+                Field("count", "int", 3, 1, 50, label="People"),
+                Field("direction", "choice", "either", options=DIRECTIONS, label="Who scans"),
+                Field("per_minute", "int", 2, 1, 10, label="At most per minute"),
+            ),
+            target_key="count",
+        ),
+        Kind(QUIZ_PLAYED, "Played the quiz", "Joined the live quiz signed in and answered at least one question.", "Play the quiz", "live_room"),
+        Kind(
+            QUIZ_SCORE,
+            "Quiz score",
+            "Scored at least this many points in the live quiz.",
+            "Score {min_score} in the quiz",
+            "live_room",
+            (Field("min_score", "int", 1000, 1, 1_000_000, required=True, label="Score at least"),),
+        ),
+        Kind(
+            QUIZ_TOP,
+            "Quiz top places",
+            "Finished in the top places of the live quiz.",
+            "Finish in the quiz's top {top}",
+            "live_room",
+            (Field("top", "int", 10, 1, 100, required=True, label="Top"),),
+        ),
+        Kind(
+            POLLS,
+            "Answered polls",
+            "Answered live polls while signed in.",
+            "Answer {count} polls",
+            "live_room",
+            (Field("count", "int", 1, 1, 50, label="Polls"),),
+            target_key="count",
+        ),
+        Kind(
+            QA_QUESTION,
+            "Asked a question",
+            "Asked the speakers a question in the live Q&A.",
+            "Ask a question",
+            "live_room",
+            (Field("count", "int", 1, 1, 20, label="Questions"),),
+            target_key="count",
+        ),
+        Kind(FEEDBACK, "Gave feedback", "Sent the event's feedback survey.", "Give feedback", "feedback"),
+        Kind(POSTER_MADE, "Made a poster", 'Made their "I\'m attending" poster.', "Make your poster", "poster"),
+        Kind(
+            POSTER_LINK,
+            "Poster link results",
+            "Their poster's link brought this many visitors or registrations.",
+            "Bring {count} people with your poster",
+            "poster",
+            (Field("metric", "choice", "clicks", options=METRICS, label="Count"), Field("count", "int", 5, 1, 1000, label="At least")),
+            target_key="count",
+        ),
+        Kind(FOLLOW_CLUB, "Followed the club", "Follows the club hosting the event.", "Follow the club", "follow"),
+        Kind(
+            PROFILE_COMPLETE,
+            "Completed their profile",
+            "Their public profile has a headline, a photo, a link and a project.",
+            "Complete your profile",
+            "profile",
+        ),
+        Kind(
+            STATION,
+            "Visited a station",
+            "Scanned by staff at a station (a booth, a workshop room).",
+            "Visit {station}",
+            "station",
+            (Field("door_id", "door", required=True, label="Station"),),
+        ),
+        Kind(
+            CODE,
+            "Secret code",
+            "Typed the code shown on stage, on a slide or around the venue.",
+            "Find the secret code",
+            "code",
+            (Field("code", "text", required=True, label="Code"),),
+        ),
+        Kind(
+            MANUAL,
+            "Marked done by the organiser",
+            "For what the platform can't see (a hackathon submission…): you tick it per guest.",
+            "Submit your project",
+            None,
+        ),
+    )
+}
 
 
 _SPACES = re.compile(r"\s+")
@@ -163,11 +239,24 @@ def default_title(kind: str, config: dict, station_name: Optional[str] = None) -
 def templates() -> list[dict]:
     return [
         {
-            "kind": k.kind, "label": k.label, "description": k.description, "default_title": default_title(k.kind, {}),
-            "action": k.action, "automatic": k.kind in AUTOMATIC,
+            "kind": k.kind,
+            "label": k.label,
+            "description": k.description,
+            "default_title": default_title(k.kind, {}),
+            "action": k.action,
+            "automatic": k.kind in AUTOMATIC,
             "default_config": {f.key: f.default for f in k.fields if f.default is not None},
             "fields": [
-                {"key": f.key, "type": f.type, "label": f.label or f.key, "required": f.required, "min": f.min, "max": f.max, "options": list(f.options), "default": f.default}
+                {
+                    "key": f.key,
+                    "type": f.type,
+                    "label": f.label or f.key,
+                    "required": f.required,
+                    "min": f.min,
+                    "max": f.max,
+                    "options": list(f.options),
+                    "default": f.default,
+                }
                 for f in k.fields
             ],
         }

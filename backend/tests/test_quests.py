@@ -3,6 +3,7 @@ milestones and their rewards' stock, stations and the swag desk at the door
 (offline and from consoles from before), codes, grants and revokes, the
 leaderboard and the export -- and that an event without a quest, and every
 entrance, behaves exactly as before."""
+
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -67,7 +68,10 @@ async def setup(client, w, *, tasks, milestones=((1, "sticker", "first_come"),),
     for threshold, item, mode_ in milestones:
         m = await ok(await client.post(url(w, "/quests/milestones"), json={"title": f"Tier {threshold}", "threshold": threshold}, headers=h), 201)
         if item:
-            await ok(await client.post(url(w, f"/quests/milestones/{m['id']}/rewards"), json={"merch_item_id": str(w[item].id), "sold_out_mode": mode_}, headers=h), 201)
+            await ok(
+                await client.post(url(w, f"/quests/milestones/{m['id']}/rewards"), json={"merch_item_id": str(w[item].id), "sold_out_mode": mode_}, headers=h),
+                201,
+            )
     await ok(await client.patch(url(w, "/quests"), json={"enabled": True, "mode": mode, **settings}, headers=h))
     return made
 
@@ -166,11 +170,16 @@ async def test_the_network_task_counts_distinct_checked_in_people_by_qr_with_a_m
     for k in "abcd":
         w["g"][k][1].is_attended = True
     await session.commit()
-    either, saved, saved_by = await setup(client, w, milestones=(), tasks=[
-        {"kind": "network", "config": {"count": 3, "direction": "either", "per_minute": 2}},
-        {"kind": "network", "title": "Scan 2", "config": {"count": 2, "direction": "saved", "per_minute": 5}},
-        {"kind": "network", "title": "Be scanned 1", "config": {"count": 1, "direction": "saved_by", "per_minute": 5}},
-    ])
+    either, saved, saved_by = await setup(
+        client,
+        w,
+        milestones=(),
+        tasks=[
+            {"kind": "network", "config": {"count": 3, "direction": "either", "per_minute": 2}},
+            {"kind": "network", "title": "Scan 2", "config": {"count": 2, "direction": "saved", "per_minute": 5}},
+            {"kind": "network", "title": "Be scanned 1", "config": {"count": 1, "direction": "saved_by", "per_minute": 5}},
+        ],
+    )
     a, b, c, d = (w["g"][k][0] for k in "abcd")
     minute = (NOW - timedelta(minutes=30)).replace(second=0, microsecond=0)
     await _met(session, a, b, w["event"], minute + timedelta(seconds=5))
@@ -220,17 +229,36 @@ async def test_a_qr_save_at_the_event_sets_the_task_off_for_both_people(client, 
 
 async def test_quiz_polls_questions_and_feedback(client, session, world):
     from app.api.live.models import (
-        FeedbackResponses, FeedbackSurveys, LivePollResponses, LivePolls, LiveQuestions, LiveQuizAnswers, LiveQuizPlayers,
-        LiveQuizQuestions, LiveQuizzes, PollStatus, QuestionStatus, QuizStatus,
+        FeedbackResponses,
+        FeedbackSurveys,
+        LivePollResponses,
+        LivePolls,
+        LiveQuestions,
+        LiveQuizAnswers,
+        LiveQuizPlayers,
+        LiveQuizQuestions,
+        LiveQuizzes,
+        PollStatus,
+        QuestionStatus,
+        QuizStatus,
     )
     from app.api.live.room import account_key
 
     w = world
     ev_id = w["event"].id
-    played, score, top, polls, qa, fb = await setup(client, w, milestones=(), tasks=[
-        {"kind": "quiz_played"}, {"kind": "quiz_score", "config": {"min_score": 900}}, {"kind": "quiz_top", "config": {"top": 1}},
-        {"kind": "polls", "config": {"count": 2}}, {"kind": "qa_question"}, {"kind": "feedback"},
-    ])
+    played, score, top, polls, qa, fb = await setup(
+        client,
+        w,
+        milestones=(),
+        tasks=[
+            {"kind": "quiz_played"},
+            {"kind": "quiz_score", "config": {"min_score": 900}},
+            {"kind": "quiz_top", "config": {"top": 1}},
+            {"kind": "polls", "config": {"count": 2}},
+            {"kind": "qa_question"},
+            {"kind": "feedback"},
+        ],
+    )
     a, ra = w["g"]["a"][0], w["g"]["a"][1]
     rb = w["g"]["b"][1]
     quiz = LiveQuizzes(id=uuid.uuid4(), event_id=ev_id, title="Quiz", status=QuizStatus.live, current_index=0)
@@ -272,11 +300,28 @@ async def test_poster_follow_and_profile_are_looked_at_by_the_card(client, sessi
     from app.api.links.models import TrackingClicks, TrackingLinks
 
     w = world
-    made, link, follow, profile = await setup(client, w, milestones=(), tasks=[
-        {"kind": "poster_made"}, {"kind": "poster_link", "config": {"metric": "clicks", "count": 2}}, {"kind": "follow_club"}, {"kind": "profile_complete"},
-    ])
+    made, link, follow, profile = await setup(
+        client,
+        w,
+        milestones=(),
+        tasks=[
+            {"kind": "poster_made"},
+            {"kind": "poster_link", "config": {"metric": "clicks", "count": 2}},
+            {"kind": "follow_club"},
+            {"kind": "profile_complete"},
+        ],
+    )
     a, ra = w["g"]["a"][0], w["g"]["a"][1]
-    tl = TrackingLinks(id=uuid.uuid4(), club_id=w["event"].club_id, event_id=w["event"].id, name="Asha's poster", code=f"qp{uuid.uuid4().hex[:6]}", kind="poster_guest", utm_source="poster", utm_medium="share")
+    tl = TrackingLinks(
+        id=uuid.uuid4(),
+        club_id=w["event"].club_id,
+        event_id=w["event"].id,
+        name="Asha's poster",
+        code=f"qp{uuid.uuid4().hex[:6]}",
+        kind="poster_guest",
+        utm_source="poster",
+        utm_medium="share",
+    )
     session.add(tl)
     await session.flush()
     session.add(GuestPosters(event_id=w["event"].id, registration_id=ra.id, tracking_link_id=tl.id, made_at=NOW))
@@ -408,7 +453,9 @@ async def test_the_swag_desk_shows_rewards_and_hands_them_over_once(client, sess
     assert done["result"] == "HANDED_OVER" and done["claim"]["variant_label"] == "M" and done["claim"]["status"] == "collected"
     row = await session.scalar(select(MerchCollections).where(MerchCollections.registration_id == ra.id))
     assert row.door_label == "Swag desk"
-    m = await session.scalar(select(MerchVariants).where(MerchVariants.label == "M", MerchVariants.item_id == w["shirt"].id).execution_options(populate_existing=True))
+    m = await session.scalar(
+        select(MerchVariants).where(MerchVariants.label == "M", MerchVariants.item_id == w["shirt"].id).execution_options(populate_existing=True)
+    )
     assert (m.collected_count, m.reserved_count) == (1, 0)
     twice = await ok(await client.post(url(w, f"/gate/quests/claims/{reward['claim_id']}/handover"), json={}, headers=h))
     assert twice["result"] == "ALREADY_COLLECTED"
@@ -471,7 +518,12 @@ async def test_waitlist_is_served_in_order_when_a_unit_frees(client, session, wo
     assert unlock.revoked_at is not None
     from app.api.notifications.models import Notifications
 
-    assert await session.scalar(select(func.count()).select_from(Notifications).where(Notifications.type == "quest_reward_held", Notifications.user_id == w["g"]["b"][0].id)) == 1
+    assert (
+        await session.scalar(
+            select(func.count()).select_from(Notifications).where(Notifications.type == "quest_reward_held", Notifications.user_id == w["g"]["b"][0].id)
+        )
+        == 1
+    )
     # More stock: Chen is served too.
     await ok(await client.patch(url(w, f"/merch/{w['sticker'].id}"), json={"stock": 2}, headers=w["club"]))
     claim_c = await session.scalar(select(QuestClaims).where(QuestClaims.registration_id == rc.id).execution_options(populate_existing=True))
@@ -520,6 +572,7 @@ async def test_two_guests_racing_for_the_last_unit_one_gets_it(session, _engine,
         await s.commit()
         ids = dict(event=event.id, item=item.id, quest=quest.id, club=club.id, owner=owner.id, users=[u for _, u in regs])
     try:
+
         async def unlock(reg_id, user_id):
             async with maker() as s2:
                 q = await s2.get(Quests, ids["quest"])
@@ -582,10 +635,16 @@ async def make_event_in(s, club, owner):
 
 async def test_codes_ignore_case_and_spaces_count_wrong_tries_and_keep_their_window(client, session, world):
     w = world
-    code, later = await setup(client, w, milestones=(), code_attempts_per_hour=3, tasks=[
-        {"kind": "code", "config": {"code": "Cloud 24"}},
-        {"kind": "code", "title": "Closing code", "config": {"code": "BYE"}, "starts_at": (NOW + timedelta(hours=2)).isoformat()},
-    ])
+    code, later = await setup(
+        client,
+        w,
+        milestones=(),
+        code_attempts_per_hour=3,
+        tasks=[
+            {"kind": "code", "config": {"code": "Cloud 24"}},
+            {"kind": "code", "title": "Closing code", "config": {"code": "BYE"}, "starts_at": (NOW + timedelta(hours=2)).isoformat()},
+        ],
+    )
     h = w["g"]["a"][2]
     wrong = await client.post(url(w, "/quest/code"), json={"code": "nope"}, headers=h)
     assert wrong.status_code == 404 and wrong.json()["error_code"] == "QUEST_CODE_WRONG" and wrong.json()["errors"]["left"] == 2
@@ -627,7 +686,9 @@ async def world_other_club(client, session):
     from app.core.auth.jwt import create_access_token
     from app.api.auth.schemas import AuthTokenData
 
-    u = Users(full_name="Other", username=f"other{uuid.uuid4().hex[:5]}", email=f"other{uuid.uuid4().hex[:5]}@example.com", password="x", user_type=UserTypes.club)
+    u = Users(
+        full_name="Other", username=f"other{uuid.uuid4().hex[:5]}", email=f"other{uuid.uuid4().hex[:5]}@example.com", password="x", user_type=UserTypes.club
+    )
     session.add(u)
     await session.flush()
     session.add(Clubs(slug=f"other-{uuid.uuid4().hex[:5]}", name="Other", user_id=u.id, is_verified=True))
@@ -642,9 +703,17 @@ async def world_other_club(client, session):
 
 async def test_points_required_tasks_leaderboard_and_export(client, session, world):
     w = world
-    must, extra = await setup(client, w, mode="points", leaderboard=True, milestones=((15, "sticker", "first_come"),), tasks=[
-        {"kind": "manual", "title": "Required", "points": 5, "required": True}, {"kind": "manual", "title": "Big", "points": 20},
-    ])
+    must, extra = await setup(
+        client,
+        w,
+        mode="points",
+        leaderboard=True,
+        milestones=((15, "sticker", "first_come"),),
+        tasks=[
+            {"kind": "manual", "title": "Required", "points": 5, "required": True},
+            {"kind": "manual", "title": "Big", "points": 20},
+        ],
+    )
     ra, rb = w["g"]["a"][1], w["g"]["b"][1]
     grant = lambda r, t: client.post(url(w, f"/quests/guests/{r.id}/tasks/{t['id']}/grant"), json={}, headers=w["club"])  # noqa: E731
     await ok(await grant(ra, extra))
@@ -698,3 +767,90 @@ async def test_entries_and_progress_rows_stay_unique_under_a_second_full_run(cli
     assert before == after == [2, 2, 2, 2]
     assert await session.scalar(select(func.count()).select_from(QuestAudit)) == 0
     assert await session.scalar(select(func.count()).select_from(Doors).where(Doors.purpose.isnot(None))) == 0
+
+
+async def test_a_finished_profile_and_poster_registrations_count(client, session, world):
+    from sqlalchemy import text
+
+    from app.api.events.models import EventRegistrationsLink
+    from app.api.guest_posters.models import GuestPosters
+    from app.api.links.models import TrackingLinks
+    from app.api.profiles.models import ProfileLinks, ProfileProjects
+    from app.api.users.models import UserProfiles
+
+    w = world
+    profile, regs = await setup(
+        client,
+        w,
+        milestones=(),
+        tasks=[
+            {"kind": "profile_complete"},
+            {"kind": "poster_link", "config": {"metric": "registrations", "count": 1}},
+        ],
+    )
+    a, ra = w["g"]["a"][0], w["g"]["a"][1]
+    session.add(UserProfiles(user_id=a.id, full_name=a.full_name, headline="Builds things"))
+    session.add_all([ProfileLinks(user_id=a.id, type="github", url="https://github.com/asha"), ProfileProjects(user_id=a.id, title="Quest app")])
+    await session.flush()
+    # The photo column uploads on write: set as stored, by key.
+    await session.execute(text("UPDATE user_profiles SET profile_pic = 'users/profile_pic/x.jpg' WHERE user_id = :u"), {"u": a.id})
+    tl = TrackingLinks(
+        id=uuid.uuid4(),
+        club_id=w["event"].club_id,
+        event_id=w["event"].id,
+        name="poster",
+        code=f"qr{uuid.uuid4().hex[:6]}",
+        kind="poster_guest",
+        utm_source="poster",
+        utm_medium="share",
+    )
+    session.add(tl)
+    await session.flush()
+    session.add(GuestPosters(event_id=w["event"].id, registration_id=ra.id, tracking_link_id=tl.id))
+    rb = await session.get(EventRegistrationsLink, w["g"]["b"][1].id)
+    rb.tracking_link_id = tl.id
+    await session.commit()
+    c = await card(client, w, "a")
+    assert task_me(c, profile["id"])["done"] is True and task_me(c, regs["id"])["done"] is True
+
+
+async def test_kiosks_and_the_team_roles_at_quest_doors(client, session, world):
+    from app.api.checkins.gate_auth import GateActor
+    from app.api.checkins.models import CheckInVia
+    from app.api.club_access import policy
+    from app.api.quests import gate as quest_gate
+
+    w = world
+    await setup(client, w, tasks=[], milestones=())
+    st = await _station(client, w)
+    door = await session.get(Doors, uuid.UUID(st["door"]["id"]))
+    kiosk = GateActor(kind="door", name="Kiosk", door=door, can_check_in=True, features=frozenset({"quests"}))
+    out = await quest_gate.scan_at(
+        session, w["event"], door, code=w["g"]["a"][1].ticket_id, registration=None, client_ref=None, scanned_at=None, actor=kiosk, via=CheckInVia.kiosk
+    )
+    assert out["outcome"] == "INVALID" and out["hint"] == "QUEST_STATION"
+    assert await session.scalar(select(func.count()).select_from(QuestStationVisits)) == 0
+    p = "/api/v1/events/1/quests"
+    assert policy.allows("editor", "PATCH", p) and policy.allows("door", "GET", p)
+    assert not policy.allows("door", "PATCH", p) and not policy.allows("door", "POST", p + "/guests/x/tasks/y/grant")
+    assert not policy.allows("door", "GET", p + "/export") and policy.allows("editor", "GET", p + "/export")
+    assert policy.allows("door", "POST", "/api/v1/events/1/gate/quests/claims/x/handover")
+    assert policy.allows("door", "POST", "/api/v1/events/1/gate/scan")
+    # "Desk" is where check-ins by hand go: never a station's name.
+    r = await client.post(url(w, "/quests/stations"), json={"name": "DESK", "purpose": "swag_desk"}, headers=w["club"])
+    assert r.status_code == 422
+
+
+async def test_the_five_minute_sweep_looks_at_follows_for_events_on_now(client, session, world):
+    from app.api.clubs.models import ClubUsersLink
+    from app.api.quests import sweep
+
+    w = world
+    (t,) = await setup(client, w, milestones=(), tasks=[{"kind": "follow_club"}])
+    session.add(ClubUsersLink(club_id=w["event"].club_id, user_id=w["g"]["b"][0].id, is_following=True))
+    await session.commit()
+    assert w["event"].id in await sweep.due_events(session, datetime.now(timezone.utc))
+    assert w["event"].id not in await sweep.due_events(session, datetime.now(timezone.utc) + timedelta(days=3))
+    assert await sweep.sweep(session) >= 1
+    p = await session.scalar(select(QuestProgress).where(QuestProgress.task_id == uuid.UUID(t["id"]), QuestProgress.registration_id == w["g"]["b"][1].id))
+    assert p is not None and p.done_at is not None

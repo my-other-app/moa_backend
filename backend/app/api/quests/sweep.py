@@ -6,6 +6,7 @@ the start to a day after the end) -- CONTRACT §5.1.
 One grouped query per task (evaluators.py), in batches of guests; nothing
 for an event without a quest on.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -35,8 +36,12 @@ async def due_events(session, now: datetime) -> list[int]:
     utc_now = now.astimezone(timezone.utc).replace(tzinfo=None)  # ends_at_sql is UTC wall time
     polled = select(QuestTasks.quest_id).where(QuestTasks.kind.in_(K.POLLED), QuestTasks.archived_at.is_(None))
     rows = await session.scalars(
-        select(Quests.event_id).join(Events, Events.id == Quests.event_id).where(
-            Quests.enabled == True, Events.is_deleted == False, Quests.id.in_(polled),  # noqa: E712
+        select(Quests.event_id)
+        .join(Events, Events.id == Quests.event_id)
+        .where(
+            Quests.enabled == True,
+            Events.is_deleted == False,
+            Quests.id.in_(polled),  # noqa: E712
             sa.func.timezone("UTC", Events.event_datetime) - sa.text("INTERVAL '24 hours'") <= utc_now,
             ends_at_sql(Events) + sa.text("INTERVAL '24 hours'") >= utc_now,
         )

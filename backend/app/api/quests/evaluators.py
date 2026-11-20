@@ -6,6 +6,7 @@ the task's window allows. One grouped query per task, never one per guest:
 the same function serves one guest's evaluation and the full recompute.
 Every function only reads, so running one twice changes nothing.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -70,7 +71,8 @@ async def _checked_in(session, ctx: Ctx, task, regs: list[Guest]) -> dict:
             pass
     rows = await session.execute(
         select(CheckIns.registration_id).where(
-            CheckIns.event_id == ctx.event.id, CheckIns.registration_id.in_([g.id for g in regs]),
+            CheckIns.event_id == ctx.event.id,
+            CheckIns.registration_id.in_([g.id for g in regs]),
             *_between(CheckIns.checked_in_at, start, end),
         )
     )
@@ -97,12 +99,14 @@ async def _network(session, ctx: Ctx, task, regs: list[Guest]) -> dict:
     if direction in ("saved", "either"):
         parts.append(
             select(NP.owner_id.label("me"), NP.person_id.label("other"), E.met_at.label("at"))
-            .join(E, E.network_person_id == NP.id).where(NP.owner_id.in_(uids), NP.person_id.in_(checked), *met)
+            .join(E, E.network_person_id == NP.id)
+            .where(NP.owner_id.in_(uids), NP.person_id.in_(checked), *met)
         )
     if direction in ("saved_by", "either"):
         parts.append(
             select(NP.person_id.label("me"), NP.owner_id.label("other"), E.met_at.label("at"))
-            .join(E, E.network_person_id == NP.id).where(NP.person_id.in_(uids), NP.owner_id.in_(checked), *met)
+            .join(E, E.network_person_id == NP.id)
+            .where(NP.person_id.in_(uids), NP.owner_id.in_(checked), *met)
         )
     both = (union_all(*parts) if len(parts) > 1 else parts[0]).subquery()
     first = select(both.c.me, both.c.other, func.min(both.c.at).label("at")).where(both.c.me != both.c.other).group_by(both.c.me, both.c.other).subquery()
@@ -131,7 +135,8 @@ async def _quiz(session, ctx: Ctx, task, regs: list[Guest]) -> dict:
     best = (
         select(P.registration_id, func.max(P.score).label("score"))
         .where(P.quiz_id == quiz.id, P.registration_id.isnot(None), P.id.in_(answered))
-        .group_by(P.registration_id).subquery()
+        .group_by(P.registration_id)
+        .subquery()
     )
     if task.kind == K.QUIZ_SCORE:
         need = int((task.config or {}).get("min_score") or 1)
@@ -161,7 +166,8 @@ async def _polls(session, ctx: Ctx, task, regs: list[Guest]) -> dict:
         return {}
     start, end = window(ctx, task)
     rows = await session.execute(
-        select(PR.voter_key, func.count(distinct(PR.poll_id))).join(LivePolls, LivePolls.id == PR.poll_id)
+        select(PR.voter_key, func.count(distinct(PR.poll_id)))
+        .join(LivePolls, LivePolls.id == PR.poll_id)
         .where(LivePolls.event_id == ctx.event.id, PR.voter_key.in_(list(keys)), *_between(PR.created_at, start, end))
         .group_by(PR.voter_key)
     )
@@ -177,8 +183,10 @@ async def _questions(session, ctx: Ctx, task, regs: list[Guest]) -> dict:
     start, end = window(ctx, task)
     rows = await session.execute(
         select(Q.id, Q.registration_id, Q.author_key).where(
-            Q.event_id == ctx.event.id, Q.status != QuestionStatus.rejected,
-            or_(Q.registration_id.in_(list(ids)), Q.author_key.in_(list(keys) or [""])), *_between(Q.created_at, start, end),
+            Q.event_id == ctx.event.id,
+            Q.status != QuestionStatus.rejected,
+            or_(Q.registration_id.in_(list(ids)), Q.author_key.in_(list(keys) or [""])),
+            *_between(Q.created_at, start, end),
         )
     )
     seen: dict = {}
@@ -194,9 +202,13 @@ async def _feedback(session, ctx: Ctx, task, regs: list[Guest]) -> dict:
 
     start, end = window(ctx, task)
     rows = await session.execute(
-        select(FeedbackResponses.registration_id).join(FeedbackSurveys, FeedbackSurveys.id == FeedbackResponses.survey_id)
-        .where(FeedbackSurveys.event_id == ctx.event.id, FeedbackResponses.registration_id.in_([g.id for g in regs]),
-               *_between(FeedbackResponses.submitted_at, start, end))
+        select(FeedbackResponses.registration_id)
+        .join(FeedbackSurveys, FeedbackSurveys.id == FeedbackResponses.survey_id)
+        .where(
+            FeedbackSurveys.event_id == ctx.event.id,
+            FeedbackResponses.registration_id.in_([g.id for g in regs]),
+            *_between(FeedbackResponses.submitted_at, start, end),
+        )
     )
     return {r: 1 for (r,) in rows.all()}
 
@@ -206,7 +218,9 @@ async def _poster_made(session, ctx: Ctx, task, regs: list[Guest]) -> dict:
 
     start, end = window(ctx, task)
     rows = await session.execute(
-        select(G.registration_id).where(G.event_id == ctx.event.id, G.registration_id.in_([g.id for g in regs]), G.made_at.isnot(None), *_between(G.made_at, start, end))
+        select(G.registration_id).where(
+            G.event_id == ctx.event.id, G.registration_id.in_([g.id for g in regs]), G.made_at.isnot(None), *_between(G.made_at, start, end)
+        )
     )
     return {r: 1 for (r,) in rows.all()}
 
@@ -217,14 +231,22 @@ async def _poster_link(session, ctx: Ctx, task, regs: list[Guest]) -> dict:
     from app.api.links.models import TrackingClicks as C
 
     start, end = window(ctx, task)
-    links = dict((await session.execute(
-        select(G.tracking_link_id, G.registration_id).where(G.event_id == ctx.event.id, G.registration_id.in_([g.id for g in regs]), G.tracking_link_id.isnot(None))
-    )).all())
+    links = dict(
+        (
+            await session.execute(
+                select(G.tracking_link_id, G.registration_id).where(
+                    G.event_id == ctx.event.id, G.registration_id.in_([g.id for g in regs]), G.tracking_link_id.isnot(None)
+                )
+            )
+        ).all()
+    )
     if not links:
         return {}
     if (task.config or {}).get("metric") == "registrations":
         rows = await session.execute(
-            select(R.tracking_link_id, R.id).where(R.event_id == ctx.event.id, R.is_deleted == False, R.tracking_link_id.in_(list(links)), *_between(R.created_at, start, end))  # noqa: E712
+            select(R.tracking_link_id, R.id).where(
+                R.event_id == ctx.event.id, R.is_deleted == False, R.tracking_link_id.in_(list(links)), *_between(R.created_at, start, end)
+            )  # noqa: E712
         )
         out: dict = {}
         for link, reg_id in rows.all():
@@ -233,7 +255,9 @@ async def _poster_link(session, ctx: Ctx, task, regs: list[Guest]) -> dict:
                 out[owner] = out.get(owner, 0) + 1
         return out
     rows = await session.execute(
-        select(C.link_id, func.count(distinct(C.visitor))).where(C.link_id.in_(list(links)), C.visitor.isnot(None), *_between(C.created_at, start, end)).group_by(C.link_id)
+        select(C.link_id, func.count(distinct(C.visitor)))
+        .where(C.link_id.in_(list(links)), C.visitor.isnot(None), *_between(C.created_at, start, end))
+        .group_by(C.link_id)
     )
     return {links[link]: int(n) for link, n in rows.all() if n}
 
@@ -245,7 +269,9 @@ async def _follow(session, ctx: Ctx, task, regs: list[Guest]) -> dict:
         return {}
     uids = [g.user_id for g in regs if g.user_id is not None]
     rows = await session.execute(
-        select(F.user_id, func.count()).where(F.club_id == ctx.event.club_id, F.user_id.in_(uids), F.is_following == True, F.is_deleted == False).group_by(F.user_id)  # noqa: E712
+        select(F.user_id, func.count())
+        .where(F.club_id == ctx.event.club_id, F.user_id.in_(uids), F.is_following == True, F.is_deleted == False)
+        .group_by(F.user_id)  # noqa: E712
     )
     return _by_user(rows.all(), regs)
 
@@ -262,11 +288,17 @@ async def _profile(session, ctx: Ctx, task, regs: list[Guest]) -> dict:
     # The photo column's type can't be part of a cached statement: asked in SQL text (profiles.stats).
     has_photo = literal_column("user_profiles.profile_pic IS NOT NULL", Boolean)
     rows = await session.execute(
-        select(UP.user_id, func.count()).where(
-            UP.user_id.in_(uids), UP.is_deleted == False, UP.headline.isnot(None), UP.headline != "", has_photo,  # noqa: E712
+        select(UP.user_id, func.count())
+        .where(
+            UP.user_id.in_(uids),
+            UP.is_deleted == False,
+            UP.headline.isnot(None),
+            UP.headline != "",
+            has_photo,  # noqa: E712
             select(ProfileLinks.id).where(ProfileLinks.user_id == UP.user_id).exists(),
             select(ProfileProjects.id).where(ProfileProjects.user_id == UP.user_id).exists(),
-        ).group_by(UP.user_id)
+        )
+        .group_by(UP.user_id)
     )
     return _by_user(rows.all(), regs)
 

@@ -12,6 +12,7 @@ STATION_VISIT / SWAG_DESK. Others -- the console deployed before, the app
 until its next release -- get a known refusal: INVALID with a hint, final
 for their offline queues, never an admission.
 """
+
 from __future__ import annotations
 
 import logging
@@ -81,12 +82,25 @@ def masked(reg) -> dict:
     """What station and desk staff see: the name, never a contact or the ticket id."""
     role = getattr(reg.role, "value", reg.role) or "attendee"
     return {
-        "id": reg.id, "name": reg.full_name or "", "ticket_id": "", "role": str(role), "email": None, "phone": None, "has_contact": False,
-        "is_paid": True, "checked_in_at": None, "badge_printed_at": None, "admission_no": None, "ticket_type": None, "missing_answers": [],
+        "id": reg.id,
+        "name": reg.full_name or "",
+        "ticket_id": "",
+        "role": str(role),
+        "email": None,
+        "phone": None,
+        "has_contact": False,
+        "is_paid": True,
+        "checked_in_at": None,
+        "badge_printed_at": None,
+        "admission_no": None,
+        "ticket_type": None,
+        "missing_answers": [],
     }
 
 
-async def scan_at(session, event, door: Doors, *, code: Optional[str], registration, client_ref: Optional[str], scanned_at: Optional[datetime], actor, via) -> dict:
+async def scan_at(
+    session, event, door: Doors, *, code: Optional[str], registration, client_ref: Optional[str], scanned_at: Optional[datetime], actor, via
+) -> dict:
     from app.api.checkins import service as cs
 
     reg = registration if registration is not None else await cs.lookup(session, event.id, code or "")
@@ -138,9 +152,21 @@ async def record_visit(session, event, door: Doors, reg, *, actor, via, client_r
             client_ref = None  # a reference used for another scan: recorded without it
     when = _visit_time(via, scanned_at, now)
     got = await session.scalar(
-        pg_insert(V).values(id=uuid.uuid4(), event_id=event.id, door_id=door.id, registration_id=reg.id, visited_at=when,
-                            scanned_at=scanned_at, recorded_by=actor.user_id, via=_via_name(via), client_ref=client_ref, created_at=now)
-        .on_conflict_do_nothing().returning(V.id)
+        pg_insert(V)
+        .values(
+            id=uuid.uuid4(),
+            event_id=event.id,
+            door_id=door.id,
+            registration_id=reg.id,
+            visited_at=when,
+            scanned_at=scanned_at,
+            recorded_by=actor.user_id,
+            via=_via_name(via),
+            client_ref=client_ref,
+            created_at=now,
+        )
+        .on_conflict_do_nothing()
+        .returning(V.id)
     )
     if got is None:
         first = await session.scalar(select(V).where(V.door_id == door.id, V.registration_id == reg.id))
@@ -159,10 +185,15 @@ async def _describe_credit(session, event, door: Doors, reg, out: dict, *, fresh
     quest = await engine.quest_of(session, event.id)
     tasks = []
     if quest is not None:
-        tasks = list((await session.scalars(
-            select(QuestTasks).where(QuestTasks.quest_id == quest.id, QuestTasks.door_id == door.id, QuestTasks.kind == K.STATION, QuestTasks.archived_at.is_(None))
-            .order_by(QuestTasks.sort_order)
-        )).all())
+        tasks = list(
+            (
+                await session.scalars(
+                    select(QuestTasks)
+                    .where(QuestTasks.quest_id == quest.id, QuestTasks.door_id == door.id, QuestTasks.kind == K.STATION, QuestTasks.archived_at.is_(None))
+                    .order_by(QuestTasks.sort_order)
+                )
+            ).all()
+        )
     if tasks:
         t = tasks[0]
         out["task"] = {"id": t.id, "title": t.title, "points": t.points}
@@ -194,18 +225,22 @@ async def _describe_credit(session, event, door: Doors, reg, out: dict, *, fresh
 async def _claims_of(session, event, reg) -> list:
     from app.api.merch.models import MerchItems, MerchVariants
 
-    rows = (await session.execute(
-        select(QuestClaims, QuestRewards, QuestMilestones, MerchItems)
-        .join(QuestRewards, QuestRewards.id == QuestClaims.reward_id)
-        .join(QuestMilestones, QuestMilestones.id == QuestClaims.milestone_id)
-        .join(MerchItems, MerchItems.id == QuestClaims.merch_item_id)
-        .where(QuestClaims.registration_id == reg.id, QuestRewards.event_id == event.id)
-        .order_by(QuestMilestones.threshold, QuestRewards.sort_order, QuestRewards.created_at)
-    )).all()
+    rows = (
+        await session.execute(
+            select(QuestClaims, QuestRewards, QuestMilestones, MerchItems)
+            .join(QuestRewards, QuestRewards.id == QuestClaims.reward_id)
+            .join(QuestMilestones, QuestMilestones.id == QuestClaims.milestone_id)
+            .join(MerchItems, MerchItems.id == QuestClaims.merch_item_id)
+            .where(QuestClaims.registration_id == reg.id, QuestRewards.event_id == event.id)
+            .order_by(QuestMilestones.threshold, QuestRewards.sort_order, QuestRewards.created_at)
+        )
+    ).all()
     item_ids = {m.id for _, _, _, m in rows}
     variants: dict = {}
     if item_ids:
-        for v in (await session.scalars(select(MerchVariants).where(MerchVariants.item_id.in_(item_ids)).order_by(MerchVariants.created_at, MerchVariants.id))).all():
+        for v in (
+            await session.scalars(select(MerchVariants).where(MerchVariants.item_id.in_(item_ids)).order_by(MerchVariants.created_at, MerchVariants.id))
+        ).all():
             variants.setdefault(v.item_id, []).append(v)
     return [(c, r, ms, m, variants.get(m.id, [])) for c, r, ms, m in rows]
 
@@ -216,9 +251,11 @@ async def _collection_brief(session, claim) -> dict:
 
     if claim.collection_id is None:
         return {"collected_at": claim.collected_at, "collected_by": None, "door": None}
-    row = (await session.execute(
-        select(MerchCollections, Users).outerjoin(Users, Users.id == MerchCollections.collected_by).where(MerchCollections.id == claim.collection_id)
-    )).first()
+    row = (
+        await session.execute(
+            select(MerchCollections, Users).outerjoin(Users, Users.id == MerchCollections.collected_by).where(MerchCollections.id == claim.collection_id)
+        )
+    ).first()
     if row is None:
         return {"collected_at": claim.collected_at, "collected_by": None, "door": None}
     c, user = row
@@ -232,11 +269,20 @@ async def claim_row(session, claim, reward, milestone, item, variants) -> dict:
     v = st.variant(claim.variant_id) if claim.variant_id is not None else None
     needs_size = claim.status == RESERVED and st.sized and v is None
     row = {
-        "claim_id": claim.id, "reward_id": reward.id, "milestone": milestone.title, "milestone_id": milestone.id,
-        "item_id": item.id, "name": item.name, "photo_url": objects.photo_url(item.photo_key),
-        "status": claim.status, "needs_size": needs_size, "variant_label": v.label if v is not None else None,
+        "claim_id": claim.id,
+        "reward_id": reward.id,
+        "milestone": milestone.title,
+        "milestone_id": milestone.id,
+        "item_id": item.id,
+        "name": item.name,
+        "photo_url": objects.photo_url(item.photo_key),
+        "status": claim.status,
+        "needs_size": needs_size,
+        "variant_label": v.label if v is not None else None,
         "choices": st.choices() if (claim.status == RESERVED and st.sized) else [],
-        "collected_at": None, "collected_by": None, "door": None,
+        "collected_at": None,
+        "collected_by": None,
+        "door": None,
     }
     if claim.status == COLLECTED:
         row.update(await _collection_brief(session, claim))
@@ -250,8 +296,11 @@ async def swag_block(session, event, door: Optional[Doors], reg) -> dict:
     entry = await session.scalar(select(QuestEntries).where(QuestEntries.quest_id == quest.id, QuestEntries.registration_id == reg.id)) if quest else None
     rewards = [await claim_row(session, *r) for r in await _claims_of(session, event, reg) if r[0].status != RELEASED]
     return {
-        "door_id": door.id if door is not None else None, "name": door.name if door is not None else None,
-        "enabled": bool(quest and quest.enabled), "points": entry.points if entry else 0, "tasks_done": entry.tasks_done if entry else 0,
+        "door_id": door.id if door is not None else None,
+        "name": door.name if door is not None else None,
+        "enabled": bool(quest and quest.enabled),
+        "points": entry.points if entry else 0,
+        "tasks_done": entry.tasks_done if entry else 0,
         "rewards": rewards,
     }
 
@@ -261,12 +310,17 @@ async def guest_view(session, event, reg_id) -> dict:
     from app.api.checkins.service import registration_of
 
     reg = await registration_of(session, event, reg_id)
-    visits = (await session.execute(
-        select(QuestStationVisits.door_id, Doors.name, QuestStationVisits.visited_at).join(Doors, Doors.id == QuestStationVisits.door_id)
-        .where(QuestStationVisits.registration_id == reg.id).order_by(QuestStationVisits.visited_at)
-    )).all()
+    visits = (
+        await session.execute(
+            select(QuestStationVisits.door_id, Doors.name, QuestStationVisits.visited_at)
+            .join(Doors, Doors.id == QuestStationVisits.door_id)
+            .where(QuestStationVisits.registration_id == reg.id)
+            .order_by(QuestStationVisits.visited_at)
+        )
+    ).all()
     return {
-        "attendee": masked(reg), "swag": await swag_block(session, event, None, reg),
+        "attendee": masked(reg),
+        "swag": await swag_block(session, event, None, reg),
         "stations": [{"door_id": d, "name": n, "visited_at": at} for d, n, at in visits],
     }
 
@@ -297,8 +351,14 @@ async def handover(session, event, claim_id, actor, *, variant_label: Optional[s
     async def answer(result: str) -> dict:
         await session.commit()
         item = await session.get(MerchItems, claim.merch_item_id)
-        variants = list((await session.scalars(select(MerchVariants).where(MerchVariants.item_id == item.id).order_by(MerchVariants.created_at, MerchVariants.id))).all())
-        return {"result": result, "claim": await claim_row(session, claim, reward, milestone, item, variants), "remaining": stock.Stock(item, variants).remaining(claim.variant_id)}
+        variants = list(
+            (await session.scalars(select(MerchVariants).where(MerchVariants.item_id == item.id).order_by(MerchVariants.created_at, MerchVariants.id))).all()
+        )
+        return {
+            "result": result,
+            "claim": await claim_row(session, claim, reward, milestone, item, variants),
+            "remaining": stock.Stock(item, variants).remaining(claim.variant_id),
+        }
 
     if claim.status == COLLECTED:
         return await answer("ALREADY_COLLECTED")
@@ -319,8 +379,17 @@ async def handover(session, event, claim_id, actor, *, variant_label: Optional[s
     collection = await stock.hand_over(session, st, claim, reg, event, actor_user_id=actor.user_id, door=door, door_label=door_label)
     if collection is None:
         return await answer("ALREADY_COLLECTED")
-    session.add(QuestAudit(quest_id=claim.quest_id, registration_id=reg.id, reward_id=reward.id, action="handover",
-                           by_user_id=actor.user_id, by_name=(actor.name or "")[:120], detail={"door": door.name if door else door_label}))
+    session.add(
+        QuestAudit(
+            quest_id=claim.quest_id,
+            registration_id=reg.id,
+            reward_id=reward.id,
+            action="handover",
+            by_user_id=actor.user_id,
+            by_name=(actor.name or "")[:120],
+            detail={"door": door.name if door else door_label},
+        )
+    )
     return await answer("HANDED_OVER")
 
 
@@ -333,6 +402,8 @@ async def context_block(session, event, actor) -> Optional[dict]:
     if quest is None and (door is None or door.purpose is None):
         return None
     return {
-        "enabled": bool(quest and quest.enabled), "door_purpose": door.purpose if door is not None else None,
-        "door_name": door.name if door is not None else None, "can_hand_over": may_hand_over(actor),
+        "enabled": bool(quest and quest.enabled),
+        "door_purpose": door.purpose if door is not None else None,
+        "door_name": door.name if door is not None else None,
+        "can_hand_over": may_hand_over(actor),
     }

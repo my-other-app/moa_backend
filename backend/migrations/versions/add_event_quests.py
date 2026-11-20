@@ -16,6 +16,7 @@ The new tables are empty, and their indexes are made with them.
 Revision ID: add_event_quests
 Revises: add_guest_posters
 """
+
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -62,7 +63,8 @@ def upgrade() -> None:
         sa.Column("title", sa.String(80), nullable=True),
         sa.Column("intro", sa.String(400), nullable=True),
         sa.Column("mode", sa.String(12), nullable=False, server_default="checkmarks"),
-        _at("starts_at"), _at("ends_at"),
+        _at("starts_at"),
+        _at("ends_at"),
         sa.Column("leaderboard", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("leaderboard_names", sa.String(8), nullable=False, server_default="initial"),
         sa.Column("code_attempts_per_hour", sa.Integer(), nullable=False, server_default="10"),
@@ -79,7 +81,8 @@ def upgrade() -> None:
         sa.Column("description", sa.String(300), nullable=True),
         sa.Column("points", sa.Integer(), nullable=False, server_default="10"),
         sa.Column("required", sa.Boolean(), nullable=False, server_default=sa.false()),
-        _at("starts_at"), _at("ends_at"),
+        _at("starts_at"),
+        _at("ends_at"),
         sa.Column("config", JSONB(), nullable=False, server_default=sa.text("'{}'::jsonb")),
         _fk("door_id", "doors.id", "SET NULL"),
         sa.Column("code", sa.String(40), nullable=True),
@@ -89,7 +92,9 @@ def upgrade() -> None:
     )
     op.create_index("ix_quest_tasks_quest", "quest_tasks", ["quest_id", "sort_order"])
     op.create_index("ix_quest_tasks_door", "quest_tasks", ["door_id"], postgresql_where=sa.text("door_id IS NOT NULL"))
-    op.create_index("ux_quest_tasks_code", "quest_tasks", ["quest_id", "code"], unique=True, postgresql_where=sa.text("code IS NOT NULL AND archived_at IS NULL"))
+    op.create_index(
+        "ux_quest_tasks_code", "quest_tasks", ["quest_id", "code"], unique=True, postgresql_where=sa.text("code IS NOT NULL AND archived_at IS NULL")
+    )
 
     op.create_table(
         "quest_milestones",
@@ -160,7 +165,8 @@ def upgrade() -> None:
         _fk("milestone_id", "quest_milestones.id", "CASCADE", nullable=False),
         _fk("registration_id", "event_registrations_link.id", "CASCADE", nullable=False),
         _at("unlocked_at", False, server_default=NOW),
-        _at("revoked_at"), _at("notified_at"),
+        _at("revoked_at"),
+        _at("notified_at"),
         sa.UniqueConstraint("milestone_id", "registration_id", name="uq_quest_unlocks_milestone_registration"),
     )
     op.create_index("ix_quest_unlocks_registration", "quest_unlocks", ["registration_id", "quest_id"])
@@ -178,9 +184,12 @@ def upgrade() -> None:
         sa.Column("status", sa.String(12), nullable=False),
         sa.Column("holds", sa.Boolean(), nullable=False, server_default=sa.false()),
         _at("unlocked_at", False, server_default=NOW),
-        _at("reserved_at"), _at("waitlisted_at"), _at("collected_at"),
+        _at("reserved_at"),
+        _at("waitlisted_at"),
+        _at("collected_at"),
         _fk("collection_id", "merch_collections.id", "SET NULL"),
-        _at("released_at"), _at("held_notified_at"),
+        _at("released_at"),
+        _at("held_notified_at"),
         *_stamps(),
         sa.UniqueConstraint("reward_id", "registration_id", name="uq_quest_claims_reward_registration"),
     )
@@ -194,7 +203,8 @@ def upgrade() -> None:
         sa.Column("event_id", sa.Integer(), sa.ForeignKey("events.id", ondelete="CASCADE"), nullable=False),
         _fk("door_id", "doors.id", "CASCADE", nullable=False),
         _fk("registration_id", "event_registrations_link.id", "CASCADE", nullable=False),
-        _at("visited_at", False), _at("scanned_at"),
+        _at("visited_at", False),
+        _at("scanned_at"),
         sa.Column("recorded_by", sa.Integer(), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
         sa.Column("via", sa.String(14), nullable=False, server_default="gate"),
         sa.Column("client_ref", sa.String(64), nullable=True, unique=True),
@@ -224,8 +234,18 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.execute("SET LOCAL lock_timeout = '5s'")
-    for table in ("quest_audit", "quest_station_visits", "quest_claims", "quest_unlocks", "quest_entries", "quest_progress",
-                  "quest_rewards", "quest_milestones", "quest_tasks", "quests"):
+    for table in (
+        "quest_audit",
+        "quest_station_visits",
+        "quest_claims",
+        "quest_unlocks",
+        "quest_entries",
+        "quest_progress",
+        "quest_rewards",
+        "quest_milestones",
+        "quest_tasks",
+        "quests",
+    ):
         op.drop_table(table)
     op.drop_column("merch_variants", "reserved_count")
     op.drop_column("merch_items", "reserved_count")

@@ -10,6 +10,7 @@
 - `evaluate` is both: for some kinds and some guests (a hook's job), or for
   everything and everyone (the recompute). Running it twice changes nothing.
 """
+
 from __future__ import annotations
 
 import logging
@@ -68,14 +69,28 @@ async def quest_of(session, event_id: int) -> Optional[Quests]:
 
 
 async def definition(session, quest: Quests) -> Definition:
-    tasks = list((await session.scalars(
-        select(QuestTasks).where(QuestTasks.quest_id == quest.id, QuestTasks.archived_at.is_(None)).order_by(QuestTasks.sort_order, QuestTasks.created_at)
-    )).all())
-    milestones = list((await session.scalars(
-        select(QuestMilestones).where(QuestMilestones.quest_id == quest.id).order_by(QuestMilestones.threshold, QuestMilestones.sort_order, QuestMilestones.created_at)
-    )).all())
+    tasks = list(
+        (
+            await session.scalars(
+                select(QuestTasks)
+                .where(QuestTasks.quest_id == quest.id, QuestTasks.archived_at.is_(None))
+                .order_by(QuestTasks.sort_order, QuestTasks.created_at)
+            )
+        ).all()
+    )
+    milestones = list(
+        (
+            await session.scalars(
+                select(QuestMilestones)
+                .where(QuestMilestones.quest_id == quest.id)
+                .order_by(QuestMilestones.threshold, QuestMilestones.sort_order, QuestMilestones.created_at)
+            )
+        ).all()
+    )
     rewards: dict = {}
-    for r in (await session.scalars(select(QuestRewards).where(QuestRewards.quest_id == quest.id).order_by(QuestRewards.sort_order, QuestRewards.created_at))).all():
+    for r in (
+        await session.scalars(select(QuestRewards).where(QuestRewards.quest_id == quest.id).order_by(QuestRewards.sort_order, QuestRewards.created_at))
+    ).all():
         rewards.setdefault(r.milestone_id, []).append(r)
     return Definition(quest, tasks, milestones, rewards)
 
@@ -106,9 +121,10 @@ async def apply(session, quest: Quests, task: QuestTasks, counts: dict, regs: li
     P = QuestProgress
     ids = [g.id for g in regs]
     existing = {
-        r: (c, d, x) for r, c, d, x in (await session.execute(
-            select(P.registration_id, P.count, P.done_at, P.revoked_at).where(P.task_id == task.id, P.registration_id.in_(ids))
-        )).all()
+        r: (c, d, x)
+        for r, c, d, x in (
+            await session.execute(select(P.registration_id, P.count, P.done_at, P.revoked_at).where(P.task_id == task.id, P.registration_id.in_(ids)))
+        ).all()
     }
     now = _now()
     rows, changed = [], set()
@@ -122,17 +138,29 @@ async def apply(session, quest: Quests, task: QuestTasks, counts: dict, regs: li
         done = n >= target
         if ex is not None and not done and ex[0] == n:
             continue
-        rows.append(dict(id=uuid.uuid4(), quest_id=quest.id, task_id=task.id, registration_id=g.id, count=n,
-                         done_at=now if done else None, source=source if done else None, updated_at=now))
+        rows.append(
+            dict(
+                id=uuid.uuid4(),
+                quest_id=quest.id,
+                task_id=task.id,
+                registration_id=g.id,
+                count=n,
+                done_at=now if done else None,
+                source=source if done else None,
+                updated_at=now,
+            )
+        )
         if done:
             changed.add(g.id)
     for i in range(0, len(rows), ROWS_PER_STATEMENT):
-        stmt = pg_insert(P).values(rows[i:i + ROWS_PER_STATEMENT])
-        await session.execute(stmt.on_conflict_do_update(
-            constraint="uq_quest_progress_task_registration",
-            set_={"count": stmt.excluded.count, "done_at": stmt.excluded.done_at, "source": stmt.excluded.source, "updated_at": stmt.excluded.updated_at},
-            where=and_(P.done_at.is_(None), P.revoked_at.is_(None)),
-        ))
+        stmt = pg_insert(P).values(rows[i : i + ROWS_PER_STATEMENT])
+        await session.execute(
+            stmt.on_conflict_do_update(
+                constraint="uq_quest_progress_task_registration",
+                set_={"count": stmt.excluded.count, "done_at": stmt.excluded.done_at, "source": stmt.excluded.source, "updated_at": stmt.excluded.updated_at},
+                where=and_(P.done_at.is_(None), P.revoked_at.is_(None)),
+            )
+        )
     return changed
 
 
@@ -140,42 +168,69 @@ async def tick(session, quest: Quests, task: QuestTasks, reg_id, *, source: str)
     """A station scan or a code: done now, unless it was already or the
     organiser revoked it. True when this made it done."""
     P = QuestProgress
-    stmt = pg_insert(P).values(id=uuid.uuid4(), quest_id=quest.id, task_id=task.id, registration_id=reg_id,
-                               count=K.target(task.kind, task.config), done_at=_now(), source=source, updated_at=_now())
-    got = await session.scalar(stmt.on_conflict_do_update(
-        constraint="uq_quest_progress_task_registration",
-        set_={"count": stmt.excluded.count, "done_at": stmt.excluded.done_at, "source": stmt.excluded.source, "updated_at": stmt.excluded.updated_at},
-        where=and_(P.done_at.is_(None), P.revoked_at.is_(None)),
-    ).returning(P.id))
+    stmt = pg_insert(P).values(
+        id=uuid.uuid4(),
+        quest_id=quest.id,
+        task_id=task.id,
+        registration_id=reg_id,
+        count=K.target(task.kind, task.config),
+        done_at=_now(),
+        source=source,
+        updated_at=_now(),
+    )
+    got = await session.scalar(
+        stmt.on_conflict_do_update(
+            constraint="uq_quest_progress_task_registration",
+            set_={"count": stmt.excluded.count, "done_at": stmt.excluded.done_at, "source": stmt.excluded.source, "updated_at": stmt.excluded.updated_at},
+            where=and_(P.done_at.is_(None), P.revoked_at.is_(None)),
+        ).returning(P.id)
+    )
     return got is not None
 
 
 async def grant(session, quest: Quests, task: QuestTasks, reg_id, by: Optional[int]) -> None:
     P = QuestProgress
     now = _now()
-    stmt = pg_insert(P).values(id=uuid.uuid4(), quest_id=quest.id, task_id=task.id, registration_id=reg_id,
-                               count=K.target(task.kind, task.config), done_at=now, source="grant", granted_by=by, updated_at=now)
-    await session.execute(stmt.on_conflict_do_update(
-        constraint="uq_quest_progress_task_registration",
-        set_={
-            "count": stmt.excluded.count, "revoked_at": None, "revoked_by": None, "updated_at": now,
-            # A tick already there keeps its time and how it came; a revoked one is given again now.
-            "done_at": case((and_(P.done_at.isnot(None), P.revoked_at.is_(None)), P.done_at), else_=stmt.excluded.done_at),
-            "source": case((and_(P.done_at.isnot(None), P.revoked_at.is_(None)), P.source), else_="grant"),
-            "granted_by": case((and_(P.done_at.isnot(None), P.revoked_at.is_(None)), P.granted_by), else_=by),
-        },
-    ))
+    stmt = pg_insert(P).values(
+        id=uuid.uuid4(),
+        quest_id=quest.id,
+        task_id=task.id,
+        registration_id=reg_id,
+        count=K.target(task.kind, task.config),
+        done_at=now,
+        source="grant",
+        granted_by=by,
+        updated_at=now,
+    )
+    await session.execute(
+        stmt.on_conflict_do_update(
+            constraint="uq_quest_progress_task_registration",
+            set_={
+                "count": stmt.excluded.count,
+                "revoked_at": None,
+                "revoked_by": None,
+                "updated_at": now,
+                # A tick already there keeps its time and how it came; a revoked one is given again now.
+                "done_at": case((and_(P.done_at.isnot(None), P.revoked_at.is_(None)), P.done_at), else_=stmt.excluded.done_at),
+                "source": case((and_(P.done_at.isnot(None), P.revoked_at.is_(None)), P.source), else_="grant"),
+                "granted_by": case((and_(P.done_at.isnot(None), P.revoked_at.is_(None)), P.granted_by), else_=by),
+            },
+        )
+    )
 
 
 async def revoke(session, quest: Quests, task: QuestTasks, reg_id, by: Optional[int]) -> None:
     P = QuestProgress
     now = _now()
-    stmt = pg_insert(P).values(id=uuid.uuid4(), quest_id=quest.id, task_id=task.id, registration_id=reg_id, count=0,
-                               revoked_at=now, revoked_by=by, updated_at=now)
-    await session.execute(stmt.on_conflict_do_update(
-        constraint="uq_quest_progress_task_registration",
-        set_={"revoked_at": now, "revoked_by": by, "updated_at": now},
-    ))
+    stmt = pg_insert(P).values(
+        id=uuid.uuid4(), quest_id=quest.id, task_id=task.id, registration_id=reg_id, count=0, revoked_at=now, revoked_by=by, updated_at=now
+    )
+    await session.execute(
+        stmt.on_conflict_do_update(
+            constraint="uq_quest_progress_task_registration",
+            set_={"revoked_at": now, "revoked_by": by, "updated_at": now},
+        )
+    )
 
 
 # ─── Totals, milestones, claims ─────────────────────────────────────────
@@ -205,19 +260,38 @@ async def _write_entries(session, d: Definition, regs: list[ev.Guest], totals: d
         out[g.id] = (score, left)
         if not n and g.id not in have:
             continue  # nothing done and no row yet: none needed (the recompute's other guests)
-        rows.append(dict(id=uuid.uuid4(), quest_id=d.quest.id, registration_id=g.id, user_id=g.user_id, tasks_done=n, points=p,
-                         required_left=left, score=score, score_at=now if score else None, created_at=now, updated_at=now))
+        rows.append(
+            dict(
+                id=uuid.uuid4(),
+                quest_id=d.quest.id,
+                registration_id=g.id,
+                user_id=g.user_id,
+                tasks_done=n,
+                points=p,
+                required_left=left,
+                score=score,
+                score_at=now if score else None,
+                created_at=now,
+                updated_at=now,
+            )
+        )
     for i in range(0, len(rows), ROWS_PER_STATEMENT):
-        stmt = pg_insert(E).values(rows[i:i + ROWS_PER_STATEMENT])
-        await session.execute(stmt.on_conflict_do_update(
-            constraint="uq_quest_entries_quest_registration",
-            set_={
-                "tasks_done": stmt.excluded.tasks_done, "points": stmt.excluded.points, "required_left": stmt.excluded.required_left,
-                "score": stmt.excluded.score, "user_id": stmt.excluded.user_id, "updated_at": now,
-                # When the score went up: the leaderboard's tie-break.
-                "score_at": case((stmt.excluded.score > E.score, now), (stmt.excluded.score == 0, None), else_=E.score_at),
-            },
-        ))
+        stmt = pg_insert(E).values(rows[i : i + ROWS_PER_STATEMENT])
+        await session.execute(
+            stmt.on_conflict_do_update(
+                constraint="uq_quest_entries_quest_registration",
+                set_={
+                    "tasks_done": stmt.excluded.tasks_done,
+                    "points": stmt.excluded.points,
+                    "required_left": stmt.excluded.required_left,
+                    "score": stmt.excluded.score,
+                    "user_id": stmt.excluded.user_id,
+                    "updated_at": now,
+                    # When the score went up: the leaderboard's tie-break.
+                    "score_at": case((stmt.excluded.score > E.score, now), (stmt.excluded.score == 0, None), else_=E.score_at),
+                },
+            )
+        )
     return out
 
 
@@ -230,7 +304,9 @@ async def refresh(session, d: Definition, event, regs: list[ev.Guest], *, commit
     ids = [g.id for g in regs]
     scores = await _write_entries(session, d, regs, await _totals(session, d, ids))
     U, C = QuestUnlocks, QuestClaims
-    unlocks = {(u.milestone_id, u.registration_id): u for u in (await session.scalars(select(U).where(U.quest_id == d.quest.id, U.registration_id.in_(ids)))).all()}
+    unlocks = {
+        (u.milestone_id, u.registration_id): u for u in (await session.scalars(select(U).where(U.quest_id == d.quest.id, U.registration_id.in_(ids)))).all()
+    }
     claims = {(c.reward_id, c.registration_id): c for c in (await session.scalars(select(C).where(C.quest_id == d.quest.id, C.registration_id.in_(ids)))).all()}
     made: list = []
     now = _now()
@@ -243,8 +319,10 @@ async def refresh(session, d: Definition, event, regs: list[ev.Guest], *, commit
             if reached:
                 if u is None:
                     uid = await session.scalar(
-                        pg_insert(U).values(id=uuid.uuid4(), quest_id=d.quest.id, milestone_id=m.id, registration_id=g.id, unlocked_at=now)
-                        .on_conflict_do_nothing(constraint="uq_quest_unlocks_milestone_registration").returning(U.id)
+                        pg_insert(U)
+                        .values(id=uuid.uuid4(), quest_id=d.quest.id, milestone_id=m.id, registration_id=g.id, unlocked_at=now)
+                        .on_conflict_do_nothing(constraint="uq_quest_unlocks_milestone_registration")
+                        .returning(U.id)
                     )
                     if uid is not None:
                         made.append(uid)
@@ -284,13 +362,25 @@ async def _stock_work(session, d: Definition, event, reg, work: list) -> None:
             continue
         if what == "claim":
             await session.execute(
-                pg_insert(QuestClaims).values(id=uuid.uuid4(), quest_id=d.quest.id, reward_id=r.id, milestone_id=m.id, registration_id=reg.id,
-                                              merch_item_id=r.merch_item_id, status=RELEASED, holds=False, unlocked_at=_now())
+                pg_insert(QuestClaims)
+                .values(
+                    id=uuid.uuid4(),
+                    quest_id=d.quest.id,
+                    reward_id=r.id,
+                    milestone_id=m.id,
+                    registration_id=reg.id,
+                    merch_item_id=r.merch_item_id,
+                    status=RELEASED,
+                    holds=False,
+                    unlocked_at=_now(),
+                )
                 .on_conflict_do_nothing(constraint="uq_quest_claims_reward_registration")
             )
         claim = await session.scalar(
-            select(QuestClaims).where(QuestClaims.reward_id == r.id, QuestClaims.registration_id == reg.id)
-            .with_for_update().execution_options(populate_existing=True)
+            select(QuestClaims)
+            .where(QuestClaims.reward_id == r.id, QuestClaims.registration_id == reg.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if claim is None:
             continue
@@ -346,7 +436,7 @@ async def evaluate(session, event_id: int, *, kinds: Optional[Iterable[str]] = N
     ctx = ev.Ctx(event=event, quest=quest, now=_now())
     total = 0
     for i in range(0, len(regs), BATCH):
-        batch = regs[i:i + BATCH]
+        batch = regs[i : i + BATCH]
         changed: set = set()
         for t in tasks:
             changed |= await apply(session, quest, t, await ev.count(session, ctx, t, batch), batch)
@@ -367,5 +457,5 @@ async def refresh_guests(session, event_id: int, reg_ids: Iterable) -> None:
     d = await definition(session, quest)
     regs = await guests(session, event_id, reg_ids=list(reg_ids))
     for i in range(0, len(regs), BATCH):
-        await refresh(session, d, event, regs[i:i + BATCH])
+        await refresh(session, d, event, regs[i : i + BATCH])
     await session.commit()

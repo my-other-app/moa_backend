@@ -10,6 +10,7 @@ closes, so it sees every change of the bucket, and a burst of poll answers
 is one evaluation. It never raises into the caller: a quest must not break
 a check-in.
 """
+
 from __future__ import annotations
 
 import logging
@@ -71,14 +72,18 @@ async def held(session, claim_id) -> None:
     await jobs.enqueue(session, NOTIFY_HELD, {"claim_id": str(claim_id)}, dedupe_key=f"quests:held:{claim_id}")
 
 
-@jobs.handler(EVALUATE, max_attempts=4, timeout=120.0, priority=jobs.HIGH)
+@jobs.handler(EVALUATE, max_attempts=4, timeout=120.0, concurrency=2, priority=jobs.NORMAL)
 async def _evaluate_job(p: dict) -> None:
     from app.api.quests import engine
 
     async with jobs.scope() as session:
         await engine.evaluate(
-            session, int(p["event_id"]), kinds=p.get("kinds") or None,
-            reg_ids=p.get("reg_ids"), user_ids=p.get("user_ids"), everyone=bool(p.get("everyone")),
+            session,
+            int(p["event_id"]),
+            kinds=p.get("kinds") or None,
+            reg_ids=p.get("reg_ids"),
+            user_ids=p.get("user_ids"),
+            everyone=bool(p.get("everyone")),
         )
 
 

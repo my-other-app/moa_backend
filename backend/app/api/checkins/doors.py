@@ -18,6 +18,14 @@ from app.config import settings
 from app.response import CustomHTTPException
 
 LINK_DAYS = 30
+#: The label a check-in by hand is recorded at when none is given: always an
+#: entrance, so a station or a swag desk may not be called it (app/api/quests).
+BY_HAND_LABEL = "desk"
+
+
+def _not_by_hand_label(name: str, purpose) -> None:
+    if purpose and name.lower() == BY_HAND_LABEL:
+        raise CustomHTTPException(422, message="“Desk” is where check-ins by hand are recorded. Call the station something else.", errors={"fields": {"name": "Pick a different name."}})
 
 
 def normalize(name: str) -> str:
@@ -117,6 +125,7 @@ async def create_door(session, event: Events, *, name: str, kind: DoorKind, purp
     name = normalize(name)
     if not name:
         raise CustomHTTPException(422, message="Name the door — “Gate A”, “Loading bay”, “Front desk”.", errors={"fields": {"name": "Name the door."}})
+    _not_by_hand_label(name, purpose)
     clash = await by_name(session, event.id, name)
     if clash is not None:
         raise CustomHTTPException(409, message=f"There is already a door called “{clash.name}”.", errors={"fields": {"name": "Pick a different name."}})
@@ -135,6 +144,7 @@ async def update_door(session, event: Events, door_id, **changes) -> Doors:
         name = normalize(name)
         if not name:
             raise CustomHTTPException(422, message="Name the door.", errors={"fields": {"name": "Name the door."}})
+        _not_by_hand_label(name, door.purpose)
         clash = await by_name(session, event.id, name)
         if clash is not None and clash.id != door.id:
             raise CustomHTTPException(409, message=f"There is already a door called “{clash.name}”.", errors={"fields": {"name": "Pick a different name."}})

@@ -1,4 +1,5 @@
 """The guest's side: the quest card, a code, a size, the leaderboard (CONTRACT §8)."""
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -36,7 +37,7 @@ def _now() -> datetime:
 
 
 def short_name(full: Optional[str]) -> str:
-    """"Asha Kumar" → "Asha K."."""
+    """ "Asha Kumar" → "Asha K."."""
     parts = (full or "").split()
     if not parts:
         return "A guest"
@@ -73,7 +74,9 @@ async def _links(session, event, reg) -> dict:
         except Exception:  # noqa: BLE001 - no link rather than no card
             feedback = None
     return {
-        "event": base, "live_room": f"{base}/live" if base else None, "feedback": feedback,
+        "event": base,
+        "live_room": f"{base}/live" if base else None,
+        "feedback": feedback,
         "poster": poster_page_url(reg.ticket_id) if reg is not None else None,
         "club": site_url(f"/clubs/{event.club.slug}") if getattr(event, "club", None) is not None and getattr(event.club, "slug", None) else None,
         "network_scan": "myotherapp://network/scan",
@@ -83,7 +86,13 @@ async def _links(session, event, reg) -> dict:
 async def _stations(session, event_id: int) -> dict:
     from app.api.checkins.models import Doors
 
-    rows = (await session.execute(select(Doors.id, Doors.name, Doors.purpose, Doors.active).where(Doors.event_id == event_id, Doors.purpose.isnot(None)).order_by(Doors.sort_order, Doors.created_at))).all()
+    rows = (
+        await session.execute(
+            select(Doors.id, Doors.name, Doors.purpose, Doors.active)
+            .where(Doors.event_id == event_id, Doors.purpose.isnot(None))
+            .order_by(Doors.sort_order, Doors.created_at)
+        )
+    ).all()
     return {i: {"door_id": i, "name": n, "purpose": p, "active": a} for i, n, p, a in rows}
 
 
@@ -94,7 +103,9 @@ async def _items(session, item_ids) -> dict:
         return {}
     items = {m.id: m for m in (await session.scalars(select(MerchItems).where(MerchItems.id.in_(item_ids)))).all()}
     variants: dict = {}
-    for v in (await session.scalars(select(MerchVariants).where(MerchVariants.item_id.in_(item_ids)).order_by(MerchVariants.created_at, MerchVariants.id))).all():
+    for v in (
+        await session.scalars(select(MerchVariants).where(MerchVariants.item_id.in_(item_ids)).order_by(MerchVariants.created_at, MerchVariants.id))
+    ).all():
         variants.setdefault(v.item_id, []).append(v)
     return {i: (m, variants.get(i, [])) for i, m in items.items()}
 
@@ -103,9 +114,18 @@ def task_out(t, stations: dict, me: Optional[dict]) -> dict:
     kind = K.KINDS.get(t.kind)
     st = stations.get(t.door_id) if t.door_id else None
     return {
-        "id": t.id, "kind": t.kind, "title": t.title, "description": t.description, "points": t.points, "required": t.required,
-        "starts_at": t.starts_at, "ends_at": t.ends_at, "target": K.target(t.kind, t.config), "action": kind.action if kind else None,
-        "station": {"door_id": st["door_id"], "name": st["name"]} if st else None, "me": me,
+        "id": t.id,
+        "kind": t.kind,
+        "title": t.title,
+        "description": t.description,
+        "points": t.points,
+        "required": t.required,
+        "starts_at": t.starts_at,
+        "ends_at": t.ends_at,
+        "target": K.target(t.kind, t.config),
+        "action": kind.action if kind else None,
+        "station": {"door_id": st["door_id"], "name": st["name"]} if st else None,
+        "me": me,
     }
 
 
@@ -119,7 +139,9 @@ def _me_task(p) -> dict:
 async def _rank(session, quest, entry) -> Optional[int]:
     if entry is None or not entry.score:
         return None
-    higher = await session.scalar(select(func.count()).select_from(QuestEntries).where(QuestEntries.quest_id == quest.id, QuestEntries.score > entry.score)) or 0
+    higher = (
+        await session.scalar(select(func.count()).select_from(QuestEntries).where(QuestEntries.quest_id == quest.id, QuestEntries.score > entry.score)) or 0
+    )
     return int(higher) + 1
 
 
@@ -135,7 +157,9 @@ async def _maybe_refresh(session, event, quest, d, reg, entry) -> None:
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 
     now = _now()
-    stmt = pg_insert(QuestEntries).values(id=uuid.uuid4(), quest_id=quest.id, registration_id=reg.id, user_id=reg.user_id, refreshed_at=now, created_at=now, updated_at=now)
+    stmt = pg_insert(QuestEntries).values(
+        id=uuid.uuid4(), quest_id=quest.id, registration_id=reg.id, user_id=reg.user_id, refreshed_at=now, created_at=now, updated_at=now
+    )
     await session.execute(stmt.on_conflict_do_update(constraint="uq_quest_entries_quest_registration", set_={"refreshed_at": now}))
     await session.commit()
 
@@ -153,12 +177,23 @@ async def card(session, event, user, *, view_all: bool = False, reg=None) -> dic
         entry = await session.scalar(select(QuestEntries).where(QuestEntries.quest_id == quest.id, QuestEntries.registration_id == reg.id))
         if not view_all:
             await _maybe_refresh(session, event, quest, d, reg, entry)
-            entry = await session.scalar(select(QuestEntries).where(QuestEntries.quest_id == quest.id, QuestEntries.registration_id == reg.id).execution_options(populate_existing=True))
+            entry = await session.scalar(
+                select(QuestEntries).where(QuestEntries.quest_id == quest.id, QuestEntries.registration_id == reg.id).execution_options(populate_existing=True)
+            )
     progress, unlocks, claims = {}, {}, {}
     if reg is not None:
-        progress = {p.task_id: p for p in (await session.scalars(select(QuestProgress).where(QuestProgress.registration_id == reg.id, QuestProgress.quest_id == quest.id))).all()}
-        unlocks = {u.milestone_id: u for u in (await session.scalars(select(QuestUnlocks).where(QuestUnlocks.registration_id == reg.id, QuestUnlocks.quest_id == quest.id))).all()}
-        claims = {c.reward_id: c for c in (await session.scalars(select(QuestClaims).where(QuestClaims.registration_id == reg.id, QuestClaims.quest_id == quest.id))).all()}
+        progress = {
+            p.task_id: p
+            for p in (await session.scalars(select(QuestProgress).where(QuestProgress.registration_id == reg.id, QuestProgress.quest_id == quest.id))).all()
+        }
+        unlocks = {
+            u.milestone_id: u
+            for u in (await session.scalars(select(QuestUnlocks).where(QuestUnlocks.registration_id == reg.id, QuestUnlocks.quest_id == quest.id))).all()
+        }
+        claims = {
+            c.reward_id: c
+            for c in (await session.scalars(select(QuestClaims).where(QuestClaims.registration_id == reg.id, QuestClaims.quest_id == quest.id))).all()
+        }
     stations = await _stations(session, event.id)
     items = await _items(session, {r.merch_item_id for rs in d.rewards.values() for r in rs})
     from app.core.storage import objects
@@ -173,12 +208,29 @@ async def card(session, event, user, *, view_all: bool = False, reg=None) -> dic
             if item is None:
                 continue
             st = stock.Stock(item, variants)
-            rewards.append({
-                "reward_id": r.id, "name": item.name, "photo_url": objects.photo_url(item.photo_key), "sizes": st.sized,
-                "sold_out_mode": r.sold_out_mode, "sold_out": r.sold_out_mode == FIRST_COME and st.pool() <= 0,
-                "claim": await _claim_out(session, claims.get(r.id), st) if unlocked or (claims.get(r.id) is not None and claims[r.id].status == COLLECTED) else None,
-            })
-        milestones.append({"id": m.id, "title": m.title, "threshold": m.threshold, "unlocked": unlocked, "unlocked_at": u.unlocked_at if unlocked else None, "rewards": rewards})
+            rewards.append(
+                {
+                    "reward_id": r.id,
+                    "name": item.name,
+                    "photo_url": objects.photo_url(item.photo_key),
+                    "sizes": st.sized,
+                    "sold_out_mode": r.sold_out_mode,
+                    "sold_out": r.sold_out_mode == FIRST_COME and st.pool() <= 0,
+                    "claim": await _claim_out(session, claims.get(r.id), st)
+                    if unlocked or (claims.get(r.id) is not None and claims[r.id].status == COLLECTED)
+                    else None,
+                }
+            )
+        milestones.append(
+            {
+                "id": m.id,
+                "title": m.title,
+                "threshold": m.threshold,
+                "unlocked": unlocked,
+                "unlocked_at": u.unlocked_at if unlocked else None,
+                "rewards": rewards,
+            }
+        )
     me = None
     if reg is not None:
         score = entry.score if entry else 0
@@ -186,18 +238,31 @@ async def card(session, event, user, *, view_all: bool = False, reg=None) -> dic
         nxt = next((m for m in d.milestones if not (unlocks.get(m.id) is not None and unlocks[m.id].revoked_at is None)), None)
         fails = entry.code_fails if entry and entry.code_window_at and _now() - entry.code_window_at < CODE_WINDOW else 0
         me = {
-            "registration_id": reg.id, "points": entry.points if entry else 0, "tasks_done": entry.tasks_done if entry else 0,
-            "required_left": left, "score": score,
+            "registration_id": reg.id,
+            "points": entry.points if entry else 0,
+            "tasks_done": entry.tasks_done if entry else 0,
+            "required_left": left,
+            "score": score,
             "next": {"milestone_id": nxt.id, "title": nxt.title, "threshold": nxt.threshold, "left": max(0, nxt.threshold - score)} if nxt else None,
             "rank": await _rank(session, quest, entry) if quest.leaderboard else None,
             "code_attempts_left": max(0, quest.code_attempts_per_hour - fails),
         }
     desks = [{"door_id": s["door_id"], "name": s["name"]} for s in stations.values() if s["purpose"] == SWAG_DESK and s["active"]]
     out = {
-        "enabled": bool(quest.enabled), "id": quest.id, "title": quest.title, "intro": quest.intro, "mode": quest.mode,
-        "starts_at": quest.starts_at, "ends_at": quest.ends_at, "open": _open(quest, _now()), "leaderboard": bool(quest.leaderboard),
+        "enabled": bool(quest.enabled),
+        "id": quest.id,
+        "title": quest.title,
+        "intro": quest.intro,
+        "mode": quest.mode,
+        "starts_at": quest.starts_at,
+        "ends_at": quest.ends_at,
+        "open": _open(quest, _now()),
+        "leaderboard": bool(quest.leaderboard),
         "tasks": [task_out(t, stations, _me_task(progress.get(t.id)) if reg is not None else None) for t in d.tasks],
-        "milestones": milestones, "me": me, "collect_at": desks, "links": await _links(session, event, reg),
+        "milestones": milestones,
+        "me": me,
+        "collect_at": desks,
+        "links": await _links(session, event, reg),
     }
     if view_all:
         # The organiser's view: the code of a code task, and tasks no longer on the quest that this guest had.
@@ -214,16 +279,29 @@ async def _claim_out(session, claim, st: stock.Stock) -> Optional[dict]:
     v = st.variant(claim.variant_id) if claim.variant_id is not None else None
     position = None
     if claim.status == WAITLISTED:
-        position = int(await session.scalar(
-            select(func.count()).select_from(QuestClaims).where(
-                QuestClaims.merch_item_id == claim.merch_item_id, QuestClaims.status == WAITLISTED,
-                (QuestClaims.unlocked_at < claim.unlocked_at) | ((QuestClaims.unlocked_at == claim.unlocked_at) & (QuestClaims.id < claim.id)),
+        position = (
+            int(
+                await session.scalar(
+                    select(func.count())
+                    .select_from(QuestClaims)
+                    .where(
+                        QuestClaims.merch_item_id == claim.merch_item_id,
+                        QuestClaims.status == WAITLISTED,
+                        (QuestClaims.unlocked_at < claim.unlocked_at) | ((QuestClaims.unlocked_at == claim.unlocked_at) & (QuestClaims.id < claim.id)),
+                    )
+                )
+                or 0
             )
-        ) or 0) + 1
+            + 1
+        )
     return {
-        "claim_id": claim.id, "status": claim.status, "needs_size": claim.status == RESERVED and st.sized and v is None,
-        "variant_label": v.label if v is not None else None, "choices": st.choices() if claim.status == RESERVED and st.sized else [],
-        "waitlist_position": position, "collected_at": claim.collected_at,
+        "claim_id": claim.id,
+        "status": claim.status,
+        "needs_size": claim.status == RESERVED and st.sized and v is None,
+        "variant_label": v.label if v is not None else None,
+        "choices": st.choices() if claim.status == RESERVED and st.sized else [],
+        "waitlist_position": position,
+        "collected_at": claim.collected_at,
     }
 
 
@@ -244,9 +322,14 @@ async def enter_code(session, event, user, code: str) -> dict:
     if reg is None:
         raise CustomHTTPException(403, message="Register for the event to take part in its quest.", error_code="QUEST_NOT_REGISTERED")
     E = QuestEntries
-    await session.execute(pg_insert(E).values(id=uuid.uuid4(), quest_id=quest.id, registration_id=reg.id, user_id=reg.user_id, created_at=now, updated_at=now)
-                          .on_conflict_do_nothing(constraint="uq_quest_entries_quest_registration"))
-    entry = await session.scalar(select(E).where(E.quest_id == quest.id, E.registration_id == reg.id).with_for_update().execution_options(populate_existing=True))
+    await session.execute(
+        pg_insert(E)
+        .values(id=uuid.uuid4(), quest_id=quest.id, registration_id=reg.id, user_id=reg.user_id, created_at=now, updated_at=now)
+        .on_conflict_do_nothing(constraint="uq_quest_entries_quest_registration")
+    )
+    entry = await session.scalar(
+        select(E).where(E.quest_id == quest.id, E.registration_id == reg.id).with_for_update().execution_options(populate_existing=True)
+    )
     if entry.code_window_at is None or now - entry.code_window_at >= CODE_WINDOW:
         entry.code_fails, entry.code_window_at = 0, None
     limit = quest.code_attempts_per_hour
@@ -255,7 +338,13 @@ async def enter_code(session, event, user, code: str) -> dict:
         await session.commit()
         raise CustomHTTPException(429, message="Too many wrong codes. Try again later.", error_code="QUEST_CODE_LOCKED", errors={"retry_after": retry})
     normal = K.normal_code(code)
-    task = await session.scalar(select(QuestTasks).where(QuestTasks.quest_id == quest.id, QuestTasks.kind == K.CODE, QuestTasks.code == normal, QuestTasks.archived_at.is_(None))) if normal else None
+    task = (
+        await session.scalar(
+            select(QuestTasks).where(QuestTasks.quest_id == quest.id, QuestTasks.kind == K.CODE, QuestTasks.code == normal, QuestTasks.archived_at.is_(None))
+        )
+        if normal
+        else None
+    )
     if task is None:
         entry.code_fails += 1
         entry.code_window_at = entry.code_window_at or now
@@ -266,7 +355,12 @@ async def enter_code(session, event, user, code: str) -> dict:
     if not ev.open_now(ctx, task):
         start, end = ev.window(ctx, task)
         await session.commit()
-        raise CustomHTTPException(409, message="That code isn't open right now.", error_code="QUEST_CODE_NOT_OPEN", errors={"opens_at": start.isoformat() if start else None, "closes_at": end.isoformat() if end else None})
+        raise CustomHTTPException(
+            409,
+            message="That code isn't open right now.",
+            error_code="QUEST_CODE_NOT_OPEN",
+            errors={"opens_at": start.isoformat() if start else None, "closes_at": end.isoformat() if end else None},
+        )
     existing = await session.scalar(select(QuestProgress).where(QuestProgress.task_id == task.id, QuestProgress.registration_id == reg.id))
     if existing is not None and existing.revoked_at is not None:
         await session.commit()
@@ -288,7 +382,8 @@ async def choose_size(session, event, user, claim_id, label: str) -> dict:
     if reg is None:
         raise CustomHTTPException(403, message="Register for the event to take part in its quest.", error_code="QUEST_NOT_REGISTERED")
     first = await session.scalar(
-        select(QuestClaims).join(QuestRewards, QuestRewards.id == QuestClaims.reward_id)
+        select(QuestClaims)
+        .join(QuestRewards, QuestRewards.id == QuestClaims.reward_id)
         .where(QuestClaims.id == claim_id, QuestClaims.registration_id == reg.id, QuestRewards.event_id == event.id)
     )
     if first is None:
@@ -317,11 +412,15 @@ async def leaderboard(session, quest, *, limit: int = 20, full_names: Optional[b
     from app.api.events.models import EventRegistrationsLink as R
 
     full = quest.leaderboard_names == "full" if full_names is None else full_names
-    rows = (await session.execute(
-        select(QuestEntries.registration_id, QuestEntries.score, R.full_name).join(R, R.id == QuestEntries.registration_id)
-        .where(QuestEntries.quest_id == quest.id, QuestEntries.score > 0, R.is_deleted == False)  # noqa: E712
-        .order_by(QuestEntries.score.desc(), QuestEntries.score_at.asc().nulls_last(), QuestEntries.registration_id).limit(max(1, min(limit, 100)))
-    )).all()
+    rows = (
+        await session.execute(
+            select(QuestEntries.registration_id, QuestEntries.score, R.full_name)
+            .join(R, R.id == QuestEntries.registration_id)
+            .where(QuestEntries.quest_id == quest.id, QuestEntries.score > 0, R.is_deleted == False)  # noqa: E712
+            .order_by(QuestEntries.score.desc(), QuestEntries.score_at.asc().nulls_last(), QuestEntries.registration_id)
+            .limit(max(1, min(limit, 100)))
+        )
+    ).all()
     out, rank, last, seen = [], 0, None, 0
     for reg_id, score, name in rows:
         seen += 1
