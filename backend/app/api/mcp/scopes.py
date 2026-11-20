@@ -37,6 +37,24 @@ SCOPES: dict[str, tuple[str, str]] = {
         "See your team",
         "Who can sign in to the club's dashboard, and their roles.",
     ),
+    "designs:read": (
+        "See your designs",
+        "Your events' ticket, certificate, ID card and poster designs, and pictures of them drawn for a made-up guest.",
+    ),
+    "designs:write": (
+        "Change your designs",
+        "Change an event's ticket, certificate, ID card and poster designs. Certificates already issued keep their design, "
+        "each change can be undone, and issuing certificates waits for you to approve it.",
+    ),
+    "emails:read": (
+        "See your emails",
+        "The emails your events and your club's library send guests: their words, look and when they go.",
+    ),
+    "emails:write": (
+        "Change your emails",
+        "Change the words and look of those emails, switch one off, and send a test to yourself. "
+        "Sending one again to guests waits for you to approve it.",
+    ),
 }
 
 ALL = tuple(SCOPES)

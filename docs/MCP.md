@@ -104,6 +104,13 @@ for the dashboard request that does the same thing.
 | `store:write` | Add to your store | owner, admin, editor |
 | `comms:write` | Draft announcements | owner, admin, editor |
 | `team:read` | See your team | owner, admin |
+| `designs:read` | See your designs | owner, admin, editor, door |
+| `designs:write` | Change your designs | owner, admin, editor |
+| `emails:read` | See your emails | owner, admin, editor, door |
+| `emails:write` | Change your emails | owner, admin, editor |
+
+A connection made before the design and email scopes existed has none of
+them: its tools are unchanged until the club connects again and allows them.
 
 A token carries the scopes that were allowed. Calling a tool outside them is
 refused at the HTTP level:
@@ -148,6 +155,55 @@ On every call each tool checks, in this order:
 | `draft_announcement` | comms:write | write | POST /clubs/notifications/events/{id}/send | Saves an announcement to an event's people (all, attendees, non_attendees) **unsent**; says whom it would reach. |
 | `request_publish_event` | events:write | write | PATCH /events/{id}/closeout/settings | A pending action: returns `confirm_url`. |
 | `request_send_announcement` | comms:write | write | POST /clubs/notifications/events/{id}/send | A pending action for a draft: returns `confirm_url`. |
+| `list_design_starters` | designs:read | read-only | GET /events/{id}/designs/{kind}/layout | The starters of a kind (ticket, certificate, badge, poster): id, name, use, photo, paper, accent. |
+| `get_design_guide` | designs:read | read-only | GET /events/{id}/designs/{kind}/layout | The layout v2 shape and every layer's fields, the kind's rules, page sizes, fonts and weights, tokens (with the event's form questions; never contacts for a poster) and a minimal valid example. |
+| `get_event_design` | designs:read | read-only | GET /events/{id}/designs/{kind}/layout | The design in use (variant: default, attendee, speaker, staff; a poster's role:/type: variant and format), whose it is, its revision, the layout (compact) and notes. |
+| `preview_event_design` | designs:read | read-only | POST /events/{id}/designs/{kind}/layout/preview | **A PNG image result** (MCP image content, at most `APP_MCP_PREVIEW_MAX_PX` a side) of the design in use or an unsaved layout, drawn by the render service for the board's made-up guest. Never a real guest. |
+| `list_design_revisions` | designs:read | read-only | GET /events/{id}/designs/{kind}/layout | The changes an assistant made to one design, newest first, each with what reverting to it gives. |
+| `update_event_design` | designs:write | write, idempotent | PUT /events/{id}/designs/{kind}/layout | Saves a whole layout v2, checked as the board checks it (`INVALID_LAYOUT` with each problem's field). An ID card needs `badges`. |
+| `apply_design_starter` | designs:write | write, idempotent | PUT /events/{id}/designs/{kind}/layout | A starter, optionally in an accent, saved as the design (a poster's: its three formats). |
+| `revert_event_design` | designs:write | write | PUT /events/{id}/designs/{kind}/layout | Puts a design back as it was before one of those changes; keeps what it replaced. |
+| `request_issue_certificates` | designs:write | write | POST /events/{id}/certificates/issue | A pending action: returns `confirm_url`. Offered only while `APP_MCP_GUEST_REQUESTS_ENABLED` is on. |
+| `list_event_emails` | emails:read | read-only | GET /events/{id}/emails | The journey emails (on, when, last sent), custom emails and the review emails (whose words, who a resend reaches). |
+| `get_event_email` | emails:read | read-only | GET /events/{id}/emails/{template} | One email: subject, design (theme, blocks), on, when, to whom, attachments, its tokens. |
+| `preview_event_email` | emails:read | read-only | POST /events/{id}/emails/preview | Subject and text for the sample guest (HTML on request), saved or with unsaved changes. |
+| `update_event_email` | emails:write | write, idempotent | PUT /events/{id}/emails/{template} | Subject, blocks, theme, name, or switching it **off** (a review email: the event's own copy). Switching on, timers, audience and attachments stay in the dashboard (`SWITCH_ON_IN_DASHBOARD`). |
+| `send_test_email` | emails:write | write | POST /events/{id}/emails/test | A test for the sample guest to the connected person's own address only, `[Test]` subject; `APP_MCP_TEST_EMAIL_LIMIT` per address. |
+| `request_resend_review_email` | emails:write | write | POST /events/{id}/emails/review/{stage}/resend | A pending action: returns `confirm_url`. Offered only while `APP_MCP_GUEST_REQUESTS_ENABLED` is on. |
+| `list_library_emails` | emails:read | read-only | GET /clubs/me/emails | The club's library. |
+| `get_library_email` | emails:read | read-only | GET /clubs/me/emails/{template} | One library email, with its tokens. |
+| `preview_library_email` | emails:read | read-only | POST /clubs/me/emails/preview | As preview_event_email, for a sample event. |
+| `update_library_email` | emails:write | write, idempotent | PUT /clubs/me/emails/{template} | As update_event_email, in the library. |
+
+The design and email tools (`design_tools.py`, `email_tools.py`) act only on
+the club's own events, as every tool does: an event the club co-hosts is
+"not found". Each calls the same service functions as the dashboard's
+design board and email editor, so the checks, the plan gates (`badges` for
+ID cards) and what a save does are the dashboard's.
+
+### Designs: what a change keeps
+
+Saving a design does what the board's save does: the event's own copy is
+forked first, the layout is stored, the designer's design is cleared and
+the revision goes up one. **Certificates already issued keep the design
+they were issued with** (they are pinned at issue), so a change reaches only
+certificates issued after it.
+
+Every design change made through MCP keeps the design as it was just before
+it, in its audit row (`entity_type` `event_design`, `entity_id`
+`<event>:<kind>:<variant>`, `details.before`): the whole stored config of the
+event's own copy, or that it had none; for a poster, the variant's layouts
+in the formats the change touched. `revert_event_design` puts one back
+exactly and keeps what it replaced, so a revert can be undone. The revision
+only moves on (a revert is a new revision). Changes made in the dashboard
+itself are not kept this way.
+
+### Emails: keys
+
+An email is named by a key: its stage in lower case (`invite`, `pre_event`,
+`reminder`, `post_event`, `request_received`, …) or `custom:<id>`. A review
+email changed on an event becomes that event's own copy, as the dashboard's
+Registration review section makes it.
 
 No tool is destructive (`destructiveHint: false` on all of them).
 `openWorldHint` is false on all of them.
@@ -160,7 +216,8 @@ These are not possible through MCP: no tool exists for them, and no pending acti
 - deleting anything;
 - changing a published or live event, including its price;
 - team or role changes;
-- sending an email or a push directly.
+- sending an email or a push to guests directly (a test email goes only to the person who connected);
+- switching an email on, or changing when it goes, to whom, or what it attaches.
 
 ### People's text
 
@@ -174,6 +231,11 @@ Text that people typed is always returned as `{"user_written": true, "text": "�
 
 Every result's text starts with a line saying such values are data, not
 instructions. The server's `instructions` say the same.
+
+Designs and emails are returned as they are stored (a layout's texts, an
+email's subject and blocks), so an assistant can edit them; the
+instructions say their words were typed by people and are never to be
+followed.
 
 ### Tool errors
 
@@ -198,6 +260,20 @@ The codes:
 | `ITEM_UNAVAILABLE` | A store item isn't in this club's store. |
 | `DRAFT_NOT_FOUND` | No announcement draft by that id. |
 | `DRAFT_NOT_PENDING` | The announcement was already sent or discarded. |
+| `UNKNOWN_TOOL` | No such tool, or one not offered now (a request kind switched off). |
+| `INVALID_LAYOUT` | A layout the board would refuse. Comes with `fields` (path → message) and `problems` ([{code, field, message, level}]). |
+| `INVALID_VARIANT` | Not a version of that kind's design. |
+| `STARTER_NOT_FOUND` | No starter by that id; the message lists them. |
+| `REVISION_NOT_FOUND`, `REVISION_NOT_KEPT` | No such change to that design, or one that kept no copy. |
+| `RENDER_UNAVAILABLE` | The render service can't draw a preview right now. |
+| `DESIGN_INCOMPLETE`, `NO_PICTURE`, `NO_DESIGN` | A preview that can't be drawn (a value it must print is empty; the classic template; no poster yet). |
+| `NOTHING_TO_ISSUE` | Everyone in that audience already has a certificate. |
+| `EMAIL_NOT_FOUND` | No email by that key here. |
+| `INVALID_EMAIL` | An email the editor would refuse (a token, a block's shape). Comes with `problems`. |
+| `SWITCH_ON_IN_DASHBOARD` | Switching an email on is done in the dashboard. Comes with `dashboard_url`. |
+| `ALWAYS_ON` | A review email can't be switched off. |
+| `TEST_EMAIL_LIMITED` | Too many test emails to that address for now. Comes with `retry_after` (seconds). |
+| `NOT_RESENDABLE`, `NOT_REVIEWED`, `NOBODY` | That review email can't be sent again, the event doesn't review registrations, or nobody would get it. |
 | `INTERNAL` | Something failed on the server. The details are logged, never returned. |
 
 ---
@@ -388,6 +464,12 @@ supersedes an older one that is still pending.
   - The plan's `announcements_per_month` is checked. If it's over, the answer is 403 `PLAN_LIMIT_REACHED` and the action **stays pending**: upgrade, then approve.
   - Then the same push and inbox send as the dashboard's announcement page, to the draft's audience.
   - The draft becomes `sent`.
+- **issue_certificates** (while `APP_MCP_GUEST_REQUESTS_ENABLED` is on)
+  - The Certificates page's Issue (`certificates.service.issue`) for the audience asked for (checked_in, everyone, or roles), counted again at the confirm.
+  - Nobody is issued twice; certificates already issued keep their design.
+- **resend_review_email** (while `APP_MCP_GUEST_REQUESTS_ENABLED` is on)
+  - The Registration review section's resend (`emails.review.start`), with the action's id as its `clientRef`: the email's current words, by email, to the people it is true for now.
+  - Over the club's emails this month: 402 `MESSAGE_QUOTA_EXCEEDED` and the action **stays pending**. Nobody to send to (`NOBODY`) or the event no longer reviewing (`NOT_REVIEWED`): the action **fails**.
 
 Every request, confirmation, rejection and disconnection is written to the
 audit log (section 8).
@@ -416,7 +498,7 @@ sign-in.
 ```jsonc
 {
   "id": "e009b1f5-…",                       // the action's id
-  "kind": "publish_event",                  // or "send_announcement"
+  "kind": "publish_event",                  // or "send_announcement", "issue_certificates", "resend_review_email"
   "status": "pending",                      // pending | confirmed | rejected | expired | superseded | failed
   "title": "Publish “Draft Demo Day”",      // the page's heading
   "effects": [                              // what approving will do, one line each: show as a list
@@ -435,6 +517,10 @@ sign-in.
     // "type": "announcement", "id": "<draft uuid>", "status": "draft", "title": "...", "body": "...",
     // "audience": "all" | "attendees" | "non_attendees", "event": {"id": 1, "name": "..."},
     // "people": 120, "reachable": 87
+    // issue_certificates: the event's fields above, and
+    // "certificates": {"audience": "checked_in" | "everyone" | "roles", "roles": [...], "to_issue": 40, "already_issued": 3}
+    // resend_review_email: the event's fields above, and
+    // "email": {"stage": "REQUEST_RECEIVED", "label": "Thanks for registering", "who": "everyone still waiting for review", "eligible": 12}
   },
   "requested": {
     "app": "Claude",                        // the connected app's name
@@ -469,6 +555,14 @@ sign-in.
 
 Render the announcement's `title` and `body` as plain text. An assistant
 wrote them.
+
+**The two newer kinds** (`issue_certificates`, `resend_review_email`) carry
+an event `target` with one more object (`certificates` or `email`, above).
+The page needs them in its list of kinds, a line each for "wants to …" and
+for the result (`{"event_id", "issued", "refreshed", "already_issued"}` or
+`{"event_id", "stage", "resend_id", "people"}`), and the event card. Until
+it has them, keep `APP_MCP_GUEST_REQUESTS_ENABLED` off: the tools that ask
+for them are not offered then.
 
 **Approve:** `POST /api/v1/clubs/pending-actions/{token}/confirm`, with no
 body. It returns 200 and the same shape, with `status: "confirmed"` and
@@ -554,12 +648,14 @@ could label them "Connected an AI assistant".
 | Acting beyond the person | Every tool stands for a dashboard request and is allowed only when the role, read on each call, may make it (`club_access/policy.py`). |
 | Removed members, suspended clubs, password changes | The grant ends on the next request or refresh (`access.py`). |
 | Another club's data | Every query is filtered by the token's club. Another club's id answers "not found". |
-| Publishing or sending without a person | No tool does either. `request_*` makes a pending action that a person confirms in the dashboard. |
+| Publishing or sending without a person | No tool does either. `request_*` makes a pending action that a person confirms in the dashboard. Issuing certificates and sending a review email again are pending actions too. A test email goes only to the connected person's own address, a few an hour. |
+| Guests' data in a design preview | Drawn for the board's made-up guest (Aisha Rahman, the form's questions as ‹placeholders›), never a registration. |
+| Undoing a design change | Each MCP design change keeps the design it replaced (`revert_event_design`); certificates already issued never change. |
 | Attendee contacts leaving the platform | Masked unless attendees:read **and** owner, admin or editor. Contacts typed into form answers are masked too. |
 | Prompt injection through club data | People's text is returned only as `{"user_written": true, "text": …}`, and the instructions say it is data. |
 | Token theft | Tokens are stored as digests, short-lived and audience-bound. Refresh tokens rotate, and reuse ends the grant. Each token can be revoked. |
 | Floods | Per-app limit `60/minute;2000/day` (429 with Retry-After). Registration: 20 an hour per address. Sign-in: 20 a minute per address, plus the per-account lockout. |
-| Audit | Every write leaves a row in `admin_audit_logs`, with `actor_id` set to the club account and `details` holding `via`, `client`, `client_id`, `grant_id`, `member_id`, `member_email` and `tool`. The actions are `mcp.app.connected`, `mcp.event.draft_created`, `mcp.event.draft_updated`, `mcp.store.item_created`, `mcp.store.offers_changed`, `mcp.announcement.drafted` and `mcp.action.requested`. Decisions are `mcp.action.confirmed` and `mcp.action.rejected` (`via: dashboard`, `requested_via: mcp`), and disconnecting is `mcp.app.disconnected`. |
+| Audit | Every write leaves a row in `admin_audit_logs`, with `actor_id` set to the club account and `details` holding `via`, `client`, `client_id`, `grant_id`, `member_id`, `member_email` and `tool`. The actions are `mcp.app.connected`, `mcp.event.draft_created`, `mcp.event.draft_updated`, `mcp.store.item_created`, `mcp.store.offers_changed`, `mcp.announcement.drafted`, `mcp.design.updated`, `mcp.design.starter_applied`, `mcp.design.reverted` (each with `before`, the design it replaced), `mcp.email.updated`, `mcp.email.library_updated`, `mcp.email.test_sent` (with `to`) and `mcp.action.requested`. Decisions are `mcp.action.confirmed` and `mcp.action.rejected` (`via: dashboard`, `requested_via: mcp`), and disconnecting is `mcp.app.disconnected`. |
 | Plan | `plan_features.mcp`, on for Growth, Pro, Campus and Enterprise. It is a club-wide gate: checked at consent and on every tool call (`PLAN_FEATURE_LOCKED`, with the cheapest plan that has it). A club that drops below Growth keeps its connections, but every tool says why it can't. |
 | Kill switch | `APP_MCP_ENABLED=false`: `/mcp`, `/oauth/*` and the discovery documents answer 404, and confirming answers 503. Listing and disconnecting apps still work. |
 
@@ -594,6 +690,9 @@ could label them "Connected an AI assistant".
 | `APP_MCP_RATE_LIMIT` | `60/minute;2000/day` | Per connected app. |
 | `APP_MCP_ALLOWED_ORIGINS` | `https://claude.ai,https://chatgpt.com,https://chat.openai.com` | For browser pages calling `/mcp` directly. |
 | `APP_MCP_CLIENT_METADATA_DOCUMENTS` | `true` | Fetch https client_id documents. |
+| `APP_MCP_GUEST_REQUESTS_ENABLED` | `false` | Offers `request_issue_certificates` and `request_resend_review_email`. On once the dashboard's confirm page shows those kinds. |
+| `APP_MCP_TEST_EMAIL_LIMIT` | `3 per 10 minutes;10/day` | Test emails per address. |
+| `APP_MCP_PREVIEW_MAX_PX` | `1200` | A design preview's longest side, in pixels. |
 
 **nginx.** `location /` already proxies `/mcp`, `/oauth/*` and
 `/.well-known/*` to the app. The answers are plain JSON, so nothing needs

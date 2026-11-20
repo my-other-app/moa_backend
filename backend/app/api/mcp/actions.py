@@ -11,6 +11,12 @@ the same thing supersedes an older one still waiting.
 Confirming does what the dashboard itself does, as the person confirming --
 with the plan's limits, their role (policy.allows_action) and the event as it
 is *then*: an event published meanwhile is not published twice.
+
+Two more kinds reach guests the same way (asked for by the design and email
+tools, offered while APP_MCP_GUEST_REQUESTS_ENABLED is on): issuing an
+event's certificates (`issue_certificates`, as its Certificates page's Issue)
+and sending a registration review email again to the people it already went
+to (`resend_review_email`, as its Registration review section's resend).
 """
 from __future__ import annotations
 
@@ -96,8 +102,17 @@ async def request(session, principal, *, kind: str, target_type: str, target_id,
     return row, token
 
 
+#: What approving each kind does, as the assistant is told it.
+WHAT = {
+    "publish_event": "publish the event",
+    "send_announcement": "send the announcement",
+    "issue_certificates": "issue the certificates",
+    "resend_review_email": "send the email again",
+}
+
+
 def requested_out(row: McpPendingActions, token: str) -> dict:
-    what = {"publish_event": "publish the event", "send_announcement": "send the announcement"}[row.kind]
+    what = WHAT[row.kind]
     return {
         "status": "pending_approval", "action_id": str(row.id), "kind": row.kind,
         "confirm_url": confirm_url(token), "expires_at": row.expires_at.isoformat(),
@@ -177,6 +192,10 @@ async def describe(session, row: McpPendingActions, *, role: str) -> dict:
                 f"{reach['people']} people, {reach['reachable']} of them with the app.",
                 "It counts toward the plan's announcements this month.",
             ]
+    elif row.kind == "issue_certificates":
+        title, target, effects = await _describe_issue(session, row)
+    elif row.kind == "resend_review_email":
+        title, target, effects = await _describe_resend(session, row)
     expired = row.status == "expired"
     can_decide = row.status == "pending" and policy.allows_action(role, row.kind) and bool(target)
     return {
@@ -211,6 +230,10 @@ async def confirm(session, row: McpPendingActions, *, user: Users, member: ClubM
         result = await _publish(session, row, user=user)
     elif row.kind == "send_announcement":
         result = await _send(session, row, user=user)
+    elif row.kind == "issue_certificates":
+        result = await _issue(session, row, user=user)
+    elif row.kind == "resend_review_email":
+        result = await _resend(session, row, user=user, member=member)
     else:  # pragma: no cover - the check constraint holds the kinds
         raise _refuse(422, "Unknown request.", "ACTION_UNKNOWN")
     row.status, row.result = "confirmed", result
@@ -305,3 +328,114 @@ async def _send(session, row: McpPendingActions, *, user: Users) -> dict:
     )
     draft.status, draft.sent_at = "sent", _now()
     return {"draft_id": str(draft.id), "event_id": event.id, "people": len(people), "pushed": sent}
+
+
+# ─── Certificates and review emails (design_tools, email_tools) ──────────
+
+
+async def _event_of(session, row: McpPendingActions, *, live: bool = True) -> Events | None:
+    try:
+        event_id = int((row.payload or {}).get("event_id"))
+    except (TypeError, ValueError):
+        return None
+    q = select(Events).where(Events.id == event_id, Events.club_id == row.club_id)
+    if live:
+        q = q.where(Events.is_deleted == False)  # noqa: E712
+    return await session.scalar(q.execution_options(populate_existing=True))
+
+
+def _event_target(event: Events) -> dict:
+    """The event a request is about, as the confirm page shows an event."""
+    return {
+        "type": "event", "id": event.id, "name": event.name, "status": (event.lifecycle or EventStatus.published).value,
+        "deleted": bool(event.is_deleted), "starts_at": _aware(event.event_datetime).isoformat(),
+        "venue": event.location_name, "online": bool(event.is_online), "paid": bool(event.has_fee),
+        "fee": float(event.reg_fee) if event.has_fee and event.reg_fee is not None else None, "capacity": event.max_participants,
+        "dashboard_url": dashboard_url(f"/events/{event.id}"), "public_url": public_urls.event_url(event.slug),
+    }
+
+
+CERTIFICATE_AUDIENCE = {"checked_in": "everyone who checked in", "everyone": "everyone registered", "roles": "these roles"}
+
+
+async def _describe_issue(session, row: McpPendingActions) -> tuple[str, dict, list[str]]:
+    from app.api.certificates import service as certificates
+
+    event = await _event_of(session, row, live=False)
+    if event is None:
+        return "Approve an assistant's request", {}, []
+    p = row.payload or {}
+    audience, roles = p.get("audience") or "checked_in", list(p.get("roles") or [])
+    try:
+        counts = await certificates.issue_preview(session, event, audience, roles) if not event.is_deleted else None
+    except CustomHTTPException:
+        counts = None
+    who = CERTIFICATE_AUDIENCE.get(audience, audience) + (f" ({', '.join(roles)})" if audience == "roles" and roles else "")
+    to_issue = counts["to_issue"] if counts else 0
+    target = {**_event_target(event), "certificates": {"audience": audience, "roles": roles, "to_issue": to_issue,
+                                                       "already_issued": counts["already_issued"] if counts else None}}
+    effects = [
+        f"{to_issue} {'person gets' if to_issue == 1 else 'people get'} a certificate for “{event.name}”: {who} who have none yet.",
+        "They see it in the MyOtherApp app and on its public check page. Emailing it is a separate step in the dashboard.",
+        "Nobody is issued twice, and certificates already issued keep their design.",
+    ]
+    return f"Issue certificates for “{event.name}”", target, effects
+
+
+async def _describe_resend(session, row: McpPendingActions) -> tuple[str, dict, list[str]]:
+    from app.api.emails import review
+    from app.core.mail.schema import EMAIL_STAGE_META
+
+    event = await _event_of(session, row, live=False)
+    if event is None:
+        return "Approve an assistant's request", {}, []
+    try:
+        stage = review.stage_of((row.payload or {}).get("stage") or "")
+    except CustomHTTPException:
+        return "Approve an assistant's request", {}, []
+    label = EMAIL_STAGE_META[stage.value]["label"]
+    eligible = 0 if event.is_deleted else (await review.count(session, event, stage))["eligible"]
+    who = review.WHO.get(stage, "the people it went to")
+    target = {**_event_target(event), "email": {"stage": stage.value, "label": label, "who": who, "eligible": eligible}}
+    effects = [
+        f"The “{label}” email, in its current words, goes again by email to {who} of “{event.name}”: "
+        f"{eligible} {'person' if eligible == 1 else 'people'} now.",
+        "Anyone whose registration moves on before their copy goes is skipped.",
+        "It counts toward the club's emails this month, as a message to the guests does.",
+    ]
+    return f"Send “{label}” again", target, effects
+
+
+async def _issue(session, row: McpPendingActions, *, user: Users) -> dict:
+    from app.api.certificates import service as certificates
+
+    event = await _event_of(session, row)
+    if event is None:
+        await _fail(session, row, "The event no longer exists.", "EVENT_NOT_FOUND", 404)
+    p = row.payload or {}
+    try:
+        result = await certificates.issue(session, event, p.get("audience") or "checked_in", list(p.get("roles") or []))
+    except CustomHTTPException as e:
+        await _fail(session, row, e.message or "The certificates couldn't be issued.", e.error_code or "ISSUE_REFUSED", e.status_code)
+    return {"event_id": event.id, **result}
+
+
+async def _resend(session, row: McpPendingActions, *, user: Users, member: ClubMembers | None) -> dict:
+    from app.api.emails import review
+
+    event = await _event_of(session, row)
+    if event is None:
+        await _fail(session, row, "The event no longer exists.", "EVENT_NOT_FOUND", 404)
+    try:
+        stage = review.stage_of((row.payload or {}).get("stage") or "")
+    except CustomHTTPException as e:
+        await _fail(session, row, e.message, e.error_code or "NOT_A_REVIEW_EMAIL", 404)
+    name = (member.full_name or member.email) if member is not None else (getattr(user, "full_name", None) or None)
+    try:
+        resend = await review.start(session, event, stage, client_ref=row.id, created_by=user.id, created_by_name=name)
+    except CustomHTTPException as e:
+        if e.status_code == 402:
+            # The club's emails this month can't cover it: it stays pending; buy credits, then approve.
+            raise
+        await _fail(session, row, e.message or "The email couldn't be sent again.", e.error_code or "RESEND_REFUSED", e.status_code)
+    return {"event_id": event.id, "stage": stage.value, "resend_id": str(resend.id), "people": resend.recipients or 0}
