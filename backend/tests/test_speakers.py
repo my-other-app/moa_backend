@@ -131,8 +131,133 @@ async def test_an_older_client_keeps_the_link_and_the_talk_title(client, session
     assert r.status_code == 200, r.text
     now = (await _info(client, event_id))["Meera N"]
     assert (now["speaker_profile_id"], now["talk_title"], now["designation"]) == (meera["speaker_profile_id"], "Flutter", "GDE")
-    # The profile is not the club's copy: it keeps the name it was made with.
-    assert (await session.get(SpeakerProfiles, meera["speaker_profile_id"])).name == "Meera"
+    # The club's own profile follows the club's edit (follow_club_edits): plainly the same name, a word more.
+    profile = await session.get(SpeakerProfiles, meera["speaker_profile_id"])
+    await session.refresh(profile)
+    assert (profile.name, profile.name_key, profile.headline) == ("Meera N", "meera n", "GDE")
+
+
+# ─── A club's edits, on the profile that is the club's alone ─────────────
+
+
+async def test_an_edit_on_the_event_reaches_the_speakers_page(client, session, world):
+    event_id = await _create(client, world, [{"name": "Dr. Rao", "designation": "Student", "bio": "Robots.", "link": "https://old.example"}])
+    rao = (await _info(client, event_id))["Dr. Rao"]
+    r = await _update(client, world, event_id, [{
+        "id": rao["id"], "name": "Dr Rao", "designation": "Professor, IIT", "bio": "Robots that cook.", "link": "https://linkedin.com/in/rao",
+    }])
+    assert r.status_code == 200, r.text
+    page = (await client.get(f"{API}/speakers/{rao['profile_slug']}")).json()
+    assert (page["name"], page["headline"], page["bio"]) == ("Dr Rao", "Professor, IIT", "Robots that cook.")
+    # The row's old link gives way to its new one.
+    assert page["links"] == {"linkedin": "https://linkedin.com/in/rao"}
+    history = (await session.scalars(
+        select(SpeakerHistory).where(SpeakerHistory.profile_id == rao["speaker_profile_id"], SpeakerHistory.action == "edited_from_event")
+    )).all()
+    assert len(history) == 1 and history[0].actor_kind == "club"
+    assert history[0].before["headline"] == "Student" and history[0].after["event_id"] == event_id
+    # Saving again with nothing changed writes nothing.
+    again = await _update(client, world, event_id, [{
+        "id": rao["id"], "name": "Dr Rao", "designation": "Professor, IIT", "bio": "Robots that cook.", "link": "https://linkedin.com/in/rao",
+    }])
+    assert again.status_code == 200
+    assert await session.scalar(
+        select(func.count()).select_from(SpeakerHistory).where(SpeakerHistory.profile_id == rao["speaker_profile_id"], SpeakerHistory.action == "edited_from_event")
+    ) == 1
+
+
+async def test_a_claimed_or_shared_profile_keeps_what_it_says(client, session, world):
+    alpha = await _create(client, world, [{"name": "Asha", "designation": "GDE"}, {"name": "Kiran", "designation": "Founder"}])
+    got = await _info(client, alpha)
+    asha, kiran = got["Asha"], got["Kiran"]
+    # Asha claimed hers: it is the speaker's to change.
+    (await session.get(SpeakerProfiles, asha["speaker_profile_id"])).claimed_by_user_id = world.speaker_user.id
+    # Kiran's is on another club's event too (one person, merged): not one club's to change.
+    beta, rows = await _event_with(session, world, world.club_b, [{"name": "Kiran", "designation": "Founder"}], name="Beta Night")
+    rows[0].speaker_profile_id = kiran["speaker_profile_id"]
+    await session.commit()
+    r = await _update(client, world, alpha, [
+        {"id": asha["id"], "name": "Asha", "designation": "Engineer"}, {"id": kiran["id"], "name": "Kiran", "designation": "CTO"},
+    ])
+    assert r.status_code == 200, r.text
+    now = await _info(client, alpha)
+    assert (now["Asha"]["designation"], now["Kiran"]["designation"]) == ("Engineer", "CTO")
+    for pid in (asha["speaker_profile_id"], kiran["speaker_profile_id"]):
+        profile = await session.get(SpeakerProfiles, pid)
+        await session.refresh(profile)
+        assert profile.headline in ("GDE", "Founder")
+
+
+async def test_a_new_name_is_another_speaker_unless_it_is_plainly_the_same(client, session, world):
+    first = await _create(client, world, [{"name": "Sunil Menon"}], name="First Night")
+    second = await _create(client, world, [{"name": "Sunil Menon"}, {"name": "Priya"}], name="Second Night")
+    third = await _create(client, world, [{"name": "Kavya"}], name="Third Night")
+    sunil = (await _info(client, second))["Sunil Menon"]
+    priya = (await _info(client, second))["Priya"]
+    kavya = (await _info(client, third))["Kavya"]
+    # Sunil spoke at the club before: replacing him on this event with someone
+    # else leaves his profile alone and makes theirs.
+    r = await _update(client, world, second, [{"id": sunil["id"], "name": "Anil Kumar"}, {"id": priya["id"], "name": "Kavya"}])
+    assert r.status_code == 200, r.text
+    now = await _info(client, second)
+    assert now["Anil Kumar"]["speaker_profile_id"] != sunil["speaker_profile_id"] and now["Anil Kumar"]["profile_slug"] == "anil-kumar"
+    kept = await session.get(SpeakerProfiles, sunil["speaker_profile_id"])
+    await session.refresh(kept)
+    assert kept.name == "Sunil Menon"
+    assert (await _info(client, first))["Sunil Menon"]["speaker_profile_id"] == kept.id
+    # A name the club has a profile for already: that profile.
+    assert now["Kavya"]["speaker_profile_id"] == kavya["speaker_profile_id"]
+    # A spelling put right on a speaker's only talk: the same profile, renamed.
+    solo = await _create(client, world, [{"name": "Jon Mathew"}], name="Solo Night")
+    jon = (await _info(client, solo))["Jon Mathew"]
+    await _update(client, world, solo, [{"id": jon["id"], "name": "John Mathew"}])
+    john = (await _info(client, solo))["John Mathew"]
+    assert john["speaker_profile_id"] == jon["speaker_profile_id"]
+    assert (await client.get(f"{API}/speakers/{jon['profile_slug']}")).json()["name"] == "John Mathew"
+
+
+async def test_a_new_photo_on_the_event_is_the_profiles_photo(session, world):
+    from app.api.speakers import links
+
+    event, rows = await _event_with(session, world, world.club_a, [{"name": "Rao", "photo": "events/speakers/v-old.jpg"}])
+    await backfill.run(session, apply=True)
+    row = rows[0]
+    await session.refresh(row)
+    profile = await session.get(SpeakerProfiles, row.speaker_profile_id)
+    assert sp.photo_key(profile.photo) == "events/speakers/v-old.jpg"
+    before = links.snapshot(row)
+    row.photo = "events/speakers/v-new.jpg"
+    await session.flush()
+    await links.follow_club_edits(session, event_id=event.id, club_id=world.club_a.id, edited=[(row, before)], actor=sp.SYSTEM)
+    await session.commit()
+    await session.refresh(profile)
+    assert sp.photo_key(profile.photo) == "events/speakers/v-new.jpg"
+
+
+async def test_the_resync_catches_up_on_edits_made_before(session, world):
+    from app.api.speakers import links
+
+    event, rows = await _event_with(session, world, world.club_a, [{"name": "Meera", "designation": "Student", "bio": "Hi."}])
+    await backfill.run(session, apply=True)
+    row = rows[0]
+    await session.refresh(row)
+    profile = await session.get(SpeakerProfiles, row.speaker_profile_id)
+    # The club's edit, made when it stopped at the event's copy.
+    row.designation, row.bio, row.link, row.name = "GDE, Flutter", "Builds apps.", "https://meera.example", "MEERA"
+    await session.commit()
+    dry = await links.resync_club_profiles(session)
+    assert dry["profiles_updated"] == 1 and dry["fields"] == {"name": 1, "headline": 1, "bio": 1, "links": 1, "photo": 0}
+    await session.refresh(profile)
+    assert profile.headline == "Student"
+    done = await links.resync_club_profiles(session, apply=True)
+    assert done["profiles_updated"] == 1
+    await session.refresh(profile)
+    assert (profile.name, profile.headline, profile.bio, profile.links) == ("MEERA", "GDE, Flutter", "Builds apps.", {"website": "https://meera.example"})
+    # Run again: nothing left to do. An admin's later edit stands.
+    assert (await links.resync_club_profiles(session, apply=True))["profiles_updated"] == 0
+    profile.bio = "Edited by an admin."
+    await session.commit()
+    assert (await links.resync_club_profiles(session, apply=True))["profiles_updated"] == 0
 
 
 async def test_picking_a_profile_fills_the_photo_and_is_limited_to_the_clubs_own_or_claimed(client, session, world):

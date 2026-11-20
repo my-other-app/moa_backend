@@ -888,6 +888,14 @@ class AppConfig(BaseSettings):
     # "deliveries.send=2,notifications.followers=1".
     JOBS_CONCURRENCY: int = 4
     JOBS_LIMITS: str = ""
+    # "I'm attending" posters (app/api/guest_posters): every event's own switch
+    # decides, off by default; this turns the whole feature off at once (every
+    # guest's poster answers "not available", nothing is drawn).
+    POSTERS_ENABLED: bool = True
+    # Where a poster's share link points: <this>/l/<code>, the website's own
+    # address (it forwards to the API's /l/<code>, which counts the click).
+    # Unset: PUBLIC_SITE_URL. Other tracking links keep the API's address.
+    POSTER_LINK_BASE: str = ""
     # Of each runner's JOBS_CONCURRENCY slots, how many only the short jobs
     # someone is waiting on (handlers registered urgent=True: approval and
     # review mails, receipts, waiting-list offers, check-in pushes, the

@@ -7,6 +7,8 @@ from app.api.users.router import admin_router as user_admin_router, router as us
 from app.api.clubs.router import router as club_router
 from app.api.events.router import router as events_router
 from app.api.event_designs.router import router as event_designs_router
+from app.api.guest_posters.organiser import router as guest_posters_organiser_router
+from app.api.guest_posters.router import router as guest_posters_router
 from app.api.deliveries.router import router as deliveries_router
 from app.api.certificates.router import public_router as verify_router, router as certificates_router
 from app.api.checkins.router import router as checkins_router
@@ -225,6 +227,11 @@ api_router.include_router(router=approvals_public_router)
 api_router.include_router(router=club_router, tags=["clubs"])
 # Before the events router: these sit under /events/{event_id} and the
 # events router owns the rest of that space.
+# "I'm attending" posters (app/api/guest_posters): /events/{event_id}/designs/poster/...
+# before event_designs' /designs/{kind}/..., which does not know the kind;
+# and the guest's own /posters/{ticket_id}/....
+api_router.include_router(router=guest_posters_organiser_router)
+api_router.include_router(router=guest_posters_router)
 api_router.include_router(router=event_designs_router, tags=["event-designs"])
 api_router.include_router(router=deliveries_router, tags=["deliveries"])
 api_router.include_router(router=certificates_router, tags=["certificates"])

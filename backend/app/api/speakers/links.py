@@ -4,8 +4,13 @@ carries the event's speakers, agenda sessions pointing at the event's
 speakers, and a profile's edits copied to a club's upcoming events.
 
 An event's speaker row keeps its own copy of name, designation, photo, bio
-and link: that is what its page shows, and a club's edit there touches only
-that copy. The profile is edited by admins and, once claimed, the speaker.
+and link: that is what its page shows. A claimed profile is its speaker's,
+and one on another club's events too is shared: a club's edit of its event
+touches only its own copy then. A profile that is the club's alone (active,
+unclaimed, on no other club's event) follows the club's edits
+(`follow_club_edits`): the event page's speaker card opens the profile, and
+an edit that stopped at the event's copy left that page showing what the
+club had just corrected. Admins edit any profile.
 """
 from __future__ import annotations
 
@@ -121,6 +126,194 @@ async def link_event_speakers(session, *, event_id: int, club_id: Optional[int],
     for profile in made:
         await sp.candidates_for_new(session, profile)
     return made
+
+
+# ─── A club's edits, to the profile that is the club's alone ─────────────
+
+#: What a club's edit of an event row may change on its profile.
+_FOLLOWED = ("name", "designation", "bio", "link", "photo")
+
+
+def snapshot(row: EventSpeakers) -> dict:
+    """An event row as it was before a club's edit (`follow_club_edits`)."""
+    return {
+        "profile_id": row.speaker_profile_id, "name": row.name, "designation": row.designation,
+        "bio": row.bio, "link": row.link, "photo": sp.photo_key(row.photo),
+    }
+
+
+async def _clubs_of_other_rows(session, profile_id: int, row_id: Optional[int]) -> list[int]:
+    """The clubs of the profile's other live event rows (one entry a row)."""
+    q = (
+        select(Events.club_id)
+        .join(EventSpeakers, EventSpeakers.event_id == Events.id)
+        .where(
+            EventSpeakers.speaker_profile_id == profile_id, EventSpeakers.is_deleted == False,  # noqa: E712
+            Events.is_deleted == False,  # noqa: E712
+        )
+    )
+    if row_id is not None:
+        q = q.where(EventSpeakers.id != row_id)
+    return list((await session.scalars(q)).all())
+
+
+def _the_clubs_alone(profile: Optional[SpeakerProfiles], club_id: int, others: list[int]) -> bool:
+    return (
+        profile is not None and profile.status == ACTIVE and profile.claimed_by_user_id is None
+        and all(c == club_id for c in others)
+    )
+
+
+def _links_after(links: Optional[dict], old: Optional[str], new: Optional[str]) -> dict:
+    """A profile's links with the event row's one link changed from `old` to `new`."""
+    out = {k: v for k, v in dict(links or {}).items() if not (old and names.link_key(v) == names.link_key(old))}
+    if new:
+        out[names.link_kind(new)] = new
+    return out
+
+
+async def follow_club_edits(session, *, event_id: int, club_id: Optional[int], edited: list, actor: sp.Actor) -> None:
+    """A club's edit of its event's speakers, on each one's profile when that
+    profile is the club's alone (active, unclaimed, on no other club's event).
+
+    `edited`: (row, `snapshot(row)` from before the edit), after
+    `link_event_speakers`. Only what this edit changed is copied: the name,
+    the designation (as the headline), the bio, the photo and the link. A row
+    linked or picked in this save is left as linking left it.
+
+    A new name that is not the profile's is another person, unless it is
+    plainly the same name ("Meera" to "Meera Nair") or the profile has no
+    other talk (a spelling put right): the row joins the club's profile of
+    that exact name when there is one, else a new profile made from it.
+    """
+    if club_id is None or not edited:
+        return
+    made: list[SpeakerProfiles] = []
+    for row, before in edited:
+        if row.speaker_profile_id is None or row.speaker_profile_id != before.get("profile_id"):
+            continue
+        now = {**{f: getattr(row, f) for f in _FOLLOWED if f != "photo"}, "photo": sp.photo_key(row.photo)}
+        changed = [f for f in _FOLLOWED if now[f] != before.get(f)]
+        if not changed:
+            continue
+        profile = await session.get(SpeakerProfiles, row.speaker_profile_id)
+        others = await _clubs_of_other_rows(session, row.speaker_profile_id, row.id) if profile is not None else []
+        if not _the_clubs_alone(profile, club_id, others):
+            continue
+        was, after = {}, {}
+        if "name" in changed and (row.name or "").strip():
+            key = names.name_key(row.name)
+            if key != profile.name_key:
+                match = await sp.club_exact_match(session, club_id, key)
+                if match is not None and match.id != profile.id:
+                    row.speaker_profile_id = match.id
+                    filled = _fill_blanks(match, row)
+                    await sp.record(session, match.id, "added_to_event", actor, after={
+                        "event_id": event_id, "event_speaker_id": row.id, "renamed_from": before.get("name"),
+                        **({"filled": sorted(filled)} if filled else {}),
+                    })
+                    continue
+                if others and not names.names_alike(profile.name_key, key):
+                    new = await sp.create_profile(
+                        session, name=row.name, headline=row.designation, bio=row.bio, photo=row.photo,
+                        links=names.links_from(row.link), club_id=club_id, actor=actor,
+                        source={"event_id": event_id, "event_speaker_id": row.id, "renamed_from": before.get("name")},
+                    )
+                    row.speaker_profile_id = new.id
+                    made.append(new)
+                    continue
+                profile.name_key = key
+            if row.name.strip()[:100] != profile.name:
+                was["name"], after["name"] = profile.name, row.name.strip()[:100]
+                profile.name = after["name"]
+        if "designation" in changed:
+            headline = (row.designation or "").strip()[:200] or None
+            if headline != profile.headline:
+                was["headline"], after["headline"] = profile.headline, headline
+                profile.headline = headline
+        if "bio" in changed:
+            bio = (row.bio or "").strip()[:600] or None
+            if bio != profile.bio:
+                was["bio"], after["bio"] = profile.bio, bio
+                profile.bio = bio
+        if "link" in changed:
+            links = _links_after(profile.links, before.get("link"), row.link)
+            if links != dict(profile.links or {}):
+                was["links"], after["links"] = dict(profile.links or {}), links
+                profile.links = links
+        if "photo" in changed and now["photo"] and now["photo"] != sp.photo_key(profile.photo):
+            was["photo"], after["photo"] = sp.photo_key(profile.photo), now["photo"]
+            profile.photo = now["photo"]
+        if after:
+            await sp.record(session, profile.id, "edited_from_event", actor, before=was, after={**after, "event_id": event_id})
+    await session.flush()
+    for profile in made:
+        await sp.candidates_for_new(session, profile)
+
+
+async def resync_club_profiles(session, *, apply: bool = False) -> dict:
+    """Profiles that a club's edits made before `follow_club_edits` never
+    reached: each active, unclaimed profile on one club's events only, from
+    the event row that club changed last, when it changed after the profile
+    did (an admin's later edit stands). Copies the designation (as the
+    headline), the bio, the photo and the link where the row has one and it
+    differs, and the name when it is the same name written otherwise; a
+    different name is counted, not copied. A dry run unless `apply`.
+    Returns the counts."""
+    rows = (await session.execute(
+        select(EventSpeakers, Events.club_id, SpeakerProfiles)
+        .join(Events, Events.id == EventSpeakers.event_id)
+        .join(SpeakerProfiles, SpeakerProfiles.id == EventSpeakers.speaker_profile_id)
+        .where(
+            EventSpeakers.is_deleted == False, Events.is_deleted == False,  # noqa: E712
+            SpeakerProfiles.status == ACTIVE, SpeakerProfiles.claimed_by_user_id.is_(None),
+        )
+    )).all()
+    by_profile: dict[int, list] = {}
+    for row, club_id, profile in rows:
+        by_profile.setdefault(profile.id, []).append((row, club_id, profile))
+    counts = {"profiles_checked": len(by_profile), "profiles_updated": 0, "names_differ": 0,
+              "fields": {"name": 0, "headline": 0, "bio": 0, "links": 0, "photo": 0}}
+    for entries in by_profile.values():
+        if len({club_id for _, club_id, _ in entries}) != 1:
+            continue
+        profile = entries[0][2]
+        row = max((r for r, _, _ in entries), key=lambda r: (r.updated_at, r.id))
+        if profile.updated_at is not None and row.updated_at is not None and row.updated_at <= profile.updated_at:
+            continue
+        want = {}
+        name = (row.name or "").strip()[:100]
+        if name and name != profile.name:
+            if names.name_key(name) == profile.name_key:
+                want["name"] = name
+            else:
+                counts["names_differ"] += 1
+        headline = (row.designation or "").strip()[:200] or None
+        if headline and headline != profile.headline:
+            want["headline"] = headline
+        bio = (row.bio or "").strip()[:600] or None
+        if bio and bio != profile.bio:
+            want["bio"] = bio
+        if row.link and names.link_key(row.link) not in names.profile_link_keys(profile.links):
+            want["links"] = {**dict(profile.links or {}), names.link_kind(row.link): row.link}
+        photo = sp.photo_key(row.photo)
+        if photo and photo != sp.photo_key(profile.photo):
+            want["photo"] = photo
+        if not want:
+            continue
+        counts["profiles_updated"] += 1
+        for field in want:
+            counts["fields"][field] += 1
+        if apply:
+            was = {f: (sp.photo_key(profile.photo) if f == "photo" else getattr(profile, f)) for f in want}
+            for field, value in want.items():
+                setattr(profile, field, value)
+            await sp.record(session, profile.id, "resynced_from_event", sp.SYSTEM, before=was, after={**want, "event_speaker_id": row.id})
+    if apply:
+        await session.commit()
+    else:
+        await session.rollback()
+    return counts
 
 
 # ─── Payloads ────────────────────────────────────────────────────────────

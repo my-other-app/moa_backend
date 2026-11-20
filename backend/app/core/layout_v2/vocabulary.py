@@ -100,14 +100,35 @@ _DESIGN_TOKENS: tuple[tuple[str, str, str, str, str], ...] = (
     ("bib_number", "Badge", "Bib number", "2047", "b"),
     ("category", "Badge", "Category (hidden unless set)", "10K", "b"),
     ("wave", "Badge", "Wave (hidden unless set)", "B", "b"),
+    # "I'm attending" posters (app/api/guest_posters): entries of their own,
+    # so every other kind's catalogue reads exactly as before.
+    ("name", "Guest", "Name (from the registration)", "Asha Nair", "p"),
+    ("first_name", "Guest", "First name", "Asha", "p"),
+    ("last_name", "Guest", "Last name", "Nair", "p"),
+    ("initials", "Guest", "Initials", "AN", "p"),
+    ("role", "Guest", "Role: attendee, speaker, volunteer or organiser", "speaker", "p"),
+    ("role_label", "Guest", "Role, in words", "Speaker", "p"),
+    ("ticket_type", "Guest", "Ticket type (hidden without types)", "General admission", "p"),
+    ("organisation", "Guest", "Their company or college", "Sahyadri College", "p"),
+    ("talk_title", "Speaker", "Talk title (speakers)", "Building for Bharat", "p"),
+    ("talk_time", "Speaker", "Talk time (speakers)", "11:30", "p"),
+    ("talk_hall", "Speaker", "Talk hall (speakers)", "Hall B", "p"),
+    ("event_name", "Event", "Event name", "DevFest 2026", "p"),
+    ("event_date", "Event", "Event date", "28 Nov 2026", "p"),
+    ("event_time", "Event", "Start time", "08:30", "p"),
+    ("venue", "Event", "Venue (or Online)", "KTPO, Bengaluru", "p"),
+    ("city", "Event", "City", "Bengaluru", "p"),
+    ("club_name", "Club", "Host club", "GDG Cloud Kochi", "p"),
+    ("moment_phrase", "Poster", "The moment's phrase (I'm attending)", "I'm attending", "p"),
+    ("share_url", "Poster", "Their own link to the event page", "https://myotherapp.in/l/x7k2m9pq", "p"),
 )
-_KIND = {"t": "ticket", "c": "certificate", "b": "badge"}
+_KIND = {"t": "ticket", "c": "certificate", "b": "badge", "p": "poster"}
 #: Pictures a showIf may name: present when the context carries that picture.
 IMAGE_TOKENS = {
     "logo_src": "org_logo", "photo_url": "guest_photo", "sponsor_src": "sponsor",
     "signature_src": "signature_1", "second_signature_src": "signature_2",
 }
-KINDS = ("ticket", "certificate", "badge", "agenda")
+KINDS = ("ticket", "certificate", "badge", "agenda", "poster")
 
 
 @lru_cache(maxsize=None)
@@ -117,7 +138,10 @@ def design_tokens(kind: str) -> frozenset[str]:
 
 
 def all_design_tokens() -> frozenset[str]:
-    return frozenset(t[0] for t in _DESIGN_TOKENS)
+    """The tickets', certificates' and ID cards' design tokens: the names a
+    v1 alias may clash with (convert.from_v1). A poster's own are not among
+    them: a v1 canvas is never a poster."""
+    return frozenset(t[0] for t in _DESIGN_TOKENS if set(t[4]) & {"t", "c", "b"})
 
 
 def tokens(kind: str) -> list[dict]:

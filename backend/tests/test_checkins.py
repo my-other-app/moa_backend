@@ -332,6 +332,31 @@ async def test_a_scan_that_fails_after_it_was_recorded_replays_as_admitted(clien
     assert len((await client.get(_url(world, "/check-ins"), headers=h)).json()["items"]) == 3
 
 
+async def test_a_ticket_of_a_deleted_event_is_not_a_ticket(client, session, world):
+    """Its event is hidden once deleted: the door answers INVALID (the app's
+    old scanner REGISTRATION_NOT_FOUND), never a 500, and the offline queue
+    is not asked to send it again for ever."""
+    h = world["club"]
+    code, event_id, guest = world["c"].ticket_id, world["event"].id, world["a"].ticket_id
+    world["other"].soft_delete()
+    await session.commit()
+    # As in a fresh request: nothing already loaded holds the deleted event.
+    session.expire_all()
+
+    live = await client.post(f"/api/v1/events/{event_id}/gate/scan", json=_scan(code), headers=h)
+    assert live.status_code == 200, live.text
+    assert live.json()["outcome"] == "INVALID" and live.json()["other_event"] is None
+
+    batch = await client.post(f"/api/v1/events/{event_id}/gate/scan-batch", json={"scans": [_scan(code), _scan(guest)]}, headers=h)
+    assert batch.status_code == 200, batch.text
+    results = [x["response"] for x in batch.json()["results"]]
+    assert [x["outcome"] for x in results] == ["INVALID", "CHECKED_IN"]
+    assert not results[0].get("retry")
+
+    old = await client.post(f"/api/v1/events/volunteer/checkin/{event_id}", json={"ticket_id": code}, headers=world["vol"])
+    assert old.status_code == 400 and old.json()["error_code"] == "REGISTRATION_NOT_FOUND"
+
+
 async def test_an_offline_scan_time_without_an_offset_is_read_as_utc(client, world):
     h = world["club"]
     earlier = (datetime.now(timezone.utc) - timedelta(minutes=30)).replace(tzinfo=None, microsecond=0)

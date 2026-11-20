@@ -547,6 +547,10 @@ def guest_values(event: Events, reg: EventRegistrationsLink) -> dict:
     from app.api.ticket_cancel.service import url_for as cancel_url_for
 
     v["cancel_ticket_url"] = cancel_url_for(reg.id) if getattr(reg, "id", None) else ""
+    # Their "I'm attending" poster page, signed (app/api/guest_posters); the page says when posters are off.
+    from app.api.guest_posters.service import poster_page_url
+
+    v["poster_url"] = "" if reg.ticket_revoked_at or not reg.ticket_id else poster_page_url(reg.ticket_id)
     # The code the door types when the QR will not scan (app.core.mail.schema).
     v.setdefault("ticket_code", reg.ticket_id or "")
     return v

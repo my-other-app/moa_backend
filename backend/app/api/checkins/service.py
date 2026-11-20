@@ -226,7 +226,10 @@ async def scan(session, event: Events, *, code: Optional[str] = None, door_label
     if reg is None:
         code = code or ""
         other = await elsewhere(session, code)
-        if other is not None and other.event_id != event.id:
+        # A ticket of an event that has since been deleted is for no event:
+        # its event does not load (soft-deleted rows are hidden), and it is
+        # answered as not a ticket rather than raising at the door.
+        if other is not None and other.event_id != event.id and other.event is not None:
             return _not_admitted("WRONG_EVENT", other_event={"name": other.event.name, "starts_at": other.event.event_datetime})
         holder = await by_admission_no(session, event.id, code)
         if holder is not None:

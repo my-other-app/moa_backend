@@ -65,6 +65,8 @@ SOCIAL_SWEEP = 773_197
 SUPPORT_SWEEP = 773_190
 #: Outgoing webhooks' retention: changes and deliveries past 30 days (app/api/webhooks_out/sweep.py).
 WEBHOOKS_SWEEP = 773_211
+#: Guests' poster photos and renders past their retention (app/api/guest_posters/sweep.py).
+POSTERS_SWEEP = 773_221
 #: The job queue's maintenance pass (app/core/jobs.py).
 JOBS_MAINTENANCE = 774_501
 #: The live room's sweep (app/api/live/service.py).
