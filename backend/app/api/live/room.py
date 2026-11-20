@@ -382,10 +382,13 @@ async def _build_room(session, event_id: int):
     if event is None:
         return _NONE
     now = now_utc()
-    await close_due(session, event.id, now)
     updates = list((await session.scalars(select(LiveUpdates).where(LiveUpdates.event_id == event.id).order_by(LiveUpdates.sent_at.desc()).limit(10))).all())
     banner = updates[0] if updates and now - updates[0].sent_at <= BANNER_FOR else None
     poll = await session.scalar(select(LivePolls).where(LivePolls.event_id == event.id, LivePolls.status == PollStatus.live).order_by(LivePolls.launched_at.desc()).limit(1))
+    if poll is not None and poll.closes_at is not None and now >= poll.closes_at:
+        # Its timer ran out: closed now, by whoever reads the room first.
+        await close_due(session, event.id, now)
+        poll = None
     rows = (await session.execute(
         select(LiveQuestions, LiveQuestions.author_key)
         .where(LiveQuestions.event_id == event.id, LiveQuestions.status.in_([QuestionStatus.approved, QuestionStatus.answered]))

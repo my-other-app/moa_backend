@@ -823,3 +823,40 @@ async def test_streams_send_each_client_its_own_version(client, session, world, 
     finally:
         await hub.close()
         bus.reset_for_tests()
+
+
+async def test_the_public_theme_is_conditional_and_the_version_rides_the_query(client, session, world):
+    first = await client.get(_u(world, "/theme/public"))
+    assert first.status_code == 200 and first.headers["cache-control"] == "public, max-age=15" and first.headers.get("etag")
+    again = await client.get(_u(world, "/theme/public"), headers={"If-None-Match": first.headers["etag"]})
+    assert again.status_code == 304
+    assert (await client.get(f"/api/v1/events/{world['eid'] + 9999}/live/theme/public")).status_code == 404
+    assert "theme" in (await client.get(_u(world), params={"v": "2"})).json()
+    await _add(client, world, {"prompt": "Pick A", "options": _opts(2), "correct_key": "a"})
+    code = (await _start(client, world))["join_code"]
+    p = await _join(client, code, 1, v2=False)
+    by_query = await client.get(_u(world, "/quiz/play"), params={"v": "2"}, headers={"X-Live-Player": p["player_key"]})
+    assert by_query.json()["phase"] == "lobby" and by_query.json()["round"] == {"index": 0, "count": 1}
+
+
+async def test_the_screen_shows_the_agenda_and_the_sponsors_for_idle_slides(client, session, world):
+    from app.api.agenda.models import AgendaItems
+    from app.api.event_partners.models import EventPartners
+
+    now = datetime.now(timezone.utc)
+    session.add(AgendaItems(event_id=world["eid"], starts_at=now - timedelta(minutes=10), ends_at=now + timedelta(minutes=20), title="Keynote", sort_order=0))
+    session.add(AgendaItems(event_id=world["eid"], starts_at=now + timedelta(minutes=30), ends_at=now + timedelta(minutes=60), title="Workshops", sort_order=1))
+    session.add(AgendaItems(event_id=world["eid"], starts_at=now - timedelta(hours=2), ends_at=now - timedelta(hours=1), title="Doors", sort_order=2))
+    session.add(EventPartners(event_id=world["eid"], kind="sponsor", name="Acme", position=0))
+    session.add(EventPartners(event_id=world["eid"], kind="partner", name="Not a sponsor", position=1))
+    await session.commit()
+    await client.put(_u(world, "/screen/control"), json={"idle_slides": ["agenda", "sponsors"]}, headers=world["hv"])
+    screen = (await client.get(_u(world, "/screen"), headers=world["hv"])).json()
+    assert screen["shows"] == "idle"
+    assert [(a["title"], a["now"]) for a in screen["agenda"]] == [("Keynote", True), ("Workshops", False)]
+    assert [s["name"] for s in screen["sponsors"]] == ["Acme"]
+    # The theme's sponsor strip asks for them too, with no idle slides.
+    await client.put(_u(world, "/screen/control"), json={"idle_slides": []}, headers=world["hv"])
+    assert (await client.get(_u(world, "/screen"), headers=world["hv"])).json()["sponsors"] == []
+    await client.put(_u(world, "/theme"), json={"preset": "meridian_dark", "screen": {"sponsors": True}}, headers=world["hv"])
+    assert [s["name"] for s in (await client.get(_u(world, "/screen"), headers=world["hv"])).json()["sponsors"]] == ["Acme"]

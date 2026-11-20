@@ -647,14 +647,15 @@ def _time_left(opened_at: Optional[datetime], seconds: int, now: datetime) -> in
 async def _tally(session, q: dict) -> dict:
     """The open question's answers, counted for the host by its kind."""
     kind = q.get("kind") or scoring.SINGLE
-    answered = await session.scalar(select(func.count()).select_from(LiveQuizAnswers).where(LiveQuizAnswers.question_id == q["id"])) or 0
-    out: dict = {"answered": int(answered)}
     if kind in scoring.ONE_KEY:
         by = dict((await session.execute(select(LiveQuizAnswers.option_key, func.count()).where(LiveQuizAnswers.question_id == q["id"]).group_by(LiveQuizAnswers.option_key))).all())
+        out: dict = {"answered": sum(by.values())}
         out["counts"] = [{"key": o["key"], "label": o["label"], "count": by.get(o["key"], 0), "correct": kind != scoring.POLL and o["key"] == q["correct_key"]} for o in q["options"]]
         return out
-    right = await session.scalar(select(func.count()).select_from(LiveQuizAnswers).where(LiveQuizAnswers.question_id == q["id"], LiveQuizAnswers.correct == True)) or 0  # noqa: E712
-    out["fully_correct"] = int(right)
+    answered, right = (await session.execute(
+        select(func.count(), func.count().filter(LiveQuizAnswers.correct == True)).where(LiveQuizAnswers.question_id == q["id"])  # noqa: E712
+    )).one()
+    out = {"answered": int(answered), "fully_correct": int(right)}
     st = q.get("settings") or {}
     if kind == scoring.TYPE:
         out["counts"] = []
