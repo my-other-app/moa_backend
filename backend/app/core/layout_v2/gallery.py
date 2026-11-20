@@ -61,6 +61,10 @@ def _load(starter_id: str, wording: Optional[str] = None) -> dict:
 
 def starter_ids(kind: str) -> list[str]:
     """The starters of a kind, in the gallery's order: the designer's, then the others."""
+    if kind == "poster":
+        from app.core.layout_v2 import poster
+
+        return poster.starter_ids()
     if kind not in KINDS:
         return []
     ids = [d.id for d in doc_designs.catalogue(kind)]
@@ -70,7 +74,15 @@ def starter_ids(kind: str) -> list[str]:
 
 def starter(starter_id: str, wording: Optional[str] = None) -> dict:
     """A copy of the starter's layout (v2 wire form). `wording`: a certificate's
-    other wording, when it has one converted (else the default)."""
+    other wording, when it has one converted (else the default). A poster's
+    is its file, a layout per format (app.core.layout_v2.poster)."""
+    if starter_id.startswith("poster/"):
+        from app.core.layout_v2 import poster
+
+        try:
+            return {**poster.meta(starter_id), "formats": poster.starter_formats(starter_id)}
+        except poster.UnknownStarter as exc:
+            raise UnknownStarter(starter_id) from exc
     if wording:
         try:
             return copy.deepcopy(_load(starter_id, wording))
@@ -80,6 +92,10 @@ def starter(starter_id: str, wording: Optional[str] = None) -> dict:
 
 
 def has(starter_id: str) -> bool:
+    if starter_id.startswith("poster/"):
+        from app.core.layout_v2 import poster
+
+        return poster.has(starter_id)
     try:
         return _path(starter_id).exists()
     except UnknownStarter:
@@ -88,6 +104,10 @@ def has(starter_id: str) -> bool:
 
 def default_starter_id(kind: str) -> Optional[str]:
     """The kind's default (doc-designs D7) as a starter."""
+    if kind == "poster":
+        from app.core.layout_v2 import poster
+
+        return poster.default_starter_id()
     d = doc_designs.DEFAULTS.get(kind)
     return d if d and has(d) else None
 
@@ -104,7 +124,12 @@ def meta(starter_id: str, base_url: Optional[str] = None) -> dict:
 
 
 def starters(kind: str, *, base_url: Optional[str] = None, with_layout: bool = True) -> list[dict]:
-    """[{id, kind, name, use, hasPhoto, colour, accent, preview, layout}] for the gallery."""
+    """[{id, kind, name, use, hasPhoto, colour, accent, preview, layout}] for the gallery.
+    A poster's has `formats` (the formats it holds) and, with_layout, `layouts`."""
+    if kind == "poster":
+        from app.core.layout_v2 import poster
+
+        return poster.starters(with_layout=with_layout)
     out = []
     for sid in starter_ids(kind):
         entry = meta(sid, base_url)

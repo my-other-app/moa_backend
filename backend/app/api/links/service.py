@@ -284,10 +284,15 @@ async def summary(session, club, event, days: int = 30, now: Optional[datetime] 
     in_period = lambda col: col >= since  # noqa: E731
     in_previous = lambda col: and_(col >= before, col < since)  # noqa: E731
 
-    scope = [TrackingLinks.club_id == club.id, TrackingLinks.is_deleted == False]  # noqa: E712
+    from app.api.guest_posters.links import GUEST, fold as poster_fold
+
+    # Each guest's poster link counts as its event's "Guest posters" row (app/api/guest_posters/links.py).
+    scope = [TrackingLinks.club_id == club.id, TrackingLinks.is_deleted == False, TrackingLinks.kind != GUEST]  # noqa: E712
     scope.append(TrackingLinks.event_id == event.id if event is not None else TrackingLinks.event_id.is_(None))
     links = list((await session.scalars(select(TrackingLinks).where(*scope).order_by(TrackingLinks.created_at.desc()))).all())
-    ids = [l.id for l in links]
+    folded = await poster_fold(session, links)
+    as_row = lambda lid: folded.get(lid, lid)  # noqa: E731
+    ids = [l.id for l in links] + list(folded)
     site_host = await active_host(session, club.id) if event is None else None
 
     clicks: dict = {}
@@ -302,7 +307,9 @@ async def summary(session, club, event, days: int = 30, now: Optional[datetime] 
                 ).where(TrackingClicks.link_id.in_(ids)).group_by(TrackingClicks.link_id)
             )
         ).all()
-        clicks = {link_id: (int(n), int(u), int(p)) for link_id, n, u, p in rows}
+        for link_id, n, u, p in rows:
+            c = clicks.get(as_row(link_id), (0, 0, 0))
+            clicks[as_row(link_id)] = (c[0] + int(n), c[1] + int(u), c[2] + int(p))
 
     conversions: dict = {}
     if event is not None:
@@ -319,7 +326,9 @@ async def summary(session, club, event, days: int = 30, now: Optional[datetime] 
                     .group_by(EventRegistrationsLink.tracking_link_id)
                 )
             ).all()
-            conversions = {link_id: (int(n), int(s), int(p)) for link_id, n, s, p in rows}
+            for link_id, n, s, p in rows:
+                c = conversions.get(as_row(link_id), (0, 0, 0))
+                conversions[as_row(link_id)] = (c[0] + int(n), c[1] + int(s), c[2] + int(p))
         all_now, all_before = (
             await session.execute(
                 select(func.count().filter(in_period(EventRegistrationsLink.created_at)), func.count().filter(in_previous(EventRegistrationsLink.created_at)))

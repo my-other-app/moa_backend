@@ -1,0 +1,653 @@
+{
+ "id": "poster/blank",
+ "name": "Simple",
+ "use": "Round photo, the phrase, the name and the event, on a deep blue",
+ "hasPhoto": true,
+ "formats": {
+  "square": {
+   "version": 2,
+   "page": {
+    "widthMm": 285.75,
+    "heightMm": 285.75
+   },
+   "canvas": {
+    "width": 1080,
+    "height": 1080,
+    "background": {
+     "type": "linear",
+     "angle": 160,
+     "stops": [
+      {
+       "offset": 0,
+       "color": "#111827"
+      },
+      {
+       "offset": 1,
+       "color": "#1E3A8A"
+      }
+     ]
+    }
+   },
+   "vars": {
+    "accent": "#60A5FA"
+   },
+   "layers": [
+    {
+     "id": "ring",
+     "name": "Photo ring",
+     "x": 380,
+     "y": 100,
+     "width": 320,
+     "height": 320,
+     "kind": "shape",
+     "shape": "ellipse",
+     "fill": {
+      "type": "solid",
+      "color": "var:accent"
+     }
+    },
+    {
+     "id": "photo",
+     "name": "Guest photo",
+     "x": 390,
+     "y": 110,
+     "width": 300,
+     "height": 300,
+     "kind": "image",
+     "source": "guest_photo",
+     "fit": "cover",
+     "radius": [
+      150,
+      150,
+      150,
+      150
+     ],
+     "placeholder": "initials",
+     "placeholderStyle": {
+      "color": "#111827",
+      "background": {
+       "type": "solid",
+       "color": "#E5E7EB"
+      },
+      "family": "Inter",
+      "weight": 700
+     }
+    },
+    {
+     "id": "phrase",
+     "name": "Moment phrase",
+     "x": 60,
+     "y": 450,
+     "width": 960,
+     "height": 64,
+     "kind": "text",
+     "text": "{{moment_phrase}}",
+     "font": {
+      "family": "Inter",
+      "weight": 600,
+      "style": "normal"
+     },
+     "size": 44,
+     "color": "var:accent",
+     "align": "center",
+     "valign": "middle",
+     "minSize": 22
+    },
+    {
+     "id": "name",
+     "name": "Name",
+     "x": 60,
+     "y": 522,
+     "width": 960,
+     "height": 96,
+     "kind": "text",
+     "text": "{{name}}",
+     "font": {
+      "family": "Inter",
+      "weight": 700,
+      "style": "normal"
+     },
+     "size": 76,
+     "color": "#FFFFFF",
+     "align": "center",
+     "valign": "middle",
+     "minSize": 38
+    },
+    {
+     "id": "role",
+     "name": "Role",
+     "x": 60,
+     "y": 618,
+     "width": 960,
+     "height": 44,
+     "kind": "text",
+     "text": "{{role_label}}{% if organisation %} · {{organisation}}{% endif %}",
+     "font": {
+      "family": "Inter",
+      "weight": 500,
+      "style": "normal"
+     },
+     "size": 30,
+     "color": "#CBD5E1",
+     "align": "center",
+     "valign": "middle",
+     "minSize": 15
+    },
+    {
+     "id": "talk",
+     "name": "Talk",
+     "x": 90,
+     "y": 688,
+     "width": 900,
+     "height": 80,
+     "showIf": "talk_title",
+     "kind": "text",
+     "text": "“{{talk_title}}”",
+     "font": {
+      "family": "Inter",
+      "weight": 500,
+      "style": "normal"
+     },
+     "size": 32,
+     "color": "#FFFFFF",
+     "align": "center",
+     "valign": "middle",
+     "maxLines": 2,
+     "minSize": 16
+    },
+    {
+     "id": "event",
+     "name": "Event name",
+     "x": 60,
+     "y": 780,
+     "width": 960,
+     "height": 130,
+     "kind": "text",
+     "text": "{{event_name}}",
+     "font": {
+      "family": "Inter",
+      "weight": 700,
+      "style": "normal"
+     },
+     "size": 58,
+     "color": "#FFFFFF",
+     "align": "center",
+     "valign": "middle",
+     "maxLines": 2,
+     "minSize": 29
+    },
+    {
+     "id": "when",
+     "name": "Date and place",
+     "x": 60,
+     "y": 920,
+     "width": 960,
+     "height": 44,
+     "kind": "text",
+     "text": "{{event_date}} · {{event_time}} · {{venue}}",
+     "font": {
+      "family": "Inter",
+      "weight": 500,
+      "style": "normal"
+     },
+     "size": 28,
+     "color": "#CBD5E1",
+     "align": "center",
+     "valign": "middle",
+     "minSize": 14
+    },
+    {
+     "id": "link",
+     "name": "Share link",
+     "x": 60,
+     "y": 990,
+     "width": 960,
+     "height": 40,
+     "kind": "text",
+     "text": "{{share_url}}",
+     "font": {
+      "family": "Roboto Mono",
+      "weight": 400,
+      "style": "normal"
+     },
+     "size": 24,
+     "color": "#93C5FD",
+     "align": "center",
+     "valign": "middle",
+     "minSize": 12
+    }
+   ],
+   "starter": "poster/blank"
+  },
+  "portrait": {
+   "version": 2,
+   "page": {
+    "widthMm": 285.75,
+    "heightMm": 357.1875
+   },
+   "canvas": {
+    "width": 1080,
+    "height": 1350,
+    "background": {
+     "type": "linear",
+     "angle": 160,
+     "stops": [
+      {
+       "offset": 0,
+       "color": "#111827"
+      },
+      {
+       "offset": 1,
+       "color": "#1E3A8A"
+      }
+     ]
+    }
+   },
+   "vars": {
+    "accent": "#60A5FA"
+   },
+   "layers": [
+    {
+     "id": "ring",
+     "name": "Photo ring",
+     "x": 350,
+     "y": 140,
+     "width": 380,
+     "height": 380,
+     "kind": "shape",
+     "shape": "ellipse",
+     "fill": {
+      "type": "solid",
+      "color": "var:accent"
+     }
+    },
+    {
+     "id": "photo",
+     "name": "Guest photo",
+     "x": 360,
+     "y": 150,
+     "width": 360,
+     "height": 360,
+     "kind": "image",
+     "source": "guest_photo",
+     "fit": "cover",
+     "radius": [
+      180,
+      180,
+      180,
+      180
+     ],
+     "placeholder": "initials",
+     "placeholderStyle": {
+      "color": "#111827",
+      "background": {
+       "type": "solid",
+       "color": "#E5E7EB"
+      },
+      "family": "Inter",
+      "weight": 700
+     }
+    },
+    {
+     "id": "phrase",
+     "name": "Moment phrase",
+     "x": 60,
+     "y": 566,
+     "width": 960,
+     "height": 64,
+     "kind": "text",
+     "text": "{{moment_phrase}}",
+     "font": {
+      "family": "Inter",
+      "weight": 600,
+      "style": "normal"
+     },
+     "size": 44,
+     "color": "var:accent",
+     "align": "center",
+     "valign": "middle",
+     "minSize": 22
+    },
+    {
+     "id": "name",
+     "name": "Name",
+     "x": 60,
+     "y": 647.6,
+     "width": 960,
+     "height": 96,
+     "kind": "text",
+     "text": "{{name}}",
+     "font": {
+      "family": "Inter",
+      "weight": 700,
+      "style": "normal"
+     },
+     "size": 76,
+     "color": "#FFFFFF",
+     "align": "center",
+     "valign": "middle",
+     "minSize": 38
+    },
+    {
+     "id": "role",
+     "name": "Role",
+     "x": 60,
+     "y": 758,
+     "width": 960,
+     "height": 44,
+     "kind": "text",
+     "text": "{{role_label}}{% if organisation %} · {{organisation}}{% endif %}",
+     "font": {
+      "family": "Inter",
+      "weight": 500,
+      "style": "normal"
+     },
+     "size": 30,
+     "color": "#CBD5E1",
+     "align": "center",
+     "valign": "middle",
+     "minSize": 15
+    },
+    {
+     "id": "talk",
+     "name": "Talk",
+     "x": 90,
+     "y": 832.6,
+     "width": 900,
+     "height": 80,
+     "showIf": "talk_title",
+     "kind": "text",
+     "text": "“{{talk_title}}”",
+     "font": {
+      "family": "Inter",
+      "weight": 500,
+      "style": "normal"
+     },
+     "size": 32,
+     "color": "#FFFFFF",
+     "align": "center",
+     "valign": "middle",
+     "maxLines": 2,
+     "minSize": 16
+    },
+    {
+     "id": "event",
+     "name": "Event name",
+     "x": 60,
+     "y": 970,
+     "width": 960,
+     "height": 130,
+     "kind": "text",
+     "text": "{{event_name}}",
+     "font": {
+      "family": "Inter",
+      "weight": 700,
+      "style": "normal"
+     },
+     "size": 58,
+     "color": "#FFFFFF",
+     "align": "center",
+     "valign": "middle",
+     "maxLines": 2,
+     "minSize": 29
+    },
+    {
+     "id": "when",
+     "name": "Date and place",
+     "x": 60,
+     "y": 1110,
+     "width": 960,
+     "height": 44,
+     "kind": "text",
+     "text": "{{event_date}} · {{event_time}} · {{venue}}",
+     "font": {
+      "family": "Inter",
+      "weight": 500,
+      "style": "normal"
+     },
+     "size": 28,
+     "color": "#CBD5E1",
+     "align": "center",
+     "valign": "middle",
+     "minSize": 14
+    },
+    {
+     "id": "link",
+     "name": "Share link",
+     "x": 60,
+     "y": 1260,
+     "width": 960,
+     "height": 40,
+     "kind": "text",
+     "text": "{{share_url}}",
+     "font": {
+      "family": "Roboto Mono",
+      "weight": 400,
+      "style": "normal"
+     },
+     "size": 24,
+     "color": "#93C5FD",
+     "align": "center",
+     "valign": "middle",
+     "minSize": 12
+    }
+   ],
+   "starter": "poster/blank"
+  },
+  "story": {
+   "version": 2,
+   "page": {
+    "widthMm": 285.75,
+    "heightMm": 508
+   },
+   "canvas": {
+    "width": 1080,
+    "height": 1920,
+    "background": {
+     "type": "linear",
+     "angle": 160,
+     "stops": [
+      {
+       "offset": 0,
+       "color": "#111827"
+      },
+      {
+       "offset": 1,
+       "color": "#1E3A8A"
+      }
+     ]
+    }
+   },
+   "vars": {
+    "accent": "#60A5FA"
+   },
+   "layers": [
+    {
+     "id": "ring",
+     "name": "Photo ring",
+     "x": 300,
+     "y": 320,
+     "width": 480,
+     "height": 480,
+     "kind": "shape",
+     "shape": "ellipse",
+     "fill": {
+      "type": "solid",
+      "color": "var:accent"
+     }
+    },
+    {
+     "id": "photo",
+     "name": "Guest photo",
+     "x": 310,
+     "y": 330,
+     "width": 460,
+     "height": 460,
+     "kind": "image",
+     "source": "guest_photo",
+     "fit": "cover",
+     "radius": [
+      230,
+      230,
+      230,
+      230
+     ],
+     "placeholder": "initials",
+     "placeholderStyle": {
+      "color": "#111827",
+      "background": {
+       "type": "solid",
+       "color": "#E5E7EB"
+      },
+      "family": "Inter",
+      "weight": 700
+     }
+    },
+    {
+     "id": "phrase",
+     "name": "Moment phrase",
+     "x": 60,
+     "y": 870,
+     "width": 960,
+     "height": 64,
+     "kind": "text",
+     "text": "{{moment_phrase}}",
+     "font": {
+      "family": "Inter",
+      "weight": 600,
+      "style": "normal"
+     },
+     "size": 44,
+     "color": "var:accent",
+     "align": "center",
+     "valign": "middle",
+     "minSize": 22
+    },
+    {
+     "id": "name",
+     "name": "Name",
+     "x": 60,
+     "y": 964.4,
+     "width": 960,
+     "height": 96,
+     "kind": "text",
+     "text": "{{name}}",
+     "font": {
+      "family": "Inter",
+      "weight": 700,
+      "style": "normal"
+     },
+     "size": 76,
+     "color": "#FFFFFF",
+     "align": "center",
+     "valign": "middle",
+     "minSize": 38
+    },
+    {
+     "id": "role",
+     "name": "Role",
+     "x": 60,
+     "y": 1094,
+     "width": 960,
+     "height": 44,
+     "kind": "text",
+     "text": "{{role_label}}{% if organisation %} · {{organisation}}{% endif %}",
+     "font": {
+      "family": "Inter",
+      "weight": 500,
+      "style": "normal"
+     },
+     "size": 30,
+     "color": "#CBD5E1",
+     "align": "center",
+     "valign": "middle",
+     "minSize": 15
+    },
+    {
+     "id": "talk",
+     "name": "Talk",
+     "x": 90,
+     "y": 1177.4,
+     "width": 900,
+     "height": 80,
+     "showIf": "talk_title",
+     "kind": "text",
+     "text": "“{{talk_title}}”",
+     "font": {
+      "family": "Inter",
+      "weight": 500,
+      "style": "normal"
+     },
+     "size": 32,
+     "color": "#FFFFFF",
+     "align": "center",
+     "valign": "middle",
+     "maxLines": 2,
+     "minSize": 16
+    },
+    {
+     "id": "event",
+     "name": "Event name",
+     "x": 60,
+     "y": 1360,
+     "width": 960,
+     "height": 130,
+     "kind": "text",
+     "text": "{{event_name}}",
+     "font": {
+      "family": "Inter",
+      "weight": 700,
+      "style": "normal"
+     },
+     "size": 58,
+     "color": "#FFFFFF",
+     "align": "center",
+     "valign": "middle",
+     "maxLines": 2,
+     "minSize": 29
+    },
+    {
+     "id": "when",
+     "name": "Date and place",
+     "x": 60,
+     "y": 1500,
+     "width": 960,
+     "height": 44,
+     "kind": "text",
+     "text": "{{event_date}} · {{event_time}} · {{venue}}",
+     "font": {
+      "family": "Inter",
+      "weight": 500,
+      "style": "normal"
+     },
+     "size": 28,
+     "color": "#CBD5E1",
+     "align": "center",
+     "valign": "middle",
+     "minSize": 14
+    },
+    {
+     "id": "link",
+     "name": "Share link",
+     "x": 60,
+     "y": 1830,
+     "width": 960,
+     "height": 40,
+     "kind": "text",
+     "text": "{{share_url}}",
+     "font": {
+      "family": "Roboto Mono",
+      "weight": 400,
+      "style": "normal"
+     },
+     "size": 24,
+     "color": "#93C5FD",
+     "align": "center",
+     "valign": "middle",
+     "minSize": 12
+    }
+   ],
+   "starter": "poster/blank"
+  }
+ }
+}

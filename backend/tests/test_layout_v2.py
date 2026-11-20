@@ -447,10 +447,12 @@ STARTER_FILES = sorted((Path(gallery.__file__).parent / "starters").rglob("*.jso
 def test_every_starter_file_round_trips(path):
     """A starter is its full form compacted, and compacting loses nothing:
     parsing it gives back every field of every layer, whatever its kind."""
-    on_disk = json.loads(path.read_text())
-    full = v2.dump(v2.parse(on_disk))
-    assert schema.compact(full) == on_disk
-    assert v2.dump(v2.parse(schema.compact(full))) == full
+    data = json.loads(path.read_text())
+    # A poster starter holds a layout per format (app/core/layout_v2/poster.py).
+    for on_disk in (data["formats"].values() if "formats" in data else [data]):
+        full = v2.dump(v2.parse(on_disk))
+        assert schema.compact(full) == on_disk
+        assert v2.dump(v2.parse(schema.compact(full))) == full
 
 
 def _every_field_off_default() -> dict:
