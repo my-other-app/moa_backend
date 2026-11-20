@@ -120,6 +120,8 @@ def problems(layout: Union[LayoutV2, dict, Any], kind: str = "ticket") -> list[d
             out.append(_p("poster_format", "canvas",
                           "A poster is 1080 × 1080 (square), 1080 × 1350 (portrait) or 1080 × 1920 (story) "
                           "pixels, on a page of the same size at 96 dpi."))
+        # Shared in public: no email address or phone number, whatever the form.
+        out += poster.contact_problems(lay)
     px_per_mm = c.width / page.width_mm
     qrs = [i for i, l in enumerate(lay.layers) if isinstance(l, QrLayer) and not l.bind]
     personal = [i for i, l in enumerate(lay.layers) if isinstance(l, QrLayer) and l.bind]

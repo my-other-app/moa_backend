@@ -691,3 +691,82 @@ async def test_the_registration_query_reads_removed_ones_too(session, world):
     cara = world["regs"]["cara"]
     found = await service.registration_by_ticket(session, cara.ticket_id)
     assert isinstance(found, EventRegistrationsLink) and found.is_deleted
+
+
+# ─── Contact details: never on a poster ─────────────────────────────────────
+
+
+async def test_a_poster_design_cannot_print_contact_details(client, session, world):
+    from app.core import layout_v2
+
+    def codes(layout, kind="poster"):
+        return [p["code"] for p in layout_v2.problems(layout, kind) if p["level"] == "error"]
+
+    for text in ("{{email}}", "Mail me: {{ email | upper }}", "{% if email %}x{% endif %}", "{{field.phone_number}}", "{{field.whatsapp}}",
+                 "{{field.mobile_no}}", "{{field.email_id}}"):
+        assert codes(_layout("square", text)) == ["poster_contact"], text
+    spans = _layout("square")
+    spans["layers"][-1] = {**spans["layers"][-1], "spans": [{"text": "Hi "}, {"text": "{{email}}"}]}
+    spans["layers"][-1].pop("text", None)
+    assert codes(spans) == ["poster_contact"]
+    shown = _layout("square", "{{name}}")
+    shown["layers"][-1]["showIf"] = "email"
+    assert codes(shown) == ["poster_contact"]
+    message = next(p for p in layout_v2.problems(_layout("square", "{{email}}"), "poster") if p["code"] == "poster_contact")["message"]
+    assert message == "Mark: a poster is shared in public, so it cannot show an email address or phone number ({{email}})."
+    # Its other words, and every other kind, as before.
+    assert codes(_layout("square", "{{name}} · {{field.college}} · {{organisation}}")) == []
+    ticket = layout_v2.starter("ticket/blank")
+    ticket["layers"][0]["text"] = "{{email}}"
+    assert "poster_contact" not in codes(ticket, "ticket")
+
+    # The board: a question the form asks as a phone number is refused by name, whatever its name says.
+    world["event"].additional_details = [
+        {"key": "college", "label": "College", "field_type": "text"},
+        {"key": "reach_me", "label": "How to reach you", "field_type": "tel"},
+        {"key": "work_address", "label": "Work address", "field_type": "email"},
+    ]
+    await session.commit()
+    base = _o(world, "/designs/poster")
+    for text in ("{{field.reach_me}}", "{{field.how_to_reach_you}}", "{{field.work_address}}", "{{email}}"):
+        r = await client.put(f"{base}/layout", params={"variant": "default", "format": "square"}, json=_layout("square", text), headers=world["host"])
+        assert r.status_code == 422 and r.json()["error_code"] == "INVALID_LAYOUT" and "email address or phone number" in r.json()["message"], text
+    ok = await client.put(f"{base}/layout", params={"variant": "default", "format": "square"}, json=_layout("square", "{{field.college}}"),
+                          headers=world["host"])
+    assert ok.status_code == 200
+    keys = {t["key"] for t in ok.json()["tokens"]}
+    assert "field.college" in keys and not keys & {"email", "field.reach_me", "field.how_to_reach_you", "field.work_address"}
+    # Nor in a caption, which is shared with the poster.
+    url = _o(world, "/posters/settings")
+    for caption in ("Write to {{email}}", "Call {{field.reach_me}}", "{{field.phone}}"):
+        r = await client.put(url, json={"moments": {"before": {"caption": caption}}}, headers=world["host"])
+        assert r.status_code == 422 and "email address or phone number" in r.json()["message"], caption
+
+
+async def test_contact_details_never_reach_the_poster_builder(client, session, world, bucket, render_service):
+    from app.api.doc_presets.values import subject_of
+    from app.api.guest_posters import values as v
+    from app.api.guest_posters.models import PosterDesigns
+
+    world["event"].additional_details = [
+        {"key": "college", "label": "College", "field_type": "text"},
+        {"key": "reach_me", "label": "How to reach you", "field_type": "tel"},
+    ]
+    asha = world["regs"]["asha"]
+    asha.additional_details = {"college": "CET Trivandrum", "reach_me": "+91 98470 12345", "phone": "+91 90000 00000"}
+    # A design that names them anyway (saved around the checks, as an old row or a script might).
+    session.add(PosterDesigns(event_id=world["event"].id, variant="default", revision=1,
+                              layouts={"square": _layout("square", "{{email}}|{{field.reach_me}}|{{field.phone}}|{{field.college}}")}))
+    await session.commit()
+    reg = await service.registration_by_ticket(session, asha.ticket_id)
+    values = v.poster_values(reg.event, reg, subject_of(reg, reg.event), role="attendee", organisation="", ticket_type="", talk=v.Talk(),
+                             moment_phrase="I'm attending", share_url="https://myotherapp.in/l/abc")
+    assert "email" not in values and "field.reach_me" not in values and "field.how_to_reach_you" not in values and "field.phone" not in values
+    assert values["field.college"] == "CET Trivandrum"
+    assert asha.email not in values.values() and "+91 98470 12345" not in values.values()
+
+    await _turn_on(client, world)
+    r = await client.post(_g(asha, "/render"), json={"format": "square"}, headers=world["t"]["asha"])
+    assert r.status_code == 202
+    page = render_service.last_html()
+    assert "CET Trivandrum" in page and asha.email not in page and "98470" not in page and "90000" not in page

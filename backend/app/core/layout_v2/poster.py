@@ -14,9 +14,10 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
 ROOT = Path(__file__).resolve().parent / "starters" / "poster"
 KIND = "poster"
@@ -33,6 +34,107 @@ BLANK = "poster/blank"
 
 class UnknownStarter(LookupError):
     pass
+
+
+# ─── Contact details: never on a poster ─────────────────────────────────────
+#
+# A poster is a picture its guest shares in public. Nothing on it -- a text
+# layer, a caption -- may print an email address or a phone number: the v1
+# {{email}}, or a form answer (field.<slug>) to an email or phone question,
+# or one whose name says it is one. Refused when a design or a caption is
+# saved (CONTRACT.md §2), left out of the board's tokens, and never among the
+# values a poster is built from.
+
+#: Token names that are contact details, whatever form asked for them.
+CONTACT_TOKENS = frozenset({
+    "email", "email_address", "e_mail", "mail", "phone", "phone_number", "mobile", "mobile_number", "mobile_no", "phone_no",
+    "whatsapp", "whatsapp_number", "telephone", "tel", "contact", "contact_number", "contact_no", "cell",
+})
+#: A form question's slug that names a contact detail.
+_CONTACT_SLUG = re.compile(r"(?:^|_)(?:e_?mail|email_?id|mail_?id|phone|mobile|whats_?app|wa|tel|telephone|cell|contact)(?:_|$|s?_?(?:no|num|number))")
+#: Form question types whose answers are contact details (events.schemas.FieldTypes).
+CONTACT_FIELD_TYPES = frozenset({"email", "tel"})
+
+
+def contact_field_slugs(form: Optional[Iterable]) -> frozenset[str]:
+    """The field.<slug>s (of each question's key and label) of a form's
+    email and phone questions."""
+    from app.core.layout.tokens import field_slug
+
+    out = set()
+    for f in form or []:
+        if not isinstance(f, dict):
+            continue
+        kind = f.get("field_type")
+        kind = getattr(kind, "value", kind)
+        if kind in CONTACT_FIELD_TYPES:
+            for name in (f.get("key"), f.get("label")):
+                if name:
+                    out.add(field_slug(str(name)))
+    return frozenset(out)
+
+
+def is_contact_token(name: str, slugs: Iterable[str] = ()) -> bool:
+    """Whether a token (as written, or its canonical key) is a contact detail."""
+    from app.core.layout.tokens import BY_NAME
+
+    n = (name or "").strip().lower()
+    if not n:
+        return False
+    if n in CONTACT_TOKENS or BY_NAME.get(n) == "email":
+        return True
+    if n.startswith("field."):
+        slug = n[len("field."):]
+        return slug in set(slugs) or bool(_CONTACT_SLUG.search(slug))
+    return False
+
+
+_TAG_NAMES = re.compile(r"\{\{\s*([A-Za-z0-9_.]+)|\{%\s*if\s+(?:not\s+)?(?:\{\{\s*)?([A-Za-z0-9_.]+)", re.I)
+
+
+def contact_tokens_in(src: str, slugs: Iterable[str] = ()) -> list[str]:
+    """The contact tokens a template names ({{x}}, {{x | upper}}, {% if x %}), in order."""
+    out = []
+    for m in _TAG_NAMES.finditer(src or ""):
+        name = (m.group(1) or m.group(2) or "").strip()
+        if is_contact_token(name, slugs) and name not in out:
+            out.append(name)
+    return out
+
+
+def contact_problems(layout: Any, slugs: Iterable[str] = ()) -> list[dict]:
+    """A save-time error for each layer whose words (or showIf) name a contact detail."""
+    if not isinstance(layout, dict):
+        from app.core.layout_v2.schema import dump
+
+        layout = dump(layout)
+    slugs = frozenset(slugs)
+    out = []
+    for i, layer in enumerate(layout.get("layers") or []):
+        if not isinstance(layer, dict):
+            continue
+        found: list[str] = []
+        if layer.get("kind") == "text":
+            sources = [s.get("text") or "" for s in layer.get("spans") or [] if isinstance(s, dict)] or [layer.get("text") or ""]
+            for src in sources:
+                found += [t for t in contact_tokens_in(src, slugs) if t not in found]
+        for name in (layer.get("showIf") or "").replace("|", " ").split():
+            if is_contact_token(name, slugs) and name not in found:
+                found.append(name)
+        if found:
+            name = layer.get("name") or layer.get("id") or "A layer"
+            out.append({
+                "code": "poster_contact", "field": f"layers.{i}.text", "level": "error", "layer": layer.get("id"),
+                "message": f"{name}: a poster is shared in public, so it cannot show an email address or phone number "
+                           f"({', '.join('{{' + t + '}}' for t in found)}).",
+            })
+    return out
+
+
+def without_contacts(values: dict, slugs: Iterable[str] = ()) -> dict:
+    """The values with every contact detail taken out (and its showIf with it)."""
+    slugs = frozenset(slugs)
+    return {k: v for k, v in values.items() if not is_contact_token(k, slugs)}
 
 
 def page_mm(fmt: str) -> dict:

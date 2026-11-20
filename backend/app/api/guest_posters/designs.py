@@ -106,13 +106,15 @@ def board(event, variant: str, fmt: str, rows: dict) -> dict:
         source = "starter" if found.variant == STARTER else "default"
     role = _role_of_variant(variant)
     sample = poster_values.sample_values(event, role=role)
+    slugs = poster.contact_field_slugs(getattr(event, "additional_details", None))
     return {
         "kind": poster.KIND, "variant": variant, "format": fmt,
         "layout": layout, "from": source, "revision": revision,
         "page": poster.page_mm(fmt), "canvas": {"width": poster.FORMATS[fmt][0], "height": poster.FORMATS[fmt][1]},
         "starters": poster.starters(),
         "fonts": layouts.fonts(),
-        "tokens": layouts.tokens(poster.KIND, event),
+        # Never an email address or a phone number (CONTRACT.md §2).
+        "tokens": [t for t in layouts.tokens(poster.KIND, event) if not poster.is_contact_token(t["key"], slugs)],
         "images": {**layouts.picture_links(layout or {}, {}, event), "guest_photo": None},
         "values": sample,
         "context": {"qr": poster_values.SAMPLE_SHARE_URL, "colors": layouts.colors({}, event), "images": {}},
@@ -146,13 +148,19 @@ async def variants_out(session, event, rows: Optional[dict] = None) -> dict:
 # ─── Saving ─────────────────────────────────────────────────────────────────
 
 
-def checked(body: dict, fmt: str, *, prefixes: tuple) -> tuple[dict, list]:
+def checked(body: dict, fmt: str, *, prefixes: tuple, event=None) -> tuple[dict, list]:
     """A poster layout as it is saved (layout v2's checks for kind poster,
-    and the format it is saved as), or the 422."""
+    and the format it is saved as), or the 422. With the `event`, its form's
+    email and phone questions are refused by name too (contact details never
+    go on a poster)."""
     try:
         layout, warnings = layouts.checked(poster.KIND, body, prefixes=prefixes)
     except layouts.Refused as exc:
         raise CustomHTTPException(422, message=exc.message, error_code="INVALID_LAYOUT", errors={"fields": exc.fields, "layout": exc.problems}) from exc
+    found = poster.contact_problems(layout, poster.contact_field_slugs(getattr(event, "additional_details", None)))
+    if found:
+        raise CustomHTTPException(422, message=found[0]["message"], error_code="INVALID_LAYOUT",
+                                  errors={"fields": {p["field"]: p["message"] for p in found}, "layout": found})
     if poster.format_of(layout) != fmt:
         w, h = poster.FORMATS[fmt]
         raise CustomHTTPException(

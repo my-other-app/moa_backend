@@ -190,7 +190,11 @@ def poster_values(event, registration, subject, *, role: str, organisation: str,
         "moment_phrase": moment_phrase,
         "share_url": share_url,
     })
-    return values
+    # A poster is shared in public: no email address or phone number is ever
+    # among what it is built from, whatever its design names (CONTRACT.md §2).
+    from app.core.layout_v2 import poster
+
+    return poster.without_contacts(values, poster.contact_field_slugs(getattr(event, "additional_details", None)))
 
 
 SAMPLE_SHARE_URL = "https://myotherapp.in/l/samplecd"

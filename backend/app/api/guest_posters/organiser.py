@@ -58,8 +58,13 @@ class SettingsBody(BaseModel):
     moments: Optional[dict[str, MomentBody]] = None
 
 
-def _checked_moments(current: dict, sent: dict[str, MomentBody]) -> dict:
+def _checked_moments(current: dict, sent: dict[str, MomentBody], form=None) -> dict:
+    """The moments with what was sent applied, or the 422. A caption is shared
+    in public with the poster: no contact detail (`form`: the event's
+    questions, whose email and phone ones are refused by name too)."""
     from app.core.layout_v2 import vocabulary as tk
+
+    slugs = poster.contact_field_slugs(form)
 
     out = {k: dict(v) for k, v in current.items()}
     problems = {}
@@ -81,8 +86,14 @@ def _checked_moments(current: dict, sent: dict[str, MomentBody]) -> dict:
                 problems[f"moments.{key}.caption"] = f"At most {mom.CAPTION_MAX} characters."
             else:
                 errors = tk.parse(caption, poster.KIND).errors
+                contacts = poster.contact_tokens_in(caption, slugs)
                 if errors:
                     problems[f"moments.{key}.caption"] = errors[0]
+                elif contacts:
+                    problems[f"moments.{key}.caption"] = (
+                        "A caption is shared in public, so it cannot show an email address or phone number "
+                        f"({', '.join('{{' + t + '}}' for t in contacts)})."
+                    )
                 else:
                     out[key]["caption"] = caption
     if problems:
@@ -98,10 +109,10 @@ async def get_settings(session: SessionDep, user: ClubAuth, event_id: int) -> di
 
 @router.put("/posters/settings", summary="Switch posters on or off; the moments' phrases and captions; the formats")
 async def put_settings(session: SessionDep, user: ClubAuth, event_id: int, body: SettingsBody) -> dict:
-    await event_designs._event_for_editing(session, user, event_id)
+    event = await event_designs._event_for_editing(session, user, event_id)
     row = await session.scalar(select(PosterSettings).where(PosterSettings.event_id == event_id).with_for_update())
     current = mom.moments_of(row)
-    moments = _checked_moments(current, body.moments or {}) if body.moments is not None else current
+    moments = _checked_moments(current, body.moments or {}, getattr(event, "additional_details", None)) if body.moments is not None else current
     if body.formats is not None:
         formats = [f for f in poster.ORDER if f in set(body.formats)]
         if not formats or any(f not in poster.FORMATS for f in body.formats):
@@ -151,7 +162,7 @@ async def put_layout(session: SessionDep, user: ClubAuth, event_id: int, body: d
     event = await event_designs._event_for_editing(session, user, event_id)
     v, fmt = designs.checked_variant(variant), designs.checked_format(format)
     layout, warnings = designs.checked(body.get("layout") if isinstance(body.get("layout"), dict) else body, fmt,
-                                       prefixes=event_designs._prefixes_for(event))
+                                       prefixes=event_designs._prefixes_for(event), event=event)
     await designs.save(session, event, v, {fmt: layout}, user_id=user.id)
     await session.commit()
     return {**designs.board(event, v, fmt, await designs.rows_of(session, event.id)), "warnings": warnings}
@@ -198,7 +209,7 @@ async def apply_starter(session: SessionDep, user: ClubAuth, event_id: int, body
     found = {}
     for fmt, layout in poster.starter_formats(body.starter_id).items():
         if fmt in poster.FORMATS and isinstance(layout, dict):
-            found[fmt], _ = designs.checked(layout, fmt, prefixes=event_designs._prefixes_for(event))
+            found[fmt], _ = designs.checked(layout, fmt, prefixes=event_designs._prefixes_for(event), event=event)
     await designs.save(session, event, v, found, user_id=user.id, starter=body.starter_id)
     await session.commit()
     return await designs.variants_out(session, event)
@@ -216,7 +227,7 @@ async def preview(session: SessionDep, user: ClubAuth, event_id: int, body: Prev
     v, fmt = designs.checked_variant(variant), designs.checked_format(format)
     rows = await designs.rows_of(session, event.id)
     if body.layout is not None:
-        layout, _ = designs.checked(body.layout, fmt, prefixes=event_designs._prefixes_for(event))
+        layout, _ = designs.checked(body.layout, fmt, prefixes=event_designs._prefixes_for(event), event=event)
         resolved = designs.Resolved(layout, v, 0)
     else:
         b = designs.board(event, v, fmt, rows)
