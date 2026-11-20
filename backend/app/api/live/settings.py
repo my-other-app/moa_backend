@@ -7,6 +7,7 @@ The defaults are the room as it has always been, so a quiz or a poll nobody
 edited behaves exactly as before. CONTRACT.md sections 3 and 7 are the
 reference for every field here.
 """
+
 from __future__ import annotations
 
 import copy
@@ -270,7 +271,14 @@ def clean_question(data: dict) -> dict:
         st["order_rule"] = _one_q(data.get("order_rule") or "all", ("all", "partial"), "order_rule")
     else:  # poll
         options = _options(data.get("options"))
-    return {"prompt": prompt, "options": options, "correct_key": correct_key, "seconds": seconds, "kind": None if kind == scoring.SINGLE else kind, "settings": st or None}
+    return {
+        "prompt": prompt,
+        "options": options,
+        "correct_key": correct_key,
+        "seconds": seconds,
+        "kind": None if kind == scoring.SINGLE else kind,
+        "settings": st or None,
+    }
 
 
 def _one_q(v, allowed, field):
@@ -313,8 +321,6 @@ def check_response(question: dict, body: dict) -> dict:
         return {"option_key": k}
     if kind == scoring.MULTI:
         ks = body.get("option_keys")
-        if ks is None and isinstance(body.get("option_key"), str):
-            ks = [body["option_key"]]
         if not isinstance(ks, list) or not ks or len(set(ks)) != len(ks) or any(k not in keys for k in ks):
             raise bad("Pick one or more of the answers.")
         return {"option_keys": [k for k in keys if k in ks]}
@@ -378,7 +384,9 @@ def clean_poll_settings(kind: str, options: list, merged: dict) -> dict:
     if out.get("scale") not in (5, 10) or (kind != "rating" and out.get("scale") != 5):
         raise _p_bad("scale", "A rating is out of 5 or out of 10.")
     for field, allowed in (
-        ("style", ("stars", "numbers")), ("results", ("live", "closed")), ("show", ("both", "percent", "count")),
+        ("style", ("stars", "numbers")),
+        ("results", ("live", "closed")),
+        ("show", ("both", "percent", "count")),
         ("chart", ("bar", "column", "donut", "cloud")),
     ):
         if out.get(field) not in allowed:
@@ -417,4 +425,3 @@ def poll_needs_update(kind: str, st: dict) -> bool:
 def poll_results_hidden(st: dict, status: str) -> bool:
     """Whether guests see the results now."""
     return bool(st.get("hide_results")) or (st.get("results") == "closed" and status == "live")
-

@@ -10,6 +10,7 @@ one that reads (WCAG 2.1 AA, 4.5:1), and refuses an accent the room could
 not see on its background (3:1). An event that never saved a theme is drawn
 as it always was: `custom` is false and the renderers keep their own look.
 """
+
 from __future__ import annotations
 
 import copy
@@ -66,7 +67,7 @@ def _channel(c: int) -> float:
 
 def luminance(hex_: str) -> float:
     h = hex_.lstrip("#")
-    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    r, g, b = (int(h[i : i + 2], 16) for i in (0, 2, 4))
     return 0.2126 * _channel(r) + 0.7152 * _channel(g) + 0.0722 * _channel(b)
 
 
@@ -80,6 +81,7 @@ def text_on(*fills: str) -> Optional[str]:
     """The text colour that reads on every one of `fills`: the better of white
     and the ink when it reaches AA on all, else black or white if one does;
     None when nothing does (a gradient from light to dark)."""
+
     def worst(c: str) -> float:
         return min(contrast(c, f) for f in fills)
 

@@ -18,6 +18,7 @@ With nothing set (P = 1000, linear speed with half the points on speed) a
 right answer is int(500.0 + 500.0 * f): the same floating-point expression
 the room has always used, so every score is the same as before.
 """
+
 from __future__ import annotations
 
 import math
@@ -221,7 +222,14 @@ class Scored:
 
 
 def score_answer(
-    *, question: dict, response: dict, scoring: dict, elapsed: float, streak_before: int, streak_continues: bool, total_before: int,
+    *,
+    question: dict,
+    response: dict,
+    scoring: dict,
+    elapsed: float,
+    streak_before: int,
+    streak_continues: bool,
+    total_before: int,
 ) -> Scored:
     """Everything one answer does to the player's score.
 

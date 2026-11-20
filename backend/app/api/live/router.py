@@ -337,7 +337,6 @@ def _slug(title: str) -> str:
 
 
 async def _sheet(rows: list, headers: list, name: str, fmt: str):
-    import csv
     import io
 
     from app.core.utils import csv_safe, spreadsheet
@@ -369,7 +368,10 @@ async def join_quiz(request: Request, session: SessionDep, body: JoinIn, user: O
     person = room.person_key(user, body.player_key or request.headers.get(service.VOTER_HEADER))
     limits.check(request, "join", person)
     out = await service.join_quiz(session, body.code, body.name, person=person, team=body.team, user=user)
-    return JoinOut(**out)
+    if _v2(request):
+        return JoinOut(**out)
+    # A client from before this release: today's fields.
+    return JSONResponse(JoinOut(**out).model_dump(mode="json", exclude={"team", "tag"}), status_code=201)
 
 
 @public_router.get("/events/{event_id}/live/quiz/play", response_model=PlayerState, summary="The player's view of the quiz right now")
@@ -521,7 +523,7 @@ async def respond(request: Request, session: SessionDep, event_id: int, poll_id:
     limits.check(request, "respond", key)
     v2 = _v2(request)
     out = await service.respond(session, event_id, poll_id, key, body.value, values=body.values, order=body.order, name=body.name, v2=v2)
-    return (PollOutV2 if v2 else PollOut)(**out)
+    return JSONResponse((PollOutV2 if v2 else PollOut)(**out).model_dump(mode="json"))
 
 
 # --- feedback ----------------------------------------------------------------------

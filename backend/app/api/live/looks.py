@@ -7,6 +7,7 @@ links. Saving it, deleting a picture it uses or changing the screen's
 controls forgets that snapshot and tells every stream of the room, the quiz
 and the screen at once (room.room_changed, room.quiz_changed).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -49,9 +50,14 @@ def now_utc() -> datetime:
 def media_out(m: LiveMedia) -> dict:
     img = m.image if isinstance(m.image, dict) else {}
     return {
-        "id": str(m.id), "kind": m.kind,
-        "thumbnail": img.get("thumbnail"), "medium": img.get("medium"), "large": img.get("large"), "original": img.get("original"),
-        "width": m.width, "height": m.height,
+        "id": str(m.id),
+        "kind": m.kind,
+        "thumbnail": img.get("thumbnail"),
+        "medium": img.get("medium"),
+        "large": img.get("large"),
+        "original": img.get("original"),
+        "width": m.width,
+        "height": m.height,
     }
 
 
@@ -60,9 +66,14 @@ def _club_logo(club) -> Optional[dict]:
     if not isinstance(logo, dict) or not logo.get("original"):
         return None
     return {
-        "id": None, "kind": "logo",
-        "thumbnail": logo.get("thumbnail") or logo.get("original"), "medium": logo.get("medium") or logo.get("original"),
-        "large": logo.get("large") or logo.get("original"), "original": logo.get("original"), "width": None, "height": None,
+        "id": None,
+        "kind": "logo",
+        "thumbnail": logo.get("thumbnail") or logo.get("original"),
+        "medium": logo.get("medium") or logo.get("original"),
+        "large": logo.get("large") or logo.get("original"),
+        "original": logo.get("original"),
+        "width": None,
+        "height": None,
     }
 
 
@@ -195,7 +206,9 @@ async def put_theme(session, event: Events, body: dict) -> dict:
     saved, verdict, resolved = await _checked(session, event, body)
     if verdict.errors:
         first = verdict.errors[0]
-        raise CustomHTTPException(422, message=first["message"], error_code="THEME_CONTRAST", errors={k: v for k, v in first.items() if k not in ("message", "code")})
+        raise CustomHTTPException(
+            422, message=first["message"], error_code="THEME_CONTRAST", errors={k: v for k, v in first.items() if k not in ("message", "code")}
+        )
     row = await session.get(LiveThemes, event.id)
     if row is None:
         row = LiveThemes(event_id=event.id)
@@ -285,10 +298,14 @@ async def put_control(session, event: Events, change: dict) -> dict:
 async def agenda(session, event_id: int, now: Optional[datetime] = None, limit: int = 6) -> list:
     """The item running now and the next ones."""
     now = now or now_utc()
-    rows = (await session.scalars(
-        select(AgendaItems).where(AgendaItems.event_id == event_id, AgendaItems.starts_at >= now - timedelta(hours=12))
-        .order_by(AgendaItems.starts_at, AgendaItems.sort_order).limit(40)
-    )).all()
+    rows = (
+        await session.scalars(
+            select(AgendaItems)
+            .where(AgendaItems.event_id == event_id, AgendaItems.starts_at >= now - timedelta(hours=12))
+            .order_by(AgendaItems.starts_at, AgendaItems.sort_order)
+            .limit(40)
+        )
+    ).all()
     started = [r for r in rows if r.starts_at <= now]
     current = [r for r in started if r.ends_at is not None and r.ends_at > now]
     if not current and started and started[-1].ends_at is None:
@@ -296,7 +313,12 @@ async def agenda(session, event_id: int, now: Optional[datetime] = None, limit: 
     items = current + [r for r in rows if r.starts_at > now]
     return [
         {
-            "id": str(r.id), "title": r.title, "starts_at": r.starts_at, "ends_at": r.ends_at, "speaker": r.speaker, "location": r.location,
+            "id": str(r.id),
+            "title": r.title,
+            "starts_at": r.starts_at,
+            "ends_at": r.ends_at,
+            "speaker": r.speaker,
+            "location": r.location,
             "now": r in current,
         }
         for r in items[:limit]
@@ -304,10 +326,13 @@ async def agenda(session, event_id: int, now: Optional[datetime] = None, limit: 
 
 
 async def sponsors(session, event_id: int) -> list:
-    rows = (await session.scalars(
-        select(EventPartners).where(EventPartners.event_id == event_id, EventPartners.kind == "sponsor", EventPartners.is_deleted == False)  # noqa: E712
-        .order_by(EventPartners.position, EventPartners.id)
-    )).all()
+    rows = (
+        await session.scalars(
+            select(EventPartners)
+            .where(EventPartners.event_id == event_id, EventPartners.kind == "sponsor", EventPartners.is_deleted == False)  # noqa: E712
+            .order_by(EventPartners.position, EventPartners.id)
+        )
+    ).all()
     out = []
     for p in rows:
         logo = p.logo if isinstance(p.logo, dict) else None
@@ -317,4 +342,3 @@ async def sponsors(session, event_id: int) -> list:
 
 def forget_for_tests() -> None:
     themes.clear()
-

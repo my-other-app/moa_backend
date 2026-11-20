@@ -12,25 +12,98 @@ The list is short and plain on purpose; it is a courtesy for the room, not
 a moderation system. Organisers who want names they can vouch for use
 registered names (`players.names: registered`).
 """
+
 from __future__ import annotations
 
 import re
 import unicodedata
 
 #: Whole words only.
-_WORDS = frozenset({
-    "anal", "anus", "arse", "ass", "bitch", "boob", "boobs", "cock", "crap", "cum", "cunt", "dick", "dildo", "fag", "fuck", "fucker",
-    "hoe", "jizz", "kike", "nazi", "nigga", "nigger", "penis", "porn", "prick", "pussy", "rape", "rapist", "retard", "sex",
-    "shit", "slut", "spic", "tit", "tits", "twat", "vagina", "wank", "wanker", "whore",
-    # Common transliterated abuse in the clubs' languages.
-    "bhosdi", "bhosdike", "chutiya", "chutiye", "gandu", "harami", "lavda", "lauda", "madarchod", "behenchod", "bhenchod",
-    "randi", "thayoli", "pooru", "myre", "kunna", "punda", "thevidiya",
-})
+_WORDS = frozenset(
+    {
+        "anal",
+        "anus",
+        "arse",
+        "ass",
+        "bitch",
+        "boob",
+        "boobs",
+        "cock",
+        "crap",
+        "cum",
+        "cunt",
+        "dick",
+        "dildo",
+        "fag",
+        "fuck",
+        "fucker",
+        "hoe",
+        "jizz",
+        "kike",
+        "nazi",
+        "nigga",
+        "nigger",
+        "penis",
+        "porn",
+        "prick",
+        "pussy",
+        "rape",
+        "rapist",
+        "retard",
+        "sex",
+        "shit",
+        "slut",
+        "spic",
+        "tit",
+        "tits",
+        "twat",
+        "vagina",
+        "wank",
+        "wanker",
+        "whore",
+        # Common transliterated abuse in the clubs' languages.
+        "bhosdi",
+        "bhosdike",
+        "chutiya",
+        "chutiye",
+        "gandu",
+        "harami",
+        "lavda",
+        "lauda",
+        "madarchod",
+        "behenchod",
+        "bhenchod",
+        "randi",
+        "thayoli",
+        "pooru",
+        "myre",
+        "kunna",
+        "punda",
+        "thevidiya",
+    }
+)
 #: Long enough to be refused inside another word too.
-_INSIDE = frozenset({
-    "fuck", "cunt", "nigger", "nigga", "bitch", "whore", "slut", "rapist", "madarchod", "behenchod", "bhenchod", "bhosdike", "chutiya",
-    "thayoli", "thevidiya", "wanker", "dildo", "pussy",
-})
+_INSIDE = frozenset(
+    {
+        "fuck",
+        "nigger",
+        "nigga",
+        "bitch",
+        "whore",
+        "slut",
+        "rapist",
+        "madarchod",
+        "behenchod",
+        "bhenchod",
+        "bhosdike",
+        "chutiya",
+        "thayoli",
+        "thevidiya",
+        "wanker",
+        "dildo",
+        "pussy",
+    }
+)
 
 _LEET = str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "8": "b", "9": "g", "@": "a", "$": "s", "!": "i", "|": "i", "+": "t"})
 

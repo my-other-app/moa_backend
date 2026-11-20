@@ -32,6 +32,7 @@ values cannot be dropped from a type in Postgres; they stay, unused.
 Revision ID: live_custom
 Revises: stability_indexes
 """
+
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import UUID
@@ -68,7 +69,10 @@ COLUMNS = (
 INDEXES = (
     ("ix_live_quizzes_event_order", "INDEX CONCURRENTLY IF NOT EXISTS ix_live_quizzes_event_order ON live_quizzes (event_id, sort_order)"),
     ("uq_live_quizzes_one_live", "UNIQUE INDEX CONCURRENTLY IF NOT EXISTS uq_live_quizzes_one_live ON live_quizzes (event_id) WHERE status = 'live'"),
-    ("ix_live_quiz_players_rank", "INDEX CONCURRENTLY IF NOT EXISTS ix_live_quiz_players_rank ON live_quiz_players (quiz_id, score DESC, saved_ms DESC, created_at)"),
+    (
+        "ix_live_quiz_players_rank",
+        "INDEX CONCURRENTLY IF NOT EXISTS ix_live_quiz_players_rank ON live_quiz_players (quiz_id, score DESC, saved_ms DESC, created_at)",
+    ),
     ("ix_live_media_event", "INDEX CONCURRENTLY IF NOT EXISTS ix_live_media_event ON live_media (event_id, created_at)"),
 )
 
@@ -82,9 +86,7 @@ _INVALID = sa.text(
     "JOIN pg_namespace n ON n.oid = c.relnamespace "
     "WHERE c.relname = :name AND n.nspname = current_schema() AND NOT (i.indisvalid AND i.indisready)"
 )
-_HAS_COLUMN = sa.text(
-    "SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = :t AND column_name = :c"
-)
+_HAS_COLUMN = sa.text("SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = :t AND column_name = :c")
 _HAS_TABLE = sa.text("SELECT 1 FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = :t")
 
 

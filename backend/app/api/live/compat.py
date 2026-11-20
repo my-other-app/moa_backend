@@ -6,6 +6,7 @@ always did, so a console tab left open across the deploy, and every test of
 the old console, sees the room as before. Each function takes the v2 body
 (already JSON-ready) and keeps today's fields only.
 """
+
 from __future__ import annotations
 
 from typing import Optional
