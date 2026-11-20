@@ -78,6 +78,8 @@ class TalkOut(CustomBaseModel):
 class ClubOut(CustomBaseModel):
     name: str
     slug: str
+    #: The club's logo (its thumbnail), or null when it has none.
+    logo: Optional[str] = None
 
 
 class Achievements(CustomBaseModel):

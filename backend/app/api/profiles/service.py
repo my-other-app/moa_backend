@@ -148,8 +148,10 @@ async def _achievements(session, user_id: int, settings: dict) -> dict:
             {"event_name": t["event_name"], "title": t.get("talk_title"), "event_slug": t["slug"]} for t in talks[:ACHIEVEMENTS_LISTED]
         ]
     if settings["show_clubs"]:
-        rows = (await session.execute(
-            select(Clubs.name, Clubs.slug)
+        # The whole row: an image column selected on its own cannot be a
+        # statement's cache key (its type holds a dict of sizes).
+        clubs = (await session.scalars(
+            select(Clubs)
             .join(ClubUsersLink, ClubUsersLink.club_id == Clubs.id)
             .where(
                 ClubUsersLink.user_id == user_id, ClubUsersLink.is_following == True, ClubUsersLink.is_deleted == False,  # noqa: E712
@@ -158,8 +160,19 @@ async def _achievements(session, user_id: int, settings: dict) -> dict:
             .order_by(Clubs.name)
             .limit(ACHIEVEMENTS_LISTED)
         )).all()
-        out["clubs"] = [{"name": name, "slug": slug} for name, slug in rows]
+        # Each with its logo (the small size: a row's picture), or null.
+        out["clubs"] = [{"name": c.name, "slug": c.slug, "logo": _logo_url(c.logo)} for c in clubs]
     return out
+
+
+def _logo_url(logo) -> Optional[str]:
+    """A club logo's link for a list: the thumbnail, else a larger size."""
+    if not isinstance(logo, dict):
+        return None
+    for size in ("thumbnail", "medium", "original"):
+        if logo.get(size):
+            return logo[size]
+    return None
 
 
 # ─── What a viewer sees ─────────────────────────────────────────────────
