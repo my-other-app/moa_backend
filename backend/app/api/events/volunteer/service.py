@@ -381,14 +381,30 @@ async def is_volunteer(session: AsyncSession, user_id: int, event_id: int):
 
 
 async def get_volunteer_events(session: AsyncSession, user_id: int):
+    """The events this user volunteers at, as the gate counts them
+    (checkins.gate_auth.actor_for, is_volunteer): an approved place on the
+    event itself, or a club-wide place in the club running it or in a club
+    co-hosting it. Each event once, newest first.
+
+    It joined on the place's event, so a club-wide place (no event) matched
+    nothing: those volunteers had no event to open in the app, though the
+    gate let them in. A club-wide place lists its clubs' events whose door
+    can open (published or live), not their drafts or past ones."""
+    from app.api.closeout.models import DOOR_OPEN_STATUSES
+    from app.api.cohosts.models import ACCEPTED, EventCohosts
+
+    theirs = (Volunteer.user_id == user_id, Volunteer.is_deleted == False, Volunteer.is_approved == True)  # noqa: E712
+    on_event = select(Volunteer.id).where(*theirs, Volunteer.event_id == Events.id).exists()
+    # The listed event's own co-hosts: correlated by hand, two levels down.
+    cohosts = select(EventCohosts.club_id).where(EventCohosts.event_id == Events.id, EventCohosts.status == ACCEPTED).correlate(Events)
+    club_wide = select(Volunteer.id).where(
+        *theirs, Volunteer.event_id.is_(None), or_(Volunteer.club_id == Events.club_id, Volunteer.club_id.in_(cohosts)),
+    ).exists()
     query = (
         select(Events)
-        .join(Volunteer, Volunteer.event_id == Events.id)
         .join(Clubs, Clubs.id == Events.club_id)
-        .where(
-            Volunteer.user_id == user_id,
-            or_(Events.id == Volunteer.event_id, Clubs.id == Volunteer.club_id),
-        )
+        .where(Events.is_deleted == False, or_(on_event, and_(Events.lifecycle.in_(DOOR_OPEN_STATUSES), club_wide)))  # noqa: E712
         .options(joinedload(Events.club))
+        .order_by(Events.event_datetime.desc(), Events.id.desc())
     )
-    return await session.scalars(query)
+    return list(await session.scalars(query))
