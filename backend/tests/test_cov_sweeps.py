@@ -159,6 +159,13 @@ def _account_sweep_tick(monkeypatch):
     monkeypatch.setattr(settings, "ACCOUNT_SWEEP_SECONDS", TICK)
 
 
+def _posters_tick(monkeypatch):
+    """The posters loop takes no interval: its hourly wait is the one that ends the pass."""
+    from app.api.guest_posters import sweep
+
+    monkeypatch.setattr(sweep, "EVERY_SECONDS", TICK)
+
+
 def _search_tick(monkeypatch):
     from app.api.search import sync
 
@@ -211,6 +218,9 @@ LOOPS = [
     Loop("support desk", "app.api.support.sweep", "sweep_loop", lock_keys.SUPPORT_SWEEP, [("app.api.support.sweep", "sweep")]),
     # Outgoing webhooks: changes and deliveries past 30 days, rotated secrets' overlaps (app/api/webhooks_out).
     Loop("webhooks", "app.api.webhooks_out.sweep", "sweep_loop", lock_keys.WEBHOOKS_SWEEP, [("app.api.webhooks_out.sweep", "purge")]),
+    # Guests' poster photos and renders past their retention, hourly (app/api/guest_posters).
+    Loop("posters", "app.api.guest_posters.sweep", "sweep_loop", lock_keys.POSTERS_SWEEP, [("app.api.guest_posters.sweep", "sweep")],
+         kwargs={}, setup=_posters_tick),
     Loop("popularity", "app.api.discover.counters", "check_loop", lock_keys.DISCOVER_POPULARITY, [("app.api.discover.popularity", "refresh")]),
     Loop("counters", "app.api.discover.counters", "check_loop", lock_keys.DISCOVER_COUNTERS,
          [("app.api.discover.counters", "reconcile"), ("app.api.discover.counters", "reconcile_more")], runs=("counters", "counters-posts")),
@@ -290,6 +300,7 @@ async def test_each_sweeps_own_entry_skips_while_another_process_holds_its_lock(
     from app.api.club_domains import sweep as domains
     from app.api.club_whatsapp import sweep as whatsapp
     from app.api.discover import counters, popularity
+    from app.api.guest_posters import sweep as posters
     from app.api.search import sync
     from app.api.sites import sweep as sites
     from app.api.store import sweep as store
@@ -301,6 +312,7 @@ async def test_each_sweeps_own_entry_skips_while_another_process_holds_its_lock(
         (sites.SITES_LOCK, lambda: sites.run_refresh(session), None),
         (domains.SWEEP_LOCK, lambda: domains.run_sweep(session), None),
         (whatsapp.SWEEP_LOCK, lambda: whatsapp.run_sweep(session), None),
+        (posters.SWEEP_LOCK, lambda: posters.run(session), None),
         (popularity.LOCK, lambda: popularity.refresh_if_free(session), None),
         (counters.COUNTERS_LOCK, lambda: counters.run_more_if_due(session), None),
         (sync.SEARCH_LOCK, lambda: sync.tick(session), {}),

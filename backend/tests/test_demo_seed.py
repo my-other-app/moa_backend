@@ -118,6 +118,9 @@ async def test_every_model_table_is_classified(session):
     # apps' own registrations with them.
     for t in MCP_TABLES:
         assert reset.CLASSIFICATION[t] == reset.WIPE, t
+    # Posters: an event's and its guests', photos' rows included.
+    for t in POSTER_TABLES:
+        assert reset.CLASSIFICATION[t] == reset.WIPE, t
 
 
 #: The tables a connected AI assistant leaves (app/api/mcp).
@@ -168,7 +171,7 @@ async def _populate(session, make_user, make_club, make_event, make_registration
     person = await make_user(email="someone@example.com")
     owner, club = await make_club(name="Real Club", email="real-club@example.com")
     event = await make_event(club=club, created_by=owner, name="Real Night")
-    await make_registration(event=event, user=person)
+    registration = await make_registration(event=event, user=person)
     session.add(UserAvatars(name="Fox", image="avatars/fox.png"))
     session.add(EventCategories(name="Admin type", created_by_id=admin.id))
     # Sign-in tries: the admin's (kept), and one at an address with no
@@ -184,8 +187,27 @@ async def _populate(session, make_user, make_club, make_event, make_registration
         "VALUES ('t:1', 0, 'desk', 'desk', 100, 0, 'INR', :c, :e, 'test', '1', now(), now())"
     ), {"c": club.id, "e": event.id})
     await _connect_assistant(session, club=club, owner=owner, event=event)
+    await _make_posters(session, event=event, registration=registration, by=admin)
     await session.commit()
     return SimpleNamespace(admin=admin, person=person, owner=owner, club=club, event=event)
+
+
+#: The tables an event's "I'm attending" posters leave (app/api/guest_posters).
+POSTER_TABLES = ("poster_settings", "poster_designs", "guest_posters")
+
+
+async def _make_posters(session, *, event, registration, by):
+    """An event's posters switched on with a design, and one guest's poster.
+    Last saved by `by`, an admin who stays: rows that go point at a row that
+    stays, as well as at the event and the registration that go."""
+    from app.api.guest_posters.models import GuestPosters, PosterDesigns, PosterSettings
+
+    session.add(PosterSettings(event_id=event.id, enabled=True, updated_by=by.id))
+    session.add(PosterDesigns(event_id=event.id, variant="default", layouts={}, updated_by=by.id))
+    await session.flush()
+    session.add(GuestPosters(event_id=event.id, registration_id=registration.id,
+                             photo_key=f"guest_posters/{event.id}/{registration.id}/photo.jpg"))
+    await session.flush()
 
 
 async def _count(session, table, where="TRUE"):
@@ -224,7 +246,8 @@ async def test_reset_keeps_admins_and_reference_data_and_wipes_the_rest(session,
         assert await _count(session, t) == n, t
     assert await _count(session, "event_categories", "created_by_id IS NULL") == shipped_types
     assert await _count(session, "event_categories", f"created_by_id = {w.admin.id}") == 1
-    for t in ("clubs", "events", "event_registrations_link", "ledger_entries", "organizations", "user_profiles", "jobs", *MCP_TABLES):
+    for t in ("clubs", "events", "event_registrations_link", "ledger_entries", "organizations", "user_profiles", "jobs",
+              *MCP_TABLES, *POSTER_TABLES):
         assert await _count(session, t) == 0, t
     # The ledger's guard is back on.
     states = dict((await session.execute(text(
