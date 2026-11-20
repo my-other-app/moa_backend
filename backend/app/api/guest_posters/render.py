@@ -240,6 +240,11 @@ async def _render_job(payload: dict) -> None:
                 made_at=sa.func.coalesce(GuestPosters.made_at, _now()),
             ).execution_options(synchronize_session=False)
         )
+        if poster_row.made_at is None:
+            # The first poster drawn: the quest's poster task (app/api/quests), when the event has one on.
+            from app.api.quests import signals as quests
+
+            await quests.touch(session, guest.event.id, ("poster_made",), registration_id=poster_row.registration_id)
         await session.commit()
         if old and old != key and photos.is_ours(old, guest.event.id, poster_row.registration_id):
             try:

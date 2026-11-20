@@ -100,6 +100,8 @@ async def list_doors(session, event: Events) -> list[dict]:
             "event_id": d.event_id,
             "name": d.name,
             "kind": d.kind.value,
+            # None for an entrance; "station" or "swag_desk" (app/api/quests).
+            "purpose": d.purpose,
             "sort_order": d.sort_order,
             "active": d.active,
             "volunteers": [{"id": vid, "name": name or email} for did, vid, name, email in team if did == d.id],
@@ -111,7 +113,7 @@ async def list_doors(session, event: Events) -> list[dict]:
     ]
 
 
-async def create_door(session, event: Events, *, name: str, kind: DoorKind) -> Doors:
+async def create_door(session, event: Events, *, name: str, kind: DoorKind, purpose: Optional[str] = None) -> Doors:
     name = normalize(name)
     if not name:
         raise CustomHTTPException(422, message="Name the door — “Gate A”, “Loading bay”, “Front desk”.", errors={"fields": {"name": "Name the door."}})
@@ -119,7 +121,7 @@ async def create_door(session, event: Events, *, name: str, kind: DoorKind) -> D
     if clash is not None:
         raise CustomHTTPException(409, message=f"There is already a door called “{clash.name}”.", errors={"fields": {"name": "Pick a different name."}})
     count = await session.scalar(select(func.count()).select_from(Doors).where(Doors.event_id == event.id)) or 0
-    door = Doors(id=uuid.uuid4(), event_id=event.id, name=name, kind=kind, sort_order=count, active=True)
+    door = Doors(id=uuid.uuid4(), event_id=event.id, name=name, kind=kind, sort_order=count, active=True, purpose=purpose or None)
     session.add(door)
     await _save_name(session, door)
     await session.commit()
@@ -139,8 +141,9 @@ async def update_door(session, event: Events, door_id, **changes) -> Doors:
         door.name = name
     if changes.get("kind") is not None:
         door.kind = DoorKind(changes["kind"])
-    if changes.get("active") is False and door.active:
-        others = await session.scalar(select(func.count()).select_from(Doors).where(Doors.event_id == event.id, Doors.active == True, Doors.id != door.id)) or 0
+    if changes.get("active") is False and door.active and door.purpose is None:
+        # At least one open entrance: a station or a swag desk admits nobody.
+        others = await session.scalar(select(func.count()).select_from(Doors).where(Doors.event_id == event.id, Doors.active == True, Doors.id != door.id, Doors.purpose.is_(None))) or 0
         if others == 0:
             raise CustomHTTPException(409, message="An event needs at least one open door. Add another before retiring this one.")
     if changes.get("active") is not None:

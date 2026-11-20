@@ -35,9 +35,11 @@ def item_out(m: MerchItems) -> dict:
         "photo_url": objects.photo_url(m.photo_key),
         "stock": m.stock, "collected": m.collected_count, "total": _total(m),
         "eligibility_field": m.eligibility_field, "eligibility_value": m.eligibility_value, "variant_field": m.variant_field,
-        "variants": [{"id": v.id, "label": v.label, "stock": v.stock, "collected": v.collected_count} for v in m.variants],
+        "variants": [{"id": v.id, "label": v.label, "stock": v.stock, "collected": v.collected_count, "reserved": v.reserved_count or 0} for v in m.variants],
         "sponsor": m.sponsor, "handout_rule": m.handout_rule, "manual_handed_out": m.manual_handed_out or 0,
         "handed_out": m.collected_count + (m.manual_handed_out or 0),
+        # Held for quest rewards (app/api/quests): the item's own and its sizes'.
+        "reserved": (m.reserved_count or 0) + sum(v.reserved_count or 0 for v in m.variants),
         "created_at": m.created_at,
     }
 
@@ -106,13 +108,24 @@ async def update_item(session, event: Events, item_id: UUID, body) -> dict:
         raise CustomHTTPException(422, message="Set both the field and the value, or neither.", error_code="MERCH_ELIGIBILITY_INCOMPLETE")
     if nxt["stock"] is not None and nxt["stock"] < m.collected_count:
         raise CustomHTTPException(422, message=f"{m.collected_count} have already been handed out, so stock cannot go below that.")
+    if nxt["stock"] is not None and m.reserved_count and nxt["stock"] < m.collected_count + (m.manual_handed_out or 0) + m.reserved_count:
+        raise CustomHTTPException(422, message=f"{m.reserved_count} are held for quest rewards, so stock cannot go below {m.collected_count + (m.manual_handed_out or 0) + m.reserved_count}.")
     for k in ("name", "photo_key", "sponsor", "handout_rule"):
         if k in data:
             setattr(m, k, data[k])
     for k, v in nxt.items():
         setattr(m, k, v)
     await session.commit()
+    await _stock_changed(session, event, m.id)
     return item_out(await _item(session, event, m.id))
+
+
+async def _stock_changed(session, event: Events, item_id) -> None:
+    """More stock (or a new size) for a quest reward: its waiting list moves (app/api/quests)."""
+    from app.api.quests import merch_link
+
+    if await merch_link.is_reward(session, item_id):
+        await merch_link.stock_changed(session, event, item_id)
 
 
 async def delete_item(session, event: Events, item_id: UUID, with_collections: bool = False) -> None:
@@ -120,6 +133,10 @@ async def delete_item(session, event: Events, item_id: UUID, with_collections: b
     out goes only when asked for explicitly, and takes its collections with
     it: the guests keep what they were given; the record of it is removed."""
     m = await _item(session, event, item_id)
+    from app.api.quests import merch_link
+
+    if await merch_link.is_reward(session, m.id):
+        raise merch_link.refuse_reward("Remove it from the quest first.")
     if m.collected_count > 0 and not with_collections:
         raise CustomHTTPException(409, message=f"{m.collected_count} have already been handed out. Delete it with its collections, or set its stock to what was given instead.", error_code="ITEM_HAS_COLLECTIONS")
     await session.execute(delete(MerchCollections).where(MerchCollections.item_id == m.id))
@@ -135,6 +152,7 @@ async def add_variant(session, event: Events, item_id: UUID, body) -> dict:
         raise CustomHTTPException(409, message="A variant with that label exists.")
     session.add(MerchVariants(item_id=m.id, label=body.label, stock=body.stock))
     await session.commit()
+    await _stock_changed(session, event, m.id)
     return item_out(await _item(session, event, m.id))
 
 
@@ -153,10 +171,13 @@ async def update_variant(session, event: Events, item_id: UUID, variant_id: UUID
         raise CustomHTTPException(409, message="A variant with that label exists.")
     if data.get("stock") is not None and data["stock"] < v.collected_count:
         raise CustomHTTPException(422, message=f"{v.collected_count} have already been handed out in {v.label}, so stock cannot go below that.")
+    if data.get("stock") is not None and v.reserved_count and data["stock"] < v.collected_count + v.reserved_count:
+        raise CustomHTTPException(422, message=f"{v.reserved_count} are held for quest rewards in {v.label}, so stock cannot go below {v.collected_count + v.reserved_count}.")
     for k, val in data.items():
         if val is not None:
             setattr(v, k, val.strip() if isinstance(val, str) else val)
     await session.commit()
+    await _stock_changed(session, event, m.id)
     return item_out(await _item(session, event, m.id))
 
 
@@ -165,6 +186,8 @@ async def delete_variant(session, event: Events, item_id: UUID, variant_id: UUID
     v = _variant(m, variant_id)
     if v.collected_count > 0:
         raise CustomHTTPException(409, message=f"{v.collected_count} have already been handed out in {v.label}. Set its stock to what was given instead.")
+    if v.reserved_count:
+        raise CustomHTTPException(409, message=f"{v.reserved_count} in {v.label} are held for quest rewards. Set its stock instead.")
     await session.delete(v)
     await session.commit()
     return item_out(await _item(session, event, m.id))
@@ -233,8 +256,15 @@ async def status_for(session, event: Events, registration_id) -> dict:
     """What this guest is owed, item by item, from their own record."""
     reg = await registration_of(session, event, registration_id)
     collected = await _collected(session, reg.id)
+    from app.api.quests import merch_link
+
+    # A quest reward is owed by the guest's claim, never by the item's rule.
+    rewards = await merch_link.reward_items(session, event.id)
     rows = []
     for m in await rows_for(session, event.id):
+        if m.id in rewards:
+            rows.append(await merch_link.status_row(session, event, m, reg))
+            continue
         r = rules.resolve(m, reg, event, m.id in collected)
         can_pick = r.status in (rules.NO_VARIANT_VALUE, rules.NO_MATCHING_VARIANT)
         rows.append({
@@ -276,6 +306,11 @@ async def collect(session, event: Events, item_id: UUID, registration_id, actor:
     two people racing for the last unit cannot both take it."""
     m = await _item(session, event, item_id)
     reg = await registration_of(session, event, registration_id)
+    from app.api.quests import merch_link
+
+    if m.id in await merch_link.reward_items(session, event.id):
+        # A quest reward: the guest's claim is handed over (the swag desk's handover).
+        return await merch_link.collect(session, event, m, reg, actor, variant_label=variant_label, door_label=door_label)
     already = m.id in await _collected(session, reg.id)
     if variant_label and not already and m.variant_field:
         await _record_door_choice(session, event, m, reg, variant_label)
@@ -410,6 +445,10 @@ async def hand_out_by_hand(session, event: Events, item_id: UUID, delta: int) ->
     used to read the same count and both write it plus one, losing a piece
     or giving out one more than there was."""
     m = await _item(session, event, item_id)
+    from app.api.quests import merch_link
+
+    if delta > 0 and await merch_link.is_reward(session, m.id):
+        raise merch_link.refuse_reward("Hand quest rewards over at the swag desk.")
     total = _total(m)
     t = MerchItems.__table__
     if delta > 0:

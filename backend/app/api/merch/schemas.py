@@ -89,6 +89,8 @@ class VariantOut(BaseModel):
     label: str
     stock: int
     collected: int
+    # Held for quest rewards (app/api/quests).
+    reserved: int = 0
 
 
 class MerchItemOut(BaseModel):
@@ -108,6 +110,8 @@ class MerchItemOut(BaseModel):
     handout_rule: Optional[str] = None
     manual_handed_out: int = 0
     handed_out: int = 0
+    # Held for quest rewards, the item's own and its sizes' (app/api/quests).
+    reserved: int = 0
     created_at: Optional[datetime]
 
 

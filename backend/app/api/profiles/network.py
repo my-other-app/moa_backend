@@ -182,6 +182,12 @@ async def save(session, viewer: Users, body) -> dict:
         await notices.note_save(session, person_id=target.id, saver_id=viewer.id, event_id=event.id if event is not None else None)
     if new_encounter and event is not None:
         await recap.schedule(session, event)
+        if body.method == "qr":
+            # The quest's "meet people" task, both ways (app/api/quests), when the event has one on.
+            from app.api.quests import signals as quests
+
+            await quests.touch(session, event.id, ("network",), user_id=viewer.id)
+            await quests.touch(session, event.id, ("network",), user_id=target.id)
     await session.commit()
 
     item = (await people_out(session, viewer.id, [np_id], all_encounters=False))[0]

@@ -61,12 +61,20 @@ class Doors(AbstractSQLModel, TimestampsMixin):
     link_prefix = Column(String(8), nullable=True)
     link_can_walkup = Column(Boolean, nullable=False, default=False)
     link_expires_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    # What the door is for: none for an entrance (every door made before
+    # quests, and any made without one); "station" (a scan records a visit,
+    # app/api/quests) or "swag_desk" (a scan shows the guest's rewards). A
+    # station or a swag desk never admits anyone. Set when it is made.
+    purpose = Column(String(16), nullable=True)
 
     event = relationship("Events")
 
     # One door per name on an event, whatever the case: a door is found by
     # lower(name) ("gate a" is "Gate A"), so that is what is unique.
-    __table_args__ = (sa.Index("uq_doors_event_lower_name", event_id, sa.func.lower(name), unique=True),)
+    __table_args__ = (
+        sa.Index("uq_doors_event_lower_name", event_id, sa.func.lower(name), unique=True),
+        sa.CheckConstraint("purpose IS NULL OR purpose IN ('station', 'swag_desk')", name="ck_doors_purpose"),
+    )
 
 
 class CheckIns(AbstractSQLModel, TimestampsMixin):

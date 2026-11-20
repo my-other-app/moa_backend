@@ -53,7 +53,7 @@ async def list_doors(session: SessionDep, user: ClubAuth, event_id: int) -> list
 @router.post("/doors", summary="A new door")
 async def create_door(session: SessionDep, user: ClubAuth, event_id: int, body: DoorCreate) -> DoorOut:
     event = await deliveries.event_for_club(session, user, event_id)
-    door = await doors_mod.create_door(session, event, name=body.name, kind=DoorKind(body.kind))
+    door = await doors_mod.create_door(session, event, name=body.name, kind=DoorKind(body.kind), purpose=body.purpose)
     return DoorOut(**next(d for d in await doors_mod.list_doors(session, event) if d["id"] == door.id))
 
 

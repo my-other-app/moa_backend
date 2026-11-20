@@ -795,9 +795,25 @@ async def follow_club(session: AsyncSession, club_id: int, user_id: int, trackin
     row_id = await session.scalar(stmt)
     if row_id is None:
         raise CustomHTTPException(409, "already following")
+    await _quests_follow(session, club_id, user_id)
     await session.commit()
     _forget_for_you(user_id)
     return await _link_row(session, row_id)
+
+
+async def _quests_follow(session: AsyncSession, club_id: int, user_id: int) -> None:
+    """A follow ticks the "follow the club" task of the club's events with a
+    quest on that the person is registered for (app/api/quests). One indexed
+    read when the club has none on."""
+    from app.api.quests.models import Quests
+    from app.api.quests import signals as quests
+
+    events = list((await session.scalars(
+        select(Quests.event_id).join(Events, Events.id == Quests.event_id)
+        .where(Quests.enabled == True, Events.club_id == club_id, Events.is_deleted == False)  # noqa: E712
+    )).all())
+    for event_id in events:
+        await quests.touch(session, event_id, ("follow_club",), user_id=user_id)
 
 
 async def following_row(session: AsyncSession, club_id: int, user_id: int):

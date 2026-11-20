@@ -34,6 +34,10 @@ class MerchItems(AbstractSQLModel, TimestampsMixin):
     sponsor = Column(String(120), nullable=True)
     handout_rule = Column(String(40), nullable=True)
     manual_handed_out = Column(Integer, nullable=False, default=0)
+    # Units held for quest rewards (app/api/quests/stock.py): for an item
+    # without sizes, and for a sized item's claims whose size isn't chosen.
+    # Always 0 on an item that is not a quest reward.
+    reserved_count = Column(Integer, nullable=False, default=0, server_default="0")
 
     variants = relationship("MerchVariants", back_populates="item", cascade="all, delete-orphan", order_by="MerchVariants.created_at")
 
@@ -47,6 +51,8 @@ class MerchVariants(AbstractSQLModel, TimestampsMixin):
     label = Column(String(40), nullable=False)
     stock = Column(Integer, nullable=False)
     collected_count = Column(Integer, nullable=False, default=0, server_default="0")
+    # Units of this size held for quest rewards (app/api/quests/stock.py).
+    reserved_count = Column(Integer, nullable=False, default=0, server_default="0")
 
     item = relationship("MerchItems", back_populates="variants")
 

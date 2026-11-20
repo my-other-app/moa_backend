@@ -202,6 +202,10 @@ async def admit(session, event: Events, reg: EventRegistrationsLink, *, actor: G
         reg.volunteer_id = actor.volunteer.id
     # The guest's note, push and badges: a job committed with the check-in.
     await after.enqueue(session, after.Admitted(user_id=reg.user_id, event_id=event.id, event_name=event.name, club_id=event.club_id))
+    # The event's quest, when it has one switched on (app/api/quests): a check-in task.
+    from app.api.quests import signals as quests
+
+    await quests.touch(session, event.id, ("checked_in",), registration_id=reg.id)
     # Every check-in is made here (the gate, the scanners' offline queue, by
     # hand, kiosks, self check-in, volunteers, walk-ups): told once (app/api/webhooks_out).
     from app.api.webhooks_out import signals as webhooks
@@ -221,7 +225,17 @@ async def scan(session, event: Events, *, code: Optional[str] = None, door_label
 
     `registration`: a guest a person already picked out, instead of a code
     (check_in_by_hand, the kiosk's verified self check-in); the rest of the
-    path is the same. A code is only ever a ticket id (_code_filters)."""
+    path is the same. A code is only ever a ticket id (_code_filters).
+
+    A scan at a station or a swag desk (app/api/quests) is never an
+    admission: it goes to quests.gate and comes back from there. Which door
+    a scan is at is decided as an admission's is: the label, else the door
+    link's door. Every other door goes on exactly as below."""
+    from app.api.quests import gate as quest_gate
+
+    quest_door = await quest_gate.door_at(session, event, actor, door_label)
+    if quest_door is not None:
+        return await quest_gate.scan_at(session, event, quest_door, code=code, registration=registration, client_ref=client_ref, scanned_at=scanned_at, actor=actor, via=via)
     reg = registration if registration is not None else await lookup(session, event.id, code or "")
     if reg is None:
         code = code or ""
@@ -404,6 +418,10 @@ async def walkup(session, event: Events, body, actor: GateActor, background_task
     about first."""
     if not door_open(event):
         return {"outcome": "EVENT_NOT_OPEN", "attendee": None, "duplicate_of": None, "duplicate_by": None, "checked_in": False, "ticket_sent": False}
+    from app.api.quests import gate as quest_gate
+
+    if await quest_gate.door_at(session, event, actor, body.door) is not None:
+        raise CustomHTTPException(409, message="Walk-ups are registered at an entrance, not at a station or the swag desk.", error_code="QUEST_DOOR_NO_WALKUPS")
     role = RegistrationRole(body.role)
     if role is not RegistrationRole.attendee and not actor.full:
         raise CustomHTTPException(422, message="Only the organiser can register a speaker or staff at the door.", errors={"fields": {"role": "Pick attendee."}})
@@ -567,8 +585,18 @@ async def update_gate_settings(session, event: Events, body) -> dict:
 
 
 async def context(session, event: Events, actor: GateActor) -> dict:
+    from app.api.quests import gate as quest_gate
+
+    knows_quests = quest_gate.aware(actor)
     doors = [d for d in await doors_mod.options(session, event.id) if d.kind is not DoorKind.kiosk]
     expected = actor.door.id if actor.door is not None else (actor.volunteer.door_id if actor.volunteer is not None else None)
+    if not knows_quests:
+        # A console from before quests sees the entrances only, as before: it
+        # never picks a station or a swag desk to scan at.
+        quest_ids = {d.id for d in doors if d.purpose is not None}
+        if expected is not None and (expected in quest_ids or (actor.door is not None and actor.door.purpose is not None)):
+            expected = None
+        doors = [d for d in doors if d.purpose is None]
     club = event.club
     return {
         "event": {
@@ -579,7 +607,7 @@ async def context(session, event: Events, actor: GateActor) -> dict:
         "permissions": actor.permissions,
         "counters": await counters(session, event.id),
         "walkup_roles": [r.value for r in RegistrationRole] if actor.full else ["attendee"],
-        "doors": [{"id": d.id, "name": d.name, "kind": d.kind.value} for d in doors],
+        "doors": [{"id": d.id, "name": d.name, "kind": d.kind.value, **({"purpose": d.purpose} if knows_quests else {})} for d in doors],
         "expected_door_id": expected,
         # As every read sends a form: a conditional question as not required (questions.wire).
         "guest_fields": questions.wire_all(event.additional_details),
@@ -587,6 +615,7 @@ async def context(session, event: Events, actor: GateActor) -> dict:
         # Whether there is anything to hand out: the console shows the merch tab only then.
         "has_merch": await _has_merch(session, event.id),
         "has_store": bool(getattr(event, "merch_enabled", False)),
+        "quests": await quest_gate.context_block(session, event, actor) if knows_quests else None,
     }
 
 

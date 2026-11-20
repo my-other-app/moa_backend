@@ -325,6 +325,10 @@ async def next_question(session, quiz: LiveQuizzes, expected_index: Optional[int
 async def end_quiz(session, quiz: LiveQuizzes) -> dict:
     quiz.status, quiz.ended_at, quiz.question_opened_at = QuizStatus.ended, now_utc(), None
     quiz.join_code = None
+    # The quest's quiz tasks, for every player (app/api/quests), when the event has one on.
+    from app.api.quests import signals as quests
+
+    await quests.touch(session, quiz.event_id, ("quiz_played", "quiz_score", "quiz_top"))
     await session.commit()
     return await _moved(session, quiz)
 
@@ -575,6 +579,11 @@ async def ask(session, event: Events, text_: str, author_name: Optional[str], vo
         status=QuestionStatus.pending if event.qa_approve_first else QuestionStatus.approved, votes=0, pinned=False,
     )
     session.add(row)
+    if registration_id is not None:
+        # A guest signed in asked: the quest's Q&A task (app/api/quests), when the event has one on.
+        from app.api.quests import signals as quests
+
+        await quests.touch(session, event.id, ("qa_question",), registration_id=registration_id)
     await session.commit()
     bus.changed(event.id, "room")
     return _question_row_out(row, mine=True)
@@ -787,6 +796,11 @@ async def respond(session, event_id: int, poll_id: UUID, voter_key: str, value: 
     # created_at from the clock, not the transaction: a word cloud's ties go to the word given first.
     stmt = pg_insert(LivePollResponses).values(poll_id=poll_id, voter_key=voter_key, value=v, created_at=now_utc())
     await session.execute(stmt.on_conflict_do_update(index_elements=["poll_id", "voter_key"], set_={"value": stmt.excluded.value}))
+    if voter_key.startswith("u:"):
+        # A signed-in answer: the quest's poll task (app/api/quests), when the event has one on.
+        from app.api.quests import signals as quests
+
+        await quests.touch(session, event_id, ("polls",), user_id=int(voter_key[2:]))
     await session.commit()
     kept = room.voter_kept(event_id, voter_key)
     if kept is not None:
@@ -1430,6 +1444,9 @@ async def submit_survey(session, event: Events, reg_id: UUID, token: str, answer
         raise CustomHTTPException(422, message="Answer at least one question.")
     stmt = pg_insert(FeedbackResponses).values(survey_id=survey.id, registration_id=reg.id, answers=clean)
     await session.execute(stmt.on_conflict_do_update(index_elements=["survey_id", "registration_id"], set_={"answers": stmt.excluded.answers}))
+    from app.api.quests import signals as quests
+
+    await quests.touch(session, event.id, ("feedback",), registration_id=reg.id)
     await session.commit()
     return {"submitted": True}
 

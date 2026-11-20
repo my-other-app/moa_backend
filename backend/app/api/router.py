@@ -19,6 +19,7 @@ from app.api.organisers.router import router as organisers_router
 from app.api.event_partners.router import router as event_partners_router
 from app.api.cohosts.router import club_router as cohost_invitations_router, router as cohosts_router
 from app.api.merch.router import router as merch_router, gate_router as merch_gate_router
+from app.api.quests.router import gate_router as quests_gate_router, public_router as quests_public_router, router as quests_router
 from app.api.closeout.router import router as closeout_router
 from app.api.hooks.router import router as hooks_router
 from app.api.contacts.router import router as contacts_router
@@ -248,6 +249,10 @@ api_router.include_router(router=organisers_router, tags=["organisers"])
 api_router.include_router(router=event_partners_router, tags=["event partners"])
 api_router.include_router(router=merch_router, tags=["merch"])
 api_router.include_router(router=merch_gate_router, tags=["merch"])
+# Event quests (app/api/quests): the organiser's, the door console's, the guest's.
+api_router.include_router(router=quests_router)
+api_router.include_router(router=quests_gate_router)
+api_router.include_router(router=quests_public_router)
 api_router.include_router(router=closeout_router, tags=["closeout"])
 api_router.include_router(router=hooks_router, tags=["hooks"])
 api_router.include_router(router=contacts_router, tags=["contacts"])
