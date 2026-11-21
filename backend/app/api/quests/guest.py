@@ -354,8 +354,12 @@ async def enter_code(session, event, user, code: str) -> dict:
         entry.code_fails += 1
         entry.code_window_at = entry.code_window_at or now
         left = max(0, limit - entry.code_fails)
+        errors = {"left": left}
+        if left == 0:
+            # The last try: say when codes count again (the 429's retry_after), so nobody is told a guess.
+            errors["retry_after"] = int((entry.code_window_at + CODE_WINDOW - now).total_seconds()) + 1
         await session.commit()
-        raise CustomHTTPException(404, message="That isn't one of the quest's codes.", error_code="QUEST_CODE_WRONG", errors={"left": left})
+        raise CustomHTTPException(404, message="That isn't one of the quest's codes.", error_code="QUEST_CODE_WRONG", errors=errors)
     ctx = ev.Ctx(event=event, quest=quest, now=now)
     if not ev.open_now(ctx, task):
         start, end = ev.window(ctx, task)

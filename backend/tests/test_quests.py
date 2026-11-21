@@ -668,8 +668,11 @@ async def test_codes_ignore_case_and_spaces_count_wrong_tries_and_keep_their_win
     done = await ok(await client.post(url(w, "/quest/code"), json={"code": "  cloud24 "}, headers=h))
     assert done["result"] == "DONE" and done["task"]["me"]["done"] is True and done["task"]["me"]["source"] == "code"
     assert (await ok(await client.post(url(w, "/quest/code"), json={"code": "CLOUD 24"}, headers=h)))["result"] == "ALREADY_DONE"
-    for _ in range(2):
-        await client.post(url(w, "/quest/code"), json={"code": "nope"}, headers=h)
+    second = await client.post(url(w, "/quest/code"), json={"code": "nope"}, headers=h)
+    assert second.json()["errors"] == {"left": 1}
+    last = await client.post(url(w, "/quest/code"), json={"code": "nope"}, headers=h)
+    # The last try says when codes count again, as the lock that follows does.
+    assert last.json()["errors"]["left"] == 0 and 3500 < last.json()["errors"]["retry_after"] <= 3601
     locked = await client.post(url(w, "/quest/code"), json={"code": "cloud24"}, headers=h)
     assert locked.status_code == 429 and locked.json()["error_code"] == "QUEST_CODE_LOCKED" and locked.json()["errors"]["retry_after"] > 0
     # The organiser may not give two code tasks one code; a guest never sees a code.
