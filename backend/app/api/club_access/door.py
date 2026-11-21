@@ -51,6 +51,8 @@ MASKED_SHAPES = (
     r"^/api/v1/events/\d+/(?:check-ins|certificates|deliveries|results|competition)$",
     r"^/api/v1/events/\d+/(?:store/orders|store/summary|merch/collections)$",
     r"^/api/v1/events/\d+/messages/[^/]+$",
+    # A quest's guests, and one guest's quest (app/api/quests).
+    r"^/api/v1/events/\d+/quests/guests(?:/[^/]+)?$",
 )
 MASKED = re.compile("|".join(f"(?:{p})" for p in MASKED_SHAPES))
 

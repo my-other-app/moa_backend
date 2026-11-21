@@ -822,6 +822,9 @@ class EventDetailResponse(CustomBaseModel):
     cancellation: dict | None = Field(None)
     #: The link-preview picture: the poster made 1200 x 630 for social posting; null until it is made (app/api/social).
     share_image_url: str | None = Field(None)
+    #: The event's quest: {"enabled", "can_take_part"} -- on, and whether the
+    #: signed-in viewer holds a live ticket (feature-register/quests/CONTRACT.md §8.5).
+    quest: dict | None = Field(None)
     retention_mode: str = Field("keep")
     created_at: datetime | None = Field(None)
     #: To an admin: the event's old slugs, which still answer and redirect, the most recent first (app/api/slugs). Null to anyone else.

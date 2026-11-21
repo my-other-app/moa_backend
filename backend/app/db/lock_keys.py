@@ -67,6 +67,8 @@ SUPPORT_SWEEP = 773_190
 WEBHOOKS_SWEEP = 773_211
 #: Guests' poster photos and renders past their retention (app/api/guest_posters/sweep.py).
 POSTERS_SWEEP = 773_221
+#: Quests' five minutes: what no event reports (posters' links, profiles, follows) (app/api/quests/sweep.py).
+QUESTS_SWEEP = 773_231
 #: The job queue's maintenance pass (app/core/jobs.py).
 JOBS_MAINTENANCE = 774_501
 #: The live room's sweep (app/api/live/service.py).

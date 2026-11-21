@@ -9,7 +9,9 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 DoorKindName = Literal["door", "desk", "kiosk"]
 DoorModeName = Literal["open", "auto", "closed"]
 ViaName = Literal["gate", "kiosk", "walkup", "offline_sync", "desk", "phone", "app"]
-ScanOutcome = Literal["CHECKED_IN", "ALREADY_CHECKED_IN", "WRONG_EVENT", "REVOKED", "UNPAID", "INVALID", "EVENT_NOT_OPEN"]
+ScanOutcome = Literal["CHECKED_IN", "ALREADY_CHECKED_IN", "WRONG_EVENT", "REVOKED", "UNPAID", "INVALID", "EVENT_NOT_OPEN", "STATION_VISIT", "SWAG_DESK"]
+#: What a door is for (app/api/quests): none for an entrance.
+DoorPurposeName = Literal["station", "swag_desk"]
 
 DOOR_KIND_META = {
     "door": {"label": "Door", "note": "Volunteers scan here. Walk-ups too, if switched on."},
@@ -42,6 +44,7 @@ class DoorOut(BaseModel):
     event_id: int
     name: str
     kind: DoorKindName
+    purpose: Optional[DoorPurposeName] = None
     sort_order: int
     active: bool
     volunteers: list[dict] = Field(default_factory=list)
@@ -53,6 +56,8 @@ class DoorOut(BaseModel):
 class DoorCreate(BaseModel):
     name: str = Field(min_length=1, max_length=40)
     kind: DoorKindName = "door"
+    # A station or a swag desk (app/api/quests); none is an entrance. Fixed once made.
+    purpose: Optional[DoorPurposeName] = None
 
 
 class DoorUpdate(BaseModel):
@@ -184,6 +189,13 @@ class ScanResult(BaseModel):
     # QR, not a ticket. Nobody was admitted; `attendee` is who holds it, for
     # staff to confirm and check in by hand.
     hint: Optional[str] = None
+    # Why a scan could not be taken; for a console from before quests at a
+    # station or swag desk, what to do (app/api/quests/gate.py).
+    error: Optional[str] = None
+    # STATION_VISIT and SWAG_DESK only, for a console that sent
+    # `X-Gate-Features: quests` (feature-register/quests/CONTRACT.md §7).
+    station: Optional[dict] = None
+    swag: Optional[dict] = None
 
 
 class ScanBatchBody(BaseModel):
@@ -246,6 +258,8 @@ class GateContext(BaseModel):
     # Whether there is anything to hand out; the console shows the merch tab only then.
     has_merch: bool = False
     has_store: bool = False
+    # The quest at this door, for a console that sent `X-Gate-Features: quests`.
+    quests: Optional[dict] = None
 
 
 class GateSearchRow(AttendeeSummary):
