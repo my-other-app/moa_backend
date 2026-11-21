@@ -130,6 +130,11 @@ async def test_a_check_in_ticks_unlocks_reserves_and_tells_the_guest(client, ses
     assert c["milestones"][0]["unlocked"] and reward["claim"]["status"] == "reserved"
     item = await session.scalar(select(MerchItems).where(MerchItems.id == w["sticker"].id).execution_options(populate_existing=True))
     assert item.reserved_count == 1
+    # A sticker has no sizes: its held unit is never counted as waiting for one.
+    live = await ok(await client.get(url(w, "/quests/dashboard"), headers=w["club"]))
+    assert [(x["reserved"], x["needs_size"]) for x in live["rewards"]] == [(1, 0)]
+    admin = await ok(await client.get(url(w, "/quests"), headers=w["club"]))
+    assert admin["milestones"][0]["rewards"][0]["claims"]["needs_size"] == 0
     from app.api.notifications.models import Notifications
 
     note = await session.scalar(select(Notifications).where(Notifications.user_id == w["g"]["a"][0].id, Notifications.type == "quest_unlocked"))
@@ -459,6 +464,8 @@ async def test_the_swag_desk_shows_rewards_and_hands_them_over_once(client, sess
     assert r["outcome"] == "SWAG_DESK"
     (reward,) = r["swag"]["rewards"]
     assert reward["status"] == "reserved" and reward["needs_size"] is True and {c["label"] for c in reward["choices"]} == {"M", "L"}
+    live = await ok(await client.get(url(w, "/quests/dashboard"), headers=w["club"]))
+    assert [(x["reserved"], x["needs_size"]) for x in live["rewards"]] == [(1, 1)]
     need = await ok(await client.post(url(w, f"/gate/quests/claims/{reward['claim_id']}/handover"), json={}, headers=h))
     assert need["result"] == "NEEDS_SIZE"
     done = await ok(await client.post(url(w, f"/gate/quests/claims/{reward['claim_id']}/handover"), json={"variant_label": "m"}, headers=h))

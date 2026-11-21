@@ -114,12 +114,16 @@ def task_admin(t: QuestTasks, stations: dict, counts: dict) -> dict:
 
 
 async def _claim_counts(session, quest) -> dict:
+    from app.api.merch.models import MerchItems
+
     C = QuestClaims
     out: dict = {}
+    # "needs a size": a unit held with no size chosen, only for an item that has sizes (a sticker's hold has no size, ever).
     rows = await session.execute(
-        select(C.reward_id, C.status, func.count(), func.count().filter(C.holds == True, C.variant_id.is_(None)))
+        select(C.reward_id, C.status, func.count(), func.count().filter(C.holds == True, C.variant_id.is_(None), MerchItems.variant_field.isnot(None)))  # noqa: E712
+        .join(MerchItems, MerchItems.id == C.merch_item_id)
         .where(C.quest_id == quest.id)
-        .group_by(C.reward_id, C.status)  # noqa: E712
+        .group_by(C.reward_id, C.status)
     )
     for reward_id, status, n, unsized in rows.all():
         row = out.setdefault(reward_id, {s: 0 for s in CLAIM_STATUSES} | {"needs_size": 0})
