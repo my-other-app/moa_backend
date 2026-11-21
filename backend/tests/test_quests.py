@@ -476,6 +476,8 @@ async def test_the_swag_desk_shows_rewards_and_hands_them_over_once(client, sess
         select(MerchVariants).where(MerchVariants.label == "M", MerchVariants.item_id == w["shirt"].id).execution_options(populate_existing=True)
     )
     assert (m.collected_count, m.reserved_count) == (1, 0)
+    admin = await ok(await client.get(url(w, "/quests"), headers=w["club"]))
+    assert [(x["name"], x["handovers"]) for x in admin["stations"]] == [("Swag desk", 1)]
     twice = await ok(await client.post(url(w, f"/gate/quests/claims/{reward['claim_id']}/handover"), json={}, headers=h))
     assert twice["result"] == "ALREADY_COLLECTED"
     rescan = await ok(await client.post(url(w, "/gate/scan"), json=scan(ra.ticket_id), headers=h))

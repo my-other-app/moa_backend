@@ -171,6 +171,21 @@ async def _station_rows(session, event) -> list:
             )
         ).all()
     )
+    from app.api.merch.models import MerchCollections
+
+    # A swag desk's figure is what was handed over there (the dashboards show it beside the desk).
+    desks = [d.id for d in doors if d.purpose == "swag_desk"]
+    handed = (
+        dict(
+            (
+                await session.execute(
+                    select(MerchCollections.door_id, func.count()).where(MerchCollections.door_id.in_(desks)).group_by(MerchCollections.door_id)
+                )
+            ).all()
+        )
+        if desks
+        else {}
+    )
     return [
         {
             "id": d.id,
@@ -181,6 +196,7 @@ async def _station_rows(session, event) -> list:
             "link": doors_mod._link_row(d),
             "visits": int(visits.get(d.id, 0)),
             "last_visit_at": last.get(d.id),
+            "handovers": int(handed.get(d.id, 0)),
         }
         for d in doors
     ]
