@@ -538,6 +538,9 @@ async def test_waitlist_is_served_in_order_when_a_unit_frees(client, session, wo
     assert [claims[r.id].status for r in (ra, rb, rc)] == ["released", "reserved", "waitlisted"]
     unlock = await session.scalar(select(QuestUnlocks).where(QuestUnlocks.registration_id == ra.id).execution_options(populate_existing=True))
     assert unlock.revoked_at is not None
+    # The log keeps the release beside the revoke that caused it.
+    log = await ok(await client.get(url(w, "/quests/audit"), headers=w["club"]))
+    assert [(x["action"], x["reward"] and x["reward"]["name"]) for x in log["items"][:2]] == [("release", "Sticker"), ("revoke", None)]
     from app.api.notifications.models import Notifications
 
     assert (
@@ -553,9 +556,9 @@ async def test_waitlist_is_served_in_order_when_a_unit_frees(client, session, wo
     # Stock can't go below what is held.
     low = await client.patch(url(w, f"/merch/{w['sticker'].id}"), json={"stock": 1}, headers=w["club"])
     assert low.status_code == 422
-    # A revoked task isn't ticked again by the rules, and the revoke and grant are in the audit.
+    # A revoked task isn't ticked again by the rules, and the grant, the revoke and the release it caused are in the audit.
     audit = await ok(await client.get(url(w, f"/quests/guests/{ra.id}"), headers=w["club"]))
-    assert [a["action"] for a in audit["audit"]] == ["revoke", "grant"] and audit["audit"][0]["note"] == "Mistake"
+    assert [a["action"] for a in audit["audit"]] == ["release", "revoke", "grant"] and audit["audit"][1]["note"] == "Mistake"
 
 
 async def test_two_guests_racing_for_the_last_unit_one_gets_it(session, _engine, make_club, make_event, make_user, make_registration):

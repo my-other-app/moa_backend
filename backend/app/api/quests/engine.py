@@ -29,6 +29,7 @@ from app.api.quests.models import (
     CHECKMARKS,
     COLLECTED,
     RELEASED,
+    QuestAudit,
     QuestClaims,
     QuestEntries,
     QuestMilestones,
@@ -391,6 +392,8 @@ async def _stock_work(session, d: Definition, event, reg, work: list) -> None:
             await stock.reserve(session, st, claim, r, reg, event)
         else:
             stock.release(st, claim)
+            # Logged beside the grant or revoke that caused it (§1: the audit keeps releases).
+            session.add(QuestAudit(quest_id=d.quest.id, registration_id=reg.id, reward_id=r.id, action="release", note=f"{m.title} no longer reached"[:300]))
             for held in await stock.promote(session, st, event):
                 await signals.held(session, held.id)
         await session.flush()
