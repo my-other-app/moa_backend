@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Iterable, Optional
 
-from sqlalchemy import Boolean, distinct, func, literal_column, or_, select, union_all
+from sqlalchemy import Boolean, String, cast, distinct, func, literal_column, or_, select, union_all
 
 from app.api.quests import kinds as K
 
@@ -119,34 +119,46 @@ async def _network(session, ctx: Ctx, task, regs: list[Guest]) -> dict:
 
 
 async def _quiz(session, ctx: Ctx, task, regs: list[Guest]) -> dict:
+    """The event's quiz, every round of it (app/api/live: an event holds
+    rounds, in sort_order). Played: an answer in any round. Score: the
+    guest's total across the rounds, as the live room's overall board adds
+    it up. Top: once the last round has ended, ranked on those totals."""
     from app.api.live.models import LiveQuizAnswers, LiveQuizPlayers, LiveQuizzes, QuizStatus
 
-    quiz = await session.scalar(select(LiveQuizzes).where(LiveQuizzes.event_id == ctx.event.id))
-    if quiz is None:
+    rounds = (await session.execute(
+        select(LiveQuizzes.id, LiveQuizzes.status).where(LiveQuizzes.event_id == ctx.event.id)
+        .order_by(LiveQuizzes.sort_order, LiveQuizzes.created_at)
+    )).all()
+    if not rounds:
         return {}
+    quiz_ids = [r.id for r in rounds]
     P = LiveQuizPlayers
     ids = [g.id for g in regs]
     start, end = window(ctx, task)
     # Only a player who answered inside the window counts (any answer, when there is no window).
     answered = select(LiveQuizAnswers.player_id).where(*_between(LiveQuizAnswers.answered_at, start, end))
     if task.kind == K.QUIZ_PLAYED:
-        rows = await session.execute(select(P.registration_id).where(P.quiz_id == quiz.id, P.registration_id.in_(ids), P.id.in_(answered)).distinct())
+        rows = await session.execute(select(P.registration_id).where(P.quiz_id.in_(quiz_ids), P.registration_id.in_(ids), P.id.in_(answered)).distinct())
         return {r: 1 for (r,) in rows.all()}
-    best = (
-        select(P.registration_id, func.max(P.score).label("score"))
-        .where(P.quiz_id == quiz.id, P.registration_id.isnot(None), P.id.in_(answered))
-        .group_by(P.registration_id)
+    # A guest's best in each round (a second seat in one round never doubles it), added up over the rounds.
+    per_round = (
+        select(P.registration_id, P.quiz_id, func.max(P.score).label("score"))
+        .where(P.quiz_id.in_(quiz_ids), P.registration_id.isnot(None), P.id.in_(answered))
+        .group_by(P.registration_id, P.quiz_id)
         .subquery()
     )
+    best = select(per_round.c.registration_id, func.sum(per_round.c.score).label("score")).group_by(per_round.c.registration_id).subquery()
     if task.kind == K.QUIZ_SCORE:
         need = int((task.config or {}).get("min_score") or 1)
         rows = await session.execute(select(best.c.registration_id).where(best.c.registration_id.in_(ids), best.c.score >= need))
         return {r: 1 for (r,) in rows.all()}
-    # QUIZ_TOP: only once the quiz is over; rank = 1 + players with a higher score.
-    if quiz.status is not QuizStatus.ended:
+    # QUIZ_TOP: only once the quiz is over (its last round ended); rank = 1 + players with a higher total.
+    if rounds[-1].status is not QuizStatus.ended:
         return {}
     top = int((task.config or {}).get("top") or 1)
-    higher = select(func.count()).select_from(P).where(P.quiz_id == quiz.id, P.score > best.c.score).correlate(best).scalar_subquery()
+    who = func.coalesce(P.person, cast(P.id, String))
+    totals = select(who.label("who"), func.sum(P.score).label("score")).where(P.quiz_id.in_(quiz_ids)).group_by(who).subquery()
+    higher = select(func.count()).select_from(totals).where(totals.c.score > best.c.score).correlate(best).scalar_subquery()
     rows = await session.execute(select(best.c.registration_id).where(best.c.registration_id.in_(ids), best.c.score > 0, higher + 1 <= top))
     return {r: 1 for (r,) in rows.all()}
 

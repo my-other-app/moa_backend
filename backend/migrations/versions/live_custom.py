@@ -30,7 +30,7 @@ has one quiz), the board's old index, and drops what this added. Enum
 values cannot be dropped from a type in Postgres; they stay, unused.
 
 Revision ID: live_custom
-Revises: add_guest_posters
+Revises: add_event_quests
 """
 
 import sqlalchemy as sa
@@ -38,7 +38,7 @@ from alembic import op
 from sqlalchemy.dialects.postgresql import UUID
 
 revision = "live_custom"
-down_revision = "add_guest_posters"
+down_revision = "add_event_quests"
 branch_labels = None
 depends_on = None
 

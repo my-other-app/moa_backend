@@ -311,6 +311,72 @@ async def test_quiz_polls_questions_and_feedback(client, session, world):
     assert task_me(await card(client, w, "b"), top["id"])["done"] is False
 
 
+async def test_quiz_tasks_count_every_round_and_top_waits_for_the_last(client, session, world):
+    from app.api.live import service as live
+    from app.api.live.models import LiveQuizAnswers, LiveQuizPlayers, LiveQuizQuestions, LiveQuizzes, QuizStatus
+
+    w = world
+    ev_id = w["event"].id
+    played, score, top = await setup(
+        client,
+        w,
+        milestones=(),
+        tasks=[{"kind": "quiz_played"}, {"kind": "quiz_score", "config": {"min_score": 900}}, {"kind": "quiz_top", "config": {"top": 1}}],
+    )
+    ra, rb = w["g"]["a"][1], w["g"]["b"][1]
+    r1 = LiveQuizzes(id=uuid.uuid4(), event_id=ev_id, title="Round 1", status=QuizStatus.ended, current_index=0, sort_order=0, ended_at=NOW)
+    r2 = LiveQuizzes(id=uuid.uuid4(), event_id=ev_id, title="Round 2", status=QuizStatus.live, current_index=0, sort_order=1)
+    session.add_all([r1, r2])
+    await session.flush()
+    for n, rnd in enumerate((r1, r2)):
+        q = LiveQuizQuestions(id=uuid.uuid4(), quiz_id=rnd.id, prompt="?", options=[{"key": "a", "label": "x"}, {"key": "b", "label": "y"}], correct_key="a")
+        pa = LiveQuizPlayers(id=uuid.uuid4(), quiz_id=rnd.id, name="Asha", player_key=f"k-a{n}-123456", registration_id=ra.id, person="person-asha", score=500)
+        pb = LiveQuizPlayers(id=uuid.uuid4(), quiz_id=rnd.id, name="Ben", player_key=f"k-b{n}-123456", registration_id=rb.id, person="person-ben", score=600)
+        session.add_all([q, pa, pb])
+        await session.flush()
+        session.add_all([LiveQuizAnswers(question_id=q.id, player_id=p.id, option_key="a", correct=True, points=p.score, answered_at=NOW) for p in (pa, pb)])
+    await session.commit()
+    await engine.evaluate(session, ev_id, everyone=True)
+    a = await card(client, w, "a")
+    # 500 in each round: 1000 over the rounds, though neither round alone reaches 900.
+    assert task_me(a, played["id"])["done"] and task_me(a, score["id"])["done"]
+    # Round 2 is still running: nobody is top yet.
+    assert task_me(await card(client, w, "b"), top["id"])["done"] is False
+    await live.end_quiz(session, r2)
+    await jobs.settle()
+    assert task_me(await card(client, w, "b"), top["id"])["done"] is True  # 1200 over the rounds
+    assert task_me(await card(client, w, "a"), top["id"])["done"] is False
+
+
+async def test_a_quiz_ended_by_its_own_clock_counts_for_the_quest(client, session, world):
+    from app.api.live import service as live
+    from app.api.live.models import LiveQuizAnswers, LiveQuizPlayers, LiveQuizQuestions, LiveQuizzes, QuizStatus
+
+    w = world
+    ev_id = w["event"].id
+    (top,) = await setup(client, w, milestones=(), tasks=[{"kind": "quiz_top", "config": {"top": 1}}])
+    rb = w["g"]["b"][1]
+    quiz = LiveQuizzes(
+        id=uuid.uuid4(), event_id=ev_id, title="Quiz", status=QuizStatus.live, current_index=0,
+        settings={"flow": {"advance": "auto", "auto_seconds": 3}}, question_opened_at=NOW - timedelta(hours=1),
+    )
+    session.add(quiz)
+    await session.flush()
+    q = LiveQuizQuestions(id=uuid.uuid4(), quiz_id=quiz.id, prompt="?", options=[{"key": "a", "label": "x"}, {"key": "b", "label": "y"}], correct_key="a")
+    pb = LiveQuizPlayers(id=uuid.uuid4(), quiz_id=quiz.id, name="Ben", player_key="k-b-123456", registration_id=rb.id, score=700)
+    session.add_all([q, pb])
+    await session.flush()
+    session.add(LiveQuizAnswers(question_id=q.id, player_id=pb.id, option_key="a", correct=True, points=700, answered_at=NOW))
+    await session.commit()
+    # The last question's reveal has been up long enough: the round moves itself on, which ends it.
+    quiz = await session.scalar(select(LiveQuizzes).where(LiveQuizzes.id == quiz.id).execution_options(populate_existing=True))
+    assert await live.advance_if_due(session, quiz) is True
+    await session.refresh(quiz)
+    assert quiz.status is QuizStatus.ended
+    await jobs.settle()
+    assert task_me(await card(client, w, "b"), top["id"])["done"] is True
+
+
 async def test_poster_follow_and_profile_are_looked_at_by_the_card(client, session, world):
     from app.api.clubs.models import ClubUsersLink
     from app.api.guest_posters.models import GuestPosters
