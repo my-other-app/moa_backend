@@ -58,6 +58,7 @@ PUBLIC_FOLDERS = (
     "events/posters/",    # event posters uploaded since Oct 2026
     "avatars/",           # the stock avatars people pick from
     "events/{id}/merch/",  # store and merch photos, shown on the event's store
+    "events/live/",       # a live room's logo, background and poll-option pictures (app/api/live/looks.py)
 )
 
 #: What a picture's file name may end in. Never SVG: a picture served from

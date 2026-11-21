@@ -120,3 +120,41 @@ async def test_a_board_write_that_fails_is_repaired_from_postgres(client, sessio
     assert view.board_key not in board._dirty and rebuilt.board == expected.board
     p0 = expected.players[players[0]["player_key"]]
     assert (await room.standings(session, rebuilt, [p0]))[p0.id] == (p0.score, expected.rank_of(p0.score))
+
+
+@needs_redis
+async def test_a_round_with_ties_by_time_ranks_in_redis_as_its_snapshot_does(client, session, world, with_redis):
+    # Equal scores apart by the time left on the clock: the faster first, each its own rank.
+    scores = [900, 1800, 900, 0, 1800, 450, 900, 0, 450, 1800, 900, 120]
+    saved = [500, 9000, 7000, 0, 9000, 10, 7000, 3, 20, 100, 6999, 5]
+    players = await _scored_quiz(client, session, world, scores)
+    quiz = await session.scalar(select(LiveQuizzes).where(LiveQuizzes.event_id == world["event"].id))
+    quiz.settings = {"ties": "time"}
+    for p, s in zip(players, saved):
+        await session.execute(update(LiveQuizPlayers).where(LiveQuizPlayers.id == p["player_id"]).values(saved_ms=s))
+    await session.commit()
+    await _wipe()
+    room.quizzes.forget(("quiz", world["event"].id))
+    expected = await _in_process(session, world)
+    view = await room._build_quiz(session, world["event"].id)
+    assert view.board_key is not None and view.board_key.endswith("t") and expected.board_key is None
+    assert view.board == expected.board and [r["rank"] for r in view.board] == list(range(1, 11))
+    met = [room.Player(id=p.id, name=p.name, score=-1, created_at=p.created_at, saved_ms=p.saved_ms) for p in expected.players.values()]
+    got = await room.standings(session, view, met)
+    assert {pid: r for pid, (_, r) in got.items()} == {p.id: expected.rank_of(p.score, p.saved_ms) for p in expected.players.values()}
+    assert {pid: s for pid, (s, _) in got.items()} == {p.id: p.score for p in expected.players.values()}
+    # The same score and the same time left share a rank; the same score faster is ahead.
+    by_name = {p.name: got[p.id][1] for p in expected.players.values()}
+    assert by_name["Player 1"] == by_name["Player 4"] == 1 and by_name["Player 9"] == 3 and by_name["Player 2"] == by_name["Player 6"] == 4 and by_name["Player 10"] == 6
+    assert board.unpacked(board.packed(1800, 9000, True), True) == 1800
+
+
+@needs_redis
+async def test_a_round_with_negative_marking_keeps_off_the_sorted_set(client, session, world, with_redis):
+    await _scored_quiz(client, session, world, [100, 200])
+    quiz = await session.scalar(select(LiveQuizzes).where(LiveQuizzes.event_id == world["event"].id))
+    quiz.settings = {"scoring": {"wrong_penalty": 0.25}}
+    await session.commit()
+    room.quizzes.forget(("quiz", world["event"].id))
+    view = await room._build_quiz(session, world["event"].id)
+    assert view.board_key is None and view.scores == [100, 200] and [r["score"] for r in view.board] == [200, 100]
