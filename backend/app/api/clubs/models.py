@@ -192,8 +192,12 @@ class ClubUsersLink(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
 
     __table_args__ = (
         # One live row per person and club: follow, pin and hide write it with
-        # ON CONFLICT (club_id, user_id, is_deleted), and "is following" is a
-        # probe of it.
+        # ON CONFLICT (club_id, user_id) WHERE NOT is_deleted, and "is
+        # following" is a probe of it.
+        sa.Index("ux_club_users_link_live", "club_id", "user_id", unique=True, postgresql_where=sa.text("NOT is_deleted")),
+        # The older key, with is_deleted in it: one deleted row per person and
+        # club at most. It goes in a later revision, once nothing writes
+        # against it (the key above says the same about the live rows).
         UniqueConstraint("club_id", "user_id", "is_deleted"),
         # One person's clubs: following, pinned, hidden (the app's feeds).
         sa.Index("ix_club_users_user", "user_id", postgresql_where=sa.text("NOT is_deleted")),
@@ -230,7 +234,11 @@ class ClubSocials(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
 
     club = relationship("Clubs", back_populates="socials")
 
-    __table_args__ = (UniqueConstraint("club_id", "is_deleted"),)
+    __table_args__ = (
+        # One live row per club. The older key (with is_deleted) goes in a later revision.
+        sa.Index("ux_club_socials_live", "club_id", unique=True, postgresql_where=sa.text("NOT is_deleted")),
+        UniqueConstraint("club_id", "is_deleted"),
+    )
 
 
 class ClubTeamMembers(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):

@@ -3,7 +3,7 @@ import io
 import re
 from fastapi import UploadFile
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import and_, delete, exists, false as sa_false, or_, select, func, update
+from sqlalchemy import and_, delete, exists, false as sa_false, or_, select, func, text as sa_text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, aliased, joinedload
@@ -758,9 +758,14 @@ async def _club_exists(session: AsyncSession, club_id: int, user_id: int) -> Non
         raise CustomHTTPException(status_code=400, message="Invalid club")
 
 
+#: The ON CONFLICT target of `_link_upsert`: the person's live row for the
+#: club (the unique index ux_club_users_link_live).
+LIVE_LINK = dict(index_elements=["club_id", "user_id"], index_where=sa_text("NOT is_deleted"))
+
+
 def _link_upsert(club_id: int, user_id: int, **values):
     """INSERT the person's live row for the club, or, when there is one
-    (the unique (club_id, user_id, is_deleted)), the caller's ON CONFLICT."""
+    (LIVE_LINK), the caller's ON CONFLICT."""
     now = datetime.now(timezone.utc)
     row = dict(club_id=club_id, user_id=user_id, is_following=False, is_pinned=False, is_hidden=False, is_deleted=False, created_at=now, updated_at=now)
     return pg_insert(ClubUsersLink).values({**row, **values})
@@ -785,7 +790,7 @@ async def follow_club(session: AsyncSession, club_id: int, user_id: int, trackin
     # (app.core.notifications.inbox). A new follow is unmuted.
     stmt = _link_upsert(club_id, user_id, is_following=True, tracking_link_id=link_id, followed_at=datetime.now(timezone.utc))
     stmt = stmt.on_conflict_do_update(
-        index_elements=["club_id", "user_id", "is_deleted"],
+        **LIVE_LINK,
         set_={
             "is_following": True, "updated_at": stmt.excluded.updated_at, "followed_at": stmt.excluded.followed_at, "is_muted": False,
             "tracking_link_id": func.coalesce(stmt.excluded.tracking_link_id, ClubUsersLink.tracking_link_id),
@@ -881,7 +886,7 @@ async def _toggle(session: AsyncSession, club_id: int, user_id: int, column: str
     flag = getattr(ClubUsersLink, column)
     row_id = await session.scalar(
         stmt.on_conflict_do_update(
-            index_elements=["club_id", "user_id", "is_deleted"],
+            **LIVE_LINK,
             set_={column: ~flag, "updated_at": stmt.excluded.updated_at},
         ).returning(ClubUsersLink.id)
     )

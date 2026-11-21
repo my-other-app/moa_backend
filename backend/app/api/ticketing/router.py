@@ -285,7 +285,7 @@ async def club_waitlist(
         whole_codes=door.viewer(request),
     )
     names = await types_mod.names(session, [r.ticket_type_id for r in rows])
-    positions = {r.id: await waitlist.position(session, r) for r in rows if r.status == "waiting"}
+    positions = await waitlist.positions(session, rows)
     return {
         "settings": await _settings_out(session, event),
         "counts": await waitlist.counts(session, event.id),

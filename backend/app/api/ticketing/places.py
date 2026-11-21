@@ -362,12 +362,14 @@ async def capture_room(session, event, registration) -> bool:
     if entry is not None:
         from app.api.ticketing import waitlist
 
-        waitlist.mark_claimed(entry)
         if entry.via_request:
-            # A club's confirmation, paid for (app/api/approvals).
+            # A club's confirmation, paid for (app/api/approvals): its request
+            # first, then the entry, the order every path takes the two in.
             from app.api.approvals import service as approvals
 
             await approvals.on_paid(session, entry, registration)
+        await session.execute(select(WaitlistEntries.id).where(WaitlistEntries.id == entry.id).with_for_update(key_share=True))
+        waitlist.mark_claimed(entry)
     return True
 
 

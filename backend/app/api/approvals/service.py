@@ -65,6 +65,7 @@ from app.api.approvals.models import (
 from app.api.closeout.models import EventStatus
 from app.api.events.models import EventRegistrationsLink, Events, ends_at_sql
 from app.core import jobs, money, public_urls
+from app.db.binds import any_of
 from app.core.utils import csv_safe
 from app.response import CustomHTTPException
 
@@ -670,7 +671,7 @@ def list_query(
     reads `limit + 1` rows. `only_ids`: just these (the missing-answers filter)."""
     stmt = select(R).where(R.event_id == event_id)
     if only_ids is not None:
-        stmt = stmt.where(R.id.in_(list(only_ids)))
+        stmt = stmt.where(any_of(R.id, only_ids))
     if descending is None:
         descending = descending_by_default(sort, status)
     if status in STATUSES:

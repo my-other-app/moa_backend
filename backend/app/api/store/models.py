@@ -16,7 +16,11 @@ from sqlalchemy.orm import relationship
 from app.core.utils.db_fields import TZAwareDateTime
 
 from app.db.base import AbstractSQLModel
+from app.db.checks import one_of
 from app.db.mixins import SoftDeleteMixin, TimestampsMixin
+
+#: event_store_orders.status: every word an order's status may hold.
+ORDER_STATUSES = ("pending", "paid", "cancelled", "refunded", "oversold")
 
 
 class EventStoreItems(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
@@ -113,6 +117,7 @@ class EventStoreOrders(AbstractSQLModel, TimestampsMixin):
     __table_args__ = (
         # The hold sweep's walk: only orders still holding something.
         sa.Index("ix_event_store_orders_held_until", "held_until", postgresql_where=sa.text("held_until IS NOT NULL")),
+        sa.CheckConstraint(one_of("status", ORDER_STATUSES), name="ck_event_store_orders_status"),
     )
 
 
