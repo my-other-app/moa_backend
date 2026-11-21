@@ -182,11 +182,26 @@ async def save(session, viewer: Users, body) -> dict:
         await notices.note_save(session, person_id=target.id, saver_id=viewer.id, event_id=event.id if event is not None else None)
     if new_encounter and event is not None:
         await recap.schedule(session, event)
+        if body.method == "qr":
+            # The quest's "meet people" task, both ways (app/api/quests), when the event has one on.
+            from app.api.quests import signals as quests
+
+            await quests.touch(session, event.id, ("network",), user_id=viewer.id)
+            await quests.touch(session, event.id, ("network",), user_id=target.id)
     await session.commit()
 
     item = (await people_out(session, viewer.id, [np_id], all_encounters=False))[0]
     rel = await access.relation(session, viewer.id, target.id)
-    return {"person": item, "created": created, "new_encounter": new_encounter, "profile": await service.public_profile(session, target, rel)}
+    out = {"person": item, "created": created, "new_encounter": new_encounter, "profile": await service.public_profile(session, target, rel)}
+    # The event's "meet people" tasks, counted now, for the scanner's "3 of 5 met" (app/api/quests);
+    # null for an event without a quest on. Last, so nothing it does can touch the answer above.
+    quest_event = event.id if event is not None else body.event_id
+    if body.method == "qr" and quest_event:
+        from app.api.quests import public as quests_public
+
+        viewer_id = viewer.id
+        out["quest"] = await quests_public.network_progress(session, quest_event, viewer_id, evaluate=bool(new_encounter and event is not None))
+    return out
 
 
 async def remove(session, viewer: Users, np_id: int) -> None:

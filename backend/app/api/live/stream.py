@@ -76,7 +76,7 @@ from sqlalchemy.orm import joinedload
 from starlette.responses import Response
 
 from app.api.events.models import Events
-from app.api.live import bus, room
+from app.api.live import bus, compat, room
 from app.config import settings
 from app.core import redis
 
@@ -172,6 +172,8 @@ class Listener:
     address: str = ""
     #: The player behind a quiz stream, as found when it opened.
     player: Optional[room.Player] = None
+    #: A client of this release (`v=2`): the room's and the quiz's bodies of this release.
+    v2: bool = False
     #: The version last sent, and what it showed (to send a new version only
     #: when it shows this stream something new).
     sent_version: Optional[int] = None
@@ -197,6 +199,8 @@ class Feed:
         self.standing: dict = {}
         #: The club's views: view -> its body as a JSON-ready dict.
         self.club: dict[str, Any] = {}
+        #: The same, as a console from before this release reads it: view -> (the body it was made from, today's fields).
+        self._club_v1: dict[str, tuple] = {}
         #: Views that are gone: view -> (status, message).
         self.gone: dict[str, tuple[int, str]] = {}
         #: Players removed since their stream opened: key -> (status, message).
@@ -218,6 +222,8 @@ class Feed:
         self._idle_since: Optional[float] = time.monotonic()
         self._next_resync = time.monotonic() + RESYNC_SECONDS
         self._clock: Optional[tuple[float, str]] = None
+        #: When the poll that is up closes by its timer: (monotonic time, tag).
+        self._room_clock: Optional[tuple[float, str]] = None
         self.builds = 0
 
     # ─── Streams coming and going ───────────────────────────────────────
@@ -322,7 +328,9 @@ class Feed:
             await self._ready()
             # The streams that made this feed asked for their views (inbox).
             while True:
-                timeout = max(0.0, min(self._next_resync, self._clock[0] if self._clock else float("inf")) - time.monotonic())
+                timeout = max(0.0, min(
+                    self._next_resync, self._clock[0] if self._clock else float("inf"), self._room_clock[0] if self._room_clock else float("inf"),
+                ) - time.monotonic())
                 if not self.listeners:
                     timeout = min(timeout, LINGER_SECONDS)
                 batch: list = []
@@ -382,6 +390,9 @@ class Feed:
         if clock:
             tag, self._clock = self._clock[1], None
             await bus.changed_once(self.event_id, tag, "quiz")
+        if self._room_clock is not None and now >= self._room_clock[0]:
+            tag, self._room_clock = self._room_clock[1], None
+            await bus.changed_once(self.event_id, tag, "room")
         if not self.listeners:
             # Nobody to show it to: what changed is built again when someone comes.
             self._forget(topics | (set(bus.TOPICS) if reread else set()))
@@ -432,10 +443,13 @@ class Feed:
         """What each view shows, comparable between builds (the clocks left out)."""
         out: dict = {view: ("gone", status) for view, (status, _) in self.gone.items()}
         if self.room is not None and "room" not in self.gone:
-            out["room"] = self.room.body
+            out["room"] = (self.room.body, self.room.body_v2)
         if self.quiz is not None and "quiz" not in self.gone:
             q = self.quiz
-            out["quiz"] = (q.status, q.title, q.current_index, q.opened_at, orjson.dumps(q.questions, default=str), orjson.dumps(q.board), q.player_count, len(q.answers))
+            out["quiz"] = (
+                q.status, q.title, q.current_index, q.opened_at, orjson.dumps(q.questions, default=str), orjson.dumps(q.board), q.player_count, len(q.answers),
+                q.paused_at, q.revealed_at, orjson.dumps(q.settings), orjson.dumps(q.teams), q.theme_version,
+            )
         for view, data in self.club.items():
             if view not in self.gone:
                 out[view] = orjson.dumps(_without_clock(view, data), default=str)
@@ -450,9 +464,16 @@ class Feed:
                 built = await room._build_room(s, self.event_id)
                 if built is room._NONE:
                     self.gone["room"] = (404, "Event not found")
+                    self._room_clock = None
                 else:
                     self.gone.pop("room", None)
                     self.room = built
+                    if built.poll_closes_at is not None:
+                        # The poll's timer: the room is read again when it runs out (it closes then).
+                        left = (built.poll_closes_at - _now()).total_seconds()
+                        self._room_clock = (time.monotonic() + max(0.0, left) + 0.05, f"poll:{built.poll_id}:{built.poll_closes_at.isoformat()}")
+                    else:
+                        self._room_clock = None
                 if reread:
                     for key, voter in list(self.voters.items()):
                         fresh = await room._load_voter(s, self.event_id, key)
@@ -489,23 +510,34 @@ class Feed:
             from app.api.live.models import LiveQuizPlayers
 
             rows = (await s.execute(
-                select(LiveQuizPlayers.player_key, LiveQuizPlayers.id, LiveQuizPlayers.name, LiveQuizPlayers.score, LiveQuizPlayers.created_at)
+                select(
+                    LiveQuizPlayers.player_key, LiveQuizPlayers.id, LiveQuizPlayers.name, LiveQuizPlayers.score, LiveQuizPlayers.created_at,
+                    LiveQuizPlayers.team, LiveQuizPlayers.saved_ms, LiveQuizPlayers.streak,
+                )
                 .where(LiveQuizPlayers.quiz_id == built.quiz_id, LiveQuizPlayers.player_key.in_(unknown))
             )).all()
-            for key, pid, name, score, at in rows:
-                built.players[key] = room.Player(id=pid, name=name, score=score, created_at=at)
+            for key, pid, name, score, at, team, saved, streak in rows:
+                built.players[key] = room.Player(id=pid, name=name, score=score, created_at=at, team=team, saved_ms=int(saved or 0), streak=int(streak or 0))
             for key in set(unknown) - {r[0] for r in rows}:
                 self.gone_players[key] = (401, "You are not in this quiz. Join again with the code on the screen.")
         players = [built.players[k] for k in keys if k in built.players]
         standing = await room.standings(s, built, players) if players else {}
         self.quiz, self.standing = built, standing
         current = built.current()
-        if current is not None and built.opened_at is not None:
+        if current is not None and built.opened_at is not None and built.paused_at is None:
             # When answers close and the players may be shown the right
-            # answer, their points and the board (room.revealed).
+            # answer, their points and the board (room.revealed); for an
+            # auto-advancing round, then when the next question opens.
+            now = _now()
             ends = room.reveal_at(built.opened_at, current["seconds"])
-            left = (ends - _now()).total_seconds()
-            self._clock = (time.monotonic() + left + 0.05, f"clock:{current['id']}") if left > 0 else None
+            left = (ends - now).total_seconds()
+            nxt = built.next_at()
+            if left > 0:
+                self._clock = (time.monotonic() + left + 0.05, f"clock:{current['id']}:{built.opened_at.isoformat()}")
+            elif nxt is not None:
+                self._clock = (time.monotonic() + max(0.0, (nxt - now).total_seconds()) + 0.05, f"next:{current['id']}:{built.opened_at.isoformat()}")
+            else:
+                self._clock = None
         else:
             self._clock = None
 
@@ -526,10 +558,10 @@ class Feed:
             if self._frames_for != (v, id(self.room)):
                 self._frames, self._frames_for = {}, (v, id(self.room))
             flags = room.flags_of(self.room, listener.key, self.voters.get(listener.key) if listener.key else None)
-            made = self._frames.get(flags)
+            made = self._frames.get((flags, listener.v2))
             if made is None:
-                body = room.body_for(self.room, listener.key, None, flags)
-                made = self._frames[flags] = (body, frame("snapshot", body, v))
+                body = room.body_for(self.room, listener.key, None, flags, v2=listener.v2)
+                made = self._frames[(flags, listener.v2)] = (body, frame("snapshot", body, v))
             return v, made[0], made[1]
         if view == "banner":
             data = self.room.strip
@@ -542,12 +574,23 @@ class Feed:
             q = self.quiz
             player = q.players.get(listener.key) or listener.player
             standing = self.standing.get(player.id) or (player.score, q.rank_of(player.score) if q.scores is not None else None)
-            data = service.player_body(q, player, standing, _now())
+            data = service.player_body(q, player, standing, _now(), v2=listener.v2)
             question = data.get("question")
             shows = {**data, "question": {**question, "time_left": None}} if question else data
             return v, shows, frame("snapshot", orjson.dumps(data, default=str), v)
         data = self.club[view]
-        return v, data, frame("snapshot", orjson.dumps(_with_clock(view, data, _now()), default=str), v)
+        if listener.v2:
+            from app.api.live import service
+
+            clocked = _with_clock(view, data, _now())
+            if view == "screen":
+                clocked = service.screen_shown(clocked)
+            return v, data, frame("snapshot", orjson.dumps(clocked, default=str), v)
+        # A console from before this release: today's fields (compat.py).
+        made = self._club_v1.get(view)
+        if made is None or made[0] is not data:
+            made = self._club_v1[view] = (data, compat.club_view(view, data))
+        return v, made[1], frame("snapshot", orjson.dumps(compat.club_view(view, _with_clock(view, data, _now())), default=str), v)
 
 
 def _made_of_room(view: str) -> str:
@@ -582,6 +625,10 @@ def _with_clock(view: str, data, now: datetime):
     q = _question_of(view, data)
     if q is None or not q.get("opened_at"):
         return data
+    holder = data if view == "host" else (data.get("quiz") or {})
+    if holder.get("paused"):
+        # A paused question's clock stands still: as it was counted at the pause.
+        return data
     opened = datetime.fromisoformat(str(q["opened_at"]).replace("Z", "+00:00"))
     left = service._time_left(opened, int(q.get("seconds") or 0), now)
     if view == "host":
@@ -591,7 +638,7 @@ def _with_clock(view: str, data, now: datetime):
 
 async def _club_body(s, service, event: Events, view: str):
     """The body the console's poll of `view` returns, JSON-ready."""
-    from app.api.live.schemas import HostState, PollOut, QABoard, Screen
+    from app.api.live.schemas import HostState, PollOutV2, QABoard, Screen
 
     if view == "host":
         quiz = await service.quiz_of(s, event)
@@ -600,7 +647,7 @@ async def _club_body(s, service, event: Events, view: str):
         return Screen(**await service.screen(s, event)).model_dump(mode="json", by_alias=True)
     if view == "questions":
         return QABoard(**await service.questions_for_club(s, event)).model_dump(mode="json", by_alias=True)
-    return [PollOut(**p).model_dump(mode="json", by_alias=True) for p in await service.list_polls(s, event)]
+    return [PollOutV2(**p).model_dump(mode="json", by_alias=True) for p in await service.list_polls(s, event)]
 
 
 # ─── The process's feeds and its bounds ─────────────────────────────────

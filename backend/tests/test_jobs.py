@@ -348,6 +348,10 @@ def test_the_platforms_jobs_have_the_priorities_and_limits_chosen(monkeypatch):
         # each person's push, each email) is not.
         "network.save_notice": (H, 4),
         "network.recap": (N, 4), "network.recap_send": (N, 4), "network.recap_email": (N, 4),
+        # Event quests (app/api/quests): telling a guest a milestone unlocked or a reward is
+        # held is waited for; one guest's ticks are capped so a poll burst can't take every
+        # slot, and the full recompute runs one at a time.
+        "quests.notify": (H, 4), "quests.notify_held": (H, 4), "quests.evaluate": (N, 2), "quests.recompute": (N, 1),
     }
     monkeypatch.setattr(settings, "JOBS_LIMITS", "")
     found = {n: (h.priority, jobs.limit_for(h, 4)) for n, h in jobs.handlers().items() if not n.startswith("test.")}
@@ -801,5 +805,7 @@ def test_the_urgent_jobs_are_the_short_ones_someone_waits_for():
         "network.save_notice",
         # One guest's ticket or certificate (a walk-in, a payment, a confirmed request).
         "deliveries.send_ids",
+        # "You unlocked a T-shirt", and "your T-shirt is waiting" (app/api/quests).
+        "quests.notify", "quests.notify_held",
     }
     assert all(jobs.handlers()[n].timeout <= jobs.URGENT_MAX_TIMEOUT for n in urgent)

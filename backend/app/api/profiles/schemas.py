@@ -207,6 +207,10 @@ class SaveOut(CustomBaseModel):
     created: bool
     new_encounter: bool
     profile: PublicProfile
+    #: A QR save at an event with a quest on: the saver's "meet people" tasks
+    #: counted now, {"event_id", "tasks": [{"task_id", "title", "count",
+    #: "target", "done"}]} (feature-register/quests/CONTRACT.md §8.6). Null otherwise.
+    quest: Optional[dict] = None
 
 
 class EventCount(CustomBaseModel):

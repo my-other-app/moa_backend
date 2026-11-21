@@ -6,11 +6,12 @@ import enum
 import uuid
 
 import sqlalchemy as sa
-from sqlalchemy import DDL, JSON, Boolean, Column, Enum, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import DDL, JSON, BigInteger, Boolean, Column, Enum, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy import event as sa_event
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
+from app.core.storage.fields import S3ImageField
 from app.core.utils.db_fields import TZAwareDateTime
 from app.db.base import AbstractSQLModel
 from app.db.mixins import TimestampsMixin
@@ -30,13 +31,20 @@ class QuizStatus(enum.Enum):
 
 
 class LiveQuizzes(AbstractSQLModel, TimestampsMixin):
-    """One quiz per event. Players join with the code on the host screen;
-    the host moves it question by question."""
+    """A quiz of an event: one round of several, in their order, at most one
+    live at a time (uq_live_quizzes_one_live). Players join with the code on
+    the host screen; the host moves it question by question."""
 
     __tablename__ = "live_quizzes"
+    __table_args__ = (
+        sa.Index("ix_live_quizzes_event_order", "event_id", "sort_order"),
+        # One round live per event, whatever two consoles press at once.
+        sa.Index("uq_live_quizzes_one_live", "event_id", unique=True, postgresql_where=sa.text("status = 'live'")),
+    )
 
     id = _uuid_pk()
-    event_id = Column(Integer, ForeignKey("events.id"), nullable=False, unique=True, index=True)
+    # By event through ix_live_quizzes_event_order.
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=False)
     title = Column(String(160), nullable=False, default="Quiz")
     intro = Column(String(300), nullable=True)
     status = Column(Enum(QuizStatus), nullable=False, default=QuizStatus.draft)
@@ -45,6 +53,16 @@ class LiveQuizzes(AbstractSQLModel, TimestampsMixin):
     current_index = Column(Integer, nullable=False, default=-1)
     question_opened_at = Column(TZAwareDateTime(timezone=True), nullable=True)
     ended_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    #: The round's place among the event's rounds.
+    sort_order = Column(Integer, nullable=False, default=0, server_default="0")
+    #: What the organiser changed of the round's settings (app/api/live/settings.py); null: none.
+    settings = Column(JSON, nullable=True)
+    #: While the open question's clock is stopped: since when.
+    paused_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    #: When the host revealed the open question (reveal by the host), else null.
+    revealed_at = Column(TZAwareDateTime(timezone=True), nullable=True)
+    #: The ids of the questions asked this run, in the order asked (for streaks).
+    asked = Column(JSON, nullable=True)
 
     questions = relationship("LiveQuizQuestions", order_by="LiveQuizQuestions.sort_order", cascade="all, delete-orphan", lazy="selectin")
 
@@ -60,14 +78,20 @@ class LiveQuizQuestions(AbstractSQLModel, TimestampsMixin):
     correct_key = Column(String(2), nullable=False)
     seconds = Column(Integer, nullable=False, default=20)
     sort_order = Column(Integer, nullable=False, default=0)
+    #: single (null, as every question before the kinds), multi, true_false, type, order, poll.
+    kind = Column(String(16), nullable=True)
+    #: The kind's own fields and the question's overrides (settings.clean_question); null: none.
+    settings = Column(JSON, nullable=True)
 
 
 class LiveQuizPlayers(AbstractSQLModel, TimestampsMixin):
     __tablename__ = "live_quiz_players"
     __table_args__ = (
         UniqueConstraint("quiz_id", "player_key", name="uq_live_quiz_players_key"),
-        # The board: a quiz's players, best first (the room's quiz snapshot reads it in this order).
-        sa.Index("ix_live_quiz_players_board", "quiz_id", sa.text("score DESC"), "created_at"),
+        # The board: a quiz's players, best first, the faster first among
+        # equals (the room's quiz snapshot reads it in this order; ordered by
+        # join time among equals it is an incremental sort on its prefix).
+        sa.Index("ix_live_quiz_players_rank", "quiz_id", sa.text("score DESC"), sa.text("saved_ms DESC"), "created_at"),
     )
 
     id = _uuid_pk()
@@ -78,6 +102,15 @@ class LiveQuizPlayers(AbstractSQLModel, TimestampsMixin):
     player_key = Column(String(64), nullable=False)
     registration_id = Column(UUID(as_uuid=True), ForeignKey("event_registrations_link.id", ondelete="SET NULL"), nullable=True)
     score = Column(Integer, nullable=False, default=0)
+    #: Who joined, for the event's overall board across rounds: a keyed hash of
+    #: the account or client key (null for a join with neither).
+    person = Column(String(64), nullable=True)
+    team = Column(String(16), nullable=True)
+    #: The time left on the clock over every answer, in ms: the faster player first among equals.
+    saved_ms = Column(BigInteger, nullable=False, default=0, server_default="0")
+    #: Right answers in a row, and the question the last one was on.
+    streak = Column(Integer, nullable=False, default=0, server_default="0")
+    streak_at = Column(UUID(as_uuid=True), nullable=True)
 
 
 class LiveQuizAnswers(AbstractSQLModel, TimestampsMixin):
@@ -92,6 +125,10 @@ class LiveQuizAnswers(AbstractSQLModel, TimestampsMixin):
     correct = Column(Boolean, nullable=False, default=False)
     points = Column(Integer, nullable=False, default=0)
     answered_at = Column(TZAwareDateTime(timezone=True), nullable=False)
+    #: The answer as given and what it came to, for the kinds past one key:
+    #: {"option_keys" | "text" | "order", "credit", "elapsed_ms", "saved_ms",
+    #: "streak_before", "streak_at_before"}. Null for an answer from before.
+    response = Column(JSON, nullable=True)
 
 
 # --- Q&A ----------------------------------------------------------------------
@@ -141,6 +178,8 @@ class PollKind(enum.Enum):
     choice = "choice"
     words = "words"
     rating = "rating"
+    ranking = "ranking"
+    text = "text"
 
 
 class PollStatus(enum.Enum):
@@ -162,6 +201,10 @@ class LivePolls(AbstractSQLModel, TimestampsMixin):
     launched_at = Column(TZAwareDateTime(timezone=True), nullable=True)
     closed_at = Column(TZAwareDateTime(timezone=True), nullable=True)
     sort_order = Column(Integer, nullable=False, default=0)
+    #: What the organiser changed of the poll's settings (settings.poll_settings); null: none.
+    settings = Column(JSON, nullable=True)
+    #: A poll with a timer closes by itself then.
+    closes_at = Column(TZAwareDateTime(timezone=True), nullable=True)
 
 
 class LivePollResponses(AbstractSQLModel):
@@ -179,6 +222,51 @@ class LivePollResponses(AbstractSQLModel):
     poll_id = Column(UUID(as_uuid=True), ForeignKey("live_polls.id", ondelete="CASCADE"), nullable=False)
     voter_key = Column(String(64), nullable=False)
     value = Column(String(120), nullable=False)
+    created_at = Column(TZAwareDateTime(timezone=True), server_default=sa.func.now(), nullable=False)
+    #: An open-text answer's moderation: pending, approved or rejected; null for every other kind.
+    status = Column(String(10), nullable=True)
+    #: The name an open-text answer shows when the poll is not anonymous.
+    author_name = Column(String(60), nullable=True)
+
+
+# --- the room's look ----------------------------------------------------------------------
+
+
+class LiveThemes(AbstractSQLModel):
+    """An event's live theme (app/api/live/theme.py) and the big screen's
+    controls. No row, or a null theme: the room looks as it always has."""
+
+    __tablename__ = "live_themes"
+
+    event_id = Column(Integer, ForeignKey("events.id", ondelete="CASCADE"), primary_key=True)
+    theme = Column(JSON, nullable=True)
+    screen = Column(JSON, nullable=True)
+    updated_at = Column(TZAwareDateTime(timezone=True), server_default=sa.func.now(), nullable=False)
+
+
+#: A live picture is fitted inside each box, never cropped or enlarged.
+MEDIA_SIZES = {
+    "thumbnail": {"width": 240, "height": 240},
+    "medium": {"width": 960, "height": 960},
+    "large": {"width": 1920, "height": 1920},
+}
+MEDIA_KINDS = ("logo", "background", "option")
+
+
+class LiveMedia(AbstractSQLModel):
+    """A picture uploaded for an event's live room: the theme's logo or
+    background, a poll option's image."""
+
+    __tablename__ = "live_media"
+    __table_args__ = (sa.Index("ix_live_media_event", "event_id", "created_at"),)
+
+    id = _uuid_pk()
+    event_id = Column(Integer, ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
+    kind = Column(String(16), nullable=False)
+    image = Column(S3ImageField(upload_to="events/live/", max_size=10 * 1024 * 1024, allowed_extensions=["jpg", "jpeg", "png", "webp"], variations=MEDIA_SIZES, public=True), nullable=False)
+    width = Column(Integer, nullable=True)
+    height = Column(Integer, nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TZAwareDateTime(timezone=True), server_default=sa.func.now(), nullable=False)
 
 

@@ -92,6 +92,8 @@ def start_loops() -> list[asyncio.Task]:
     # Guests' poster photos and renders past their retention (30 days after the
     # event's end; at once for a ticket removed or revoked) -- hourly, one process.
     from app.api.guest_posters.sweep import sweep_loop as posters_sweep_loop
+    # Quests: what no event reports, every five minutes while a quest is on (app/api/quests/sweep.py).
+    from app.api.quests.sweep import sweep_loop as quests_sweep_loop
 
     return [
         asyncio.create_task(loop())
@@ -103,6 +105,7 @@ def start_loops() -> list[asyncio.Task]:
             support_sweep_loop,
             webhooks_sweep_loop,
             posters_sweep_loop,
+            quests_sweep_loop,
         )
     ]
 

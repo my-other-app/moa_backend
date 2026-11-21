@@ -353,6 +353,10 @@ async def get_event(
 
     row = await session.get(Events, int(data["id"])) if data.get("id") is not None else None
     data["share_image_url"] = await social_posters.share_image_url(session, row) if row is not None else None
+    # Whether there is a quest card to ask for (app/api/quests): one cached read.
+    from app.api.quests import public as quests_public
+
+    data["quest"] = await quests_public.flag(session, data.get("id"), user)
     # The admin's Web address card: the old slugs that still answer (app/api/slugs).
     data["slug_aliases"] = None
     if user is not None and is_admin_user(user) and data.get("id") is not None:

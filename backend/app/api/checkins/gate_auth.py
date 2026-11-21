@@ -43,6 +43,9 @@ class GateActor:
     can_merch: bool = False
     # Access from above volunteer: the club or an admin. Overrides the switches.
     full: bool = False
+    # What the console says it understands (X-Gate-Features): "quests" gets
+    # the station and swag-desk outcomes (app/api/quests/gate.py).
+    features: frozenset = frozenset()
 
     @property
     def user_id(self) -> Optional[int]:
@@ -113,6 +116,9 @@ async def gate_actor(request: Request, session: SessionDep, event_id: int, user:
     volunteer reads the guests masked (club_access.door): `door_view`."""
     event = await load_event(session, event_id)
     actor = await actor_for(session, event, user, request.headers.get(GATE_KEY_HEADER), request.method)
+    from app.api.quests.gate import FEATURES_HEADER, features_of
+
+    actor.features = features_of(request.headers.get(FEATURES_HEADER))
     request.state.gate_event = event
     request.state.gate_actor_key = actor_key(actor)
     request.state.door_view = not actor.full

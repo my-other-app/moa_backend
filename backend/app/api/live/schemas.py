@@ -13,23 +13,57 @@ class QuizOption(BaseModel):
     label: str = Field(..., min_length=1, max_length=120)
 
 
+QuestionKind = Literal["single", "multi", "true_false", "type", "order", "poll"]
+
+
 class QuizPatch(BaseModel):
     title: Optional[str] = Field(None, max_length=160)
     intro: Optional[str] = Field(None, max_length=300)
+    #: Any part of the round's settings (CONTRACT 3.1), merged into what is saved.
+    settings: Optional[dict] = None
+
+
+class RoundIn(BaseModel):
+    title: Optional[str] = Field(None, max_length=160)
+    intro: Optional[str] = Field(None, max_length=300)
+    settings: Optional[dict] = None
+
+
+class IdsIn(BaseModel):
+    ids: list[UUID] = Field(..., max_length=500)
 
 
 class QuizQuestionIn(BaseModel):
+    """A question (CONTRACT 3.2). With no kind it is today's: two to six
+    options and the right one's key; each kind checks its own fields."""
+
+    kind: Optional[QuestionKind] = None
     prompt: str = Field(..., min_length=3, max_length=300)
-    options: list[QuizOption] = Field(..., min_length=2, max_length=6)
-    correct_key: str = Field(..., min_length=1, max_length=2)
-    seconds: int = Field(20, ge=5, le=120)
+    options: Optional[list[QuizOption]] = Field(None, max_length=6)
+    correct_key: Optional[str] = Field(None, min_length=1, max_length=2)
+    correct_keys: Optional[list[str]] = Field(None, max_length=6)
+    accepted: Optional[list[str]] = Field(None, max_length=10)
+    match: Optional[Literal["exact", "close"]] = None
+    multi_rule: Optional[Literal["all", "proportional", "subtract"]] = None
+    order_rule: Optional[Literal["all", "partial"]] = None
+    seconds: int = Field(20, ge=5, le=300)
+    points: Optional[int] = Field(None, ge=0, le=10000)
+    double: bool = False
 
 
 class QuizQuestionPatch(BaseModel):
+    kind: Optional[QuestionKind] = None
     prompt: Optional[str] = Field(None, min_length=3, max_length=300)
-    options: Optional[list[QuizOption]] = Field(None, min_length=2, max_length=6)
+    options: Optional[list[QuizOption]] = Field(None, max_length=6)
     correct_key: Optional[str] = Field(None, min_length=1, max_length=2)
-    seconds: Optional[int] = Field(None, ge=5, le=120)
+    correct_keys: Optional[list[str]] = Field(None, max_length=6)
+    accepted: Optional[list[str]] = Field(None, max_length=10)
+    match: Optional[Literal["exact", "close"]] = None
+    multi_rule: Optional[Literal["all", "proportional", "subtract"]] = None
+    order_rule: Optional[Literal["all", "partial"]] = None
+    seconds: Optional[int] = Field(None, ge=5, le=300)
+    points: Optional[int] = Field(None, ge=0, le=10000)
+    double: Optional[bool] = None
 
 
 class QuizQuestionOut(BaseModel):
@@ -39,6 +73,15 @@ class QuizQuestionOut(BaseModel):
     correct_key: Optional[str] = None
     seconds: int
     sort_order: int
+    kind: str = "single"
+    correct_keys: Optional[list[str]] = None
+    accepted: Optional[list[str]] = None
+    match: Optional[str] = None
+    multi_rule: Optional[str] = None
+    order_rule: Optional[str] = None
+    points: Optional[int] = None
+    double: bool = False
+    effective_points: Optional[int] = None
 
 
 class QuizOut(BaseModel):
@@ -50,6 +93,21 @@ class QuizOut(BaseModel):
     current_index: int
     players: int
     questions: list[QuizQuestionOut]
+    sort_order: int = 0
+    settings: Optional[dict] = None
+    round: Optional[dict] = None
+
+
+class RoundSummary(BaseModel):
+    id: UUID
+    title: str
+    intro: Optional[str] = None
+    status: str
+    sort_order: int
+    questions: int
+    players: int
+    join_code: Optional[str] = None
+    settings: dict
 
 
 class HostState(BaseModel):
@@ -61,6 +119,15 @@ class HostState(BaseModel):
     total: int
     question: Optional[dict] = None
     leaderboard: list[dict]
+    quiz_id: Optional[UUID] = None
+    round: Optional[dict] = None
+    phase: Optional[str] = None
+    paused: bool = False
+    board_now: bool = False
+    next_at: Optional[datetime] = None
+    settings: Optional[dict] = None
+    teams: Optional[list[dict]] = None
+    overall: Optional[list[dict]] = None
 
 
 class Notified(BaseModel):
@@ -83,6 +150,7 @@ class HostActionIn(BaseModel):
     notify: Optional[bool] = Field(None, description="start only: tell everyone checked in. Not given: yes.")
     restart: Optional[bool] = Field(None, description="start only: start again a quiz that is running, clearing every player's score. Without it, starting a running quiz is 409 QUIZ_RUNNING.")
     expected_index: Optional[int] = Field(None, ge=-1, description="next only: the question index the console shows. When the quiz has moved on from it (a second press, another console), 409 QUIZ_MOVED_ON and nothing moves.")
+    index: Optional[int] = Field(None, ge=0, description="reopen only: the question to open again (the current one when not given).")
 
 
 class HostActionOut(HostState):
@@ -93,6 +161,7 @@ class HostActionOut(HostState):
 class JoinIn(BaseModel):
     code: str = Field(..., min_length=4, max_length=8)
     name: str = Field(..., min_length=1, max_length=60)
+    team: Optional[str] = Field(None, max_length=16, description="A round played in teams the players pick: the team's key. Not given: assigned.")
     player_key: Optional[str] = Field(
         None, max_length=64,
         description="The client's stable key (the browser's, the install's): joining again with it in the same quiz run returns the same player. A signed-in caller is the account instead, on any device.",
@@ -106,6 +175,8 @@ class JoinOut(BaseModel):
     player_id: UUID
     player_key: str
     name: str
+    team: Optional[dict] = None
+    tag: Optional[str] = None
 
 
 class PlayerState(BaseModel):
@@ -121,7 +192,12 @@ class PlayerState(BaseModel):
 
 
 class AnswerIn(BaseModel):
-    option_key: str = Field(..., min_length=1, max_length=2)
+    """Exactly one, by the question's kind (CONTRACT 5.3)."""
+
+    option_key: Optional[str] = Field(None, min_length=1, max_length=2)
+    option_keys: Optional[list[str]] = Field(None, min_length=1, max_length=6)
+    text: Optional[str] = Field(None, min_length=1, max_length=200)
+    order: Optional[list[str]] = Field(None, min_length=2, max_length=6)
 
 
 class AnswerOut(BaseModel):
@@ -193,16 +269,22 @@ class VoteOut(BaseModel):
 # --- polls ----------------------------------------------------------------------
 
 
+PollKindName = Literal["choice", "words", "rating", "ranking", "text"]
+
+
 class PollIn(BaseModel):
-    kind: Literal["choice", "words", "rating"] = "choice"
+    kind: PollKindName = "choice"
     prompt: str = Field(..., min_length=1, max_length=300)
     options: list[str] = Field(default_factory=list, max_length=8)
+    #: Any of the poll's settings (CONTRACT 7.1).
+    settings: Optional[dict] = None
 
 
 class PollPatch(BaseModel):
-    kind: Optional[Literal["choice", "words", "rating"]] = None
+    kind: Optional[PollKindName] = None
     prompt: Optional[str] = Field(None, min_length=1, max_length=300)
     options: Optional[list[str]] = Field(None, max_length=8)
+    settings: Optional[dict] = None
 
 
 class PollStatusIn(BaseModel):
@@ -223,13 +305,43 @@ class PollOut(BaseModel):
     my_response: Optional[str] = None
 
 
-class PollStatusOut(PollOut):
+class PollOutV2(PollOut):
+    """The poll as this release's clients read it: its settings, its timer,
+    its options' pictures, whether guests see its results, and a browser's
+    own answer as labels."""
+
+    settings: dict = Field(default_factory=dict)
+    closes_at: Optional[datetime] = None
+    option_images: list = Field(default_factory=list)
+    results_hidden: bool = False
+    my_values: Optional[list[str]] = None
+
+
+class PollStatusOut(PollOutV2):
     #: For a launch, what telling the room came to; null when it was not asked (and for a close).
     notified: Optional[Notified] = None
 
 
 class RespondIn(BaseModel):
-    value: str = Field(..., min_length=1, max_length=120)
+    """`value` as always (a choice's label, a word, a rating, a text); a
+    multiple-choice poll's labels in `values`; a ranking's in `order`."""
+
+    value: Optional[str] = Field(None, min_length=1, max_length=200)
+    values: Optional[list[str]] = Field(None, min_length=1, max_length=8)
+    order: Optional[list[str]] = Field(None, min_length=2, max_length=8)
+    name: Optional[str] = Field(None, max_length=60)
+
+
+class PollResponseOut(BaseModel):
+    id: UUID
+    text: str
+    name: Optional[str] = None
+    status: Optional[str] = None
+    at: datetime
+
+
+class PollModerateIn(BaseModel):
+    action: Literal["approve", "reject"]
 
 
 # --- feedback ----------------------------------------------------------------------
@@ -338,6 +450,13 @@ class Feed(BaseModel):
     quiz: dict
 
 
+class FeedV2(Feed):
+    """The feed for this release's clients (X-Live-Version: 2): the poll with its settings, and the theme."""
+
+    poll: Optional[PollOutV2] = None
+    theme: Optional[dict] = None
+
+
 class BannerPoll(BaseModel):
     id: UUID
     kind: str
@@ -368,6 +487,88 @@ class Screen(BaseModel):
     event: dict
     pinned: Optional[QuestionOut] = None
     board: list[QuestionOut]
-    poll: Optional[PollOut] = None
+    poll: Optional[PollOutV2] = None
     quiz: Optional[HostState] = None
     update: Optional[UpdateOut] = None
+    theme: Optional[dict] = None
+    theme_custom: bool = False
+    theme_version: Optional[str] = None
+    control: Optional[dict] = None
+    shows: Optional[str] = None
+    wall: list[QuestionOut] = Field(default_factory=list)
+    updates: list[UpdateOut] = Field(default_factory=list)
+    agenda: list[dict] = Field(default_factory=list)
+    sponsors: list[dict] = Field(default_factory=list)
+    overall: Optional[list[dict]] = None
+
+
+# --- the look ----------------------------------------------------------------------
+
+
+class ThemeOut(BaseModel):
+    custom: bool
+    theme: dict
+    version: str
+    warnings: list[dict] = Field(default_factory=list)
+    updated_at: Optional[datetime] = None
+
+
+class ThemeCheckOut(BaseModel):
+    ok: bool
+    errors: list[dict]
+    warnings: list[dict]
+    theme: dict
+    version: str
+
+
+class PublicTheme(BaseModel):
+    custom: bool
+    theme: dict
+    version: str
+
+
+class ThemePreset(BaseModel):
+    key: str
+    name: str
+    theme: dict
+
+
+class MediaOut(BaseModel):
+    id: str
+    kind: str
+    thumbnail: Optional[str] = None
+    medium: Optional[str] = None
+    large: Optional[str] = None
+    original: Optional[str] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+
+
+class ScreenControl(BaseModel):
+    mode: Literal["auto", "quiz", "poll", "qa", "idle", "leaderboard"] = "auto"
+    results: Literal["live", "hidden"] = "live"
+    ticker: bool = False
+    idle_slides: list[str] = Field(default_factory=list)
+    slide_seconds: int = 12
+    wall_size: int = 6
+
+
+class ScreenControlPatch(BaseModel):
+    mode: Optional[Literal["auto", "quiz", "poll", "qa", "idle", "leaderboard"]] = None
+    results: Optional[Literal["live", "hidden"]] = None
+    ticker: Optional[bool] = None
+    idle_slides: Optional[list[str]] = Field(None, max_length=3)
+    slide_seconds: Optional[int] = None
+    wall_size: Optional[int] = None
+
+
+# --- winners ----------------------------------------------------------------------
+
+
+class TopIn(BaseModel):
+    top: int = Field(3, ge=1, le=100)
+
+
+class MarkOut(BaseModel):
+    marked: list[dict]
+    skipped: list[dict]
