@@ -151,6 +151,9 @@ async def describe(session, row: McpPendingActions, *, role: str) -> dict:
     target: dict = {}
     effects: list[str] = []
     title = "Approve an assistant's request"
+    # Why a request that is still shown can't be approved (a count the server
+    # refused): said instead of an Approve that can only fail.
+    blocked: str | None = None
     if row.kind == "publish_event":
         event = await session.scalar(select(Events).where(Events.id == int(row.target_id), Events.club_id == row.club_id))
         if event is not None:
@@ -193,19 +196,25 @@ async def describe(session, row: McpPendingActions, *, role: str) -> dict:
                 "It counts toward the plan's announcements this month.",
             ]
     elif row.kind == "issue_certificates":
-        title, target, effects = await _describe_issue(session, row)
+        title, target, effects, blocked = await _describe_issue(session, row)
     elif row.kind == "resend_review_email":
-        title, target, effects = await _describe_resend(session, row)
+        title, target, effects, blocked = await _describe_resend(session, row)
     expired = row.status == "expired"
-    can_decide = row.status == "pending" and policy.allows_action(role, row.kind) and bool(target)
+    can_decide = row.status == "pending" and policy.allows_action(role, row.kind) and bool(target) and not blocked
+    if can_decide or row.status != "pending":
+        reason = None
+    elif not target:
+        reason = "This action is no longer possible."
+    elif blocked:
+        reason = blocked
+    else:
+        reason = "Your role can't approve this. Ask an admin or the club's owner."
     return {
         "id": str(row.id), "kind": row.kind, "status": row.status, "title": title, "effects": effects, "target": target,
         "requested": {"app": row.client_name, "by": await _person(session, row.requested_by_user_id, row.requested_by_member_id), "at": _aware(row.created_at).isoformat()},
         "expires_at": _aware(row.expires_at).isoformat(), "expired": expired,
         "can_decide": can_decide,
-        "cannot_decide_reason": None if can_decide or row.status != "pending" else (
-            "This action is no longer possible." if not target else "Your role can't approve this. Ask an admin or the club's owner."
-        ),
+        "cannot_decide_reason": reason,
         "decided": {"at": _aware(row.decided_at).isoformat(), "by": await _person(session, row.decided_by_user_id, row.decided_by_member_id)} if row.decided_at and row.status in ("confirmed", "rejected", "failed") else None,
         "result": row.result,
     }
@@ -355,44 +364,59 @@ def _event_target(event: Events) -> dict:
     }
 
 
-CERTIFICATE_AUDIENCE = {"checked_in": "everyone who checked in", "everyone": "everyone registered", "roles": "these roles"}
+CERTIFICATE_AUDIENCE = {"checked_in": "everyone who checked in", "everyone": "everyone registered"}
+CERTIFICATE_ROLE_WORDS = {"attendee": "attendees", "speaker": "speakers", "staff": "staff"}
 
 
-async def _describe_issue(session, row: McpPendingActions) -> tuple[str, dict, list[str]]:
+def _certificate_who(audience: str, roles: list[str]) -> str:
+    """Who gets one, as the confirm page says it: "everyone who checked in", "only speakers and staff"."""
+    if audience != "roles":
+        return CERTIFICATE_AUDIENCE.get(audience, audience)
+    words = [CERTIFICATE_ROLE_WORDS.get(r, r) for r in roles]
+    if not words:
+        return "certain roles"
+    return "only " + (words[0] if len(words) == 1 else f"{', '.join(words[:-1])} and {words[-1]}")
+
+
+async def _describe_issue(session, row: McpPendingActions) -> tuple[str, dict, list[str], str | None]:
     from app.api.certificates import service as certificates
 
     event = await _event_of(session, row, live=False)
     if event is None:
-        return "Approve an assistant's request", {}, []
+        return "Approve an assistant's request", {}, [], None
     p = row.payload or {}
     audience, roles = p.get("audience") or "checked_in", list(p.get("roles") or [])
+    blocked = None
     try:
         counts = await certificates.issue_preview(session, event, audience, roles) if not event.is_deleted else None
-    except CustomHTTPException:
+    except CustomHTTPException as e:
+        # Approving would be refused the same way: say why now, rather than
+        # show "nobody new" and an Approve that can only fail.
         counts = None
-    who = CERTIFICATE_AUDIENCE.get(audience, audience) + (f" ({', '.join(roles)})" if audience == "roles" and roles else "")
+        blocked = e.message or "The certificates can't be counted, so this can't be approved."
     to_issue = counts["to_issue"] if counts else 0
     target = {**_event_target(event), "certificates": {"audience": audience, "roles": roles, "to_issue": to_issue,
                                                        "already_issued": counts["already_issued"] if counts else None}}
     effects = [
-        f"{to_issue} {'person gets' if to_issue == 1 else 'people get'} a certificate for “{event.name}”: {who} who have none yet.",
+        f"{to_issue} {'person gets' if to_issue == 1 else 'people get'} a certificate for “{event.name}”: "
+        f"{_certificate_who(audience, roles)}, except anyone who already has one.",
         "They see it in the MyOtherApp app and on its public check page. Emailing it is a separate step in the dashboard.",
         "Nobody is issued twice, and certificates already issued keep their design.",
     ]
-    return f"Issue certificates for “{event.name}”", target, effects
+    return f"Issue certificates for “{event.name}”", target, effects, blocked
 
 
-async def _describe_resend(session, row: McpPendingActions) -> tuple[str, dict, list[str]]:
+async def _describe_resend(session, row: McpPendingActions) -> tuple[str, dict, list[str], str | None]:
     from app.api.emails import review
     from app.core.mail.schema import EMAIL_STAGE_META
 
     event = await _event_of(session, row, live=False)
     if event is None:
-        return "Approve an assistant's request", {}, []
+        return "Approve an assistant's request", {}, [], None
     try:
         stage = review.stage_of((row.payload or {}).get("stage") or "")
     except CustomHTTPException:
-        return "Approve an assistant's request", {}, []
+        return "Approve an assistant's request", {}, [], None
     label = EMAIL_STAGE_META[stage.value]["label"]
     eligible = 0 if event.is_deleted else (await review.count(session, event, stage))["eligible"]
     who = review.WHO.get(stage, "the people it went to")
@@ -403,7 +427,7 @@ async def _describe_resend(session, row: McpPendingActions) -> tuple[str, dict, 
         "Anyone whose registration moves on before their copy goes is skipped.",
         "It counts toward the club's emails this month, as a message to the guests does.",
     ]
-    return f"Send “{label}” again", target, effects
+    return f"Send “{label}” again", target, effects, None
 
 
 async def _issue(session, row: McpPendingActions, *, user: Users) -> dict:

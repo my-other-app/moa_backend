@@ -334,3 +334,41 @@ async def test_issuing_certificates_waits_for_a_person(client, session, world, m
     # Switched off again: not offered, and refused.
     monkeypatch.setattr(settings, "MCP_GUEST_REQUESTS_ENABLED", False)
     assert (await call(client, c.access_token, "request_issue_certificates", {"event_id": world.ids.upcoming}))["_error"] == "UNKNOWN_TOOL"
+
+
+async def test_a_certificate_request_says_who_and_when_it_cannot_be_approved(client, session, world, monkeypatch):
+    from app.api.mcp.models import McpPendingActions
+
+    monkeypatch.setattr(settings, "MCP_GUEST_REQUESTS_ENABLED", True)
+    c = await connect(client, "editor@robotics.example.com")
+    out = await call(client, c.access_token, "request_issue_certificates", {"event_id": world.ids.upcoming})
+    token = out["confirm_url"].rsplit("/", 1)[1]
+    h = auth_header(await _owner_token(session, world))
+
+    async def page() -> dict:
+        return (await client.get(f"{API}/clubs/pending-actions/{token}", headers=h)).json()
+
+    first = await page()
+    assert first["effects"][0] == (
+        "1 person gets a certificate for “Bot Build Night”: everyone who checked in, except anyone who already has one."
+    )
+    row = await session.scalar(select(McpPendingActions).where(McpPendingActions.kind == "issue_certificates"))
+    row.payload = {**row.payload, "audience": "roles", "roles": ["speaker", "staff"]}
+    await session.commit()
+    roles = await page()
+    assert roles["effects"][0].endswith("only speakers and staff, except anyone who already has one.")
+    assert roles["can_decide"] is True
+    # A count the server refuses (a role it doesn't know): said, and Approve not offered.
+    row.payload = {**row.payload, "roles": ["wizard"]}
+    await session.commit()
+    refused = await page()
+    assert refused["can_decide"] is False
+    assert refused["cannot_decide_reason"] == "Pick roles from attendee, speaker and staff."
+    # A deleted event is gone (soft-deleted rows are never read): no longer possible.
+    row.payload = {**row.payload, "audience": "checked_in", "roles": []}
+    event = await session.get(Events, world.ids.upcoming)
+    event.is_deleted = True
+    await session.commit()
+    gone = await page()
+    assert gone["target"] == {} and gone["can_decide"] is False
+    assert gone["cannot_decide_reason"] == "This action is no longer possible."

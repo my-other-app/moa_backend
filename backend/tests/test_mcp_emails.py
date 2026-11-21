@@ -237,3 +237,22 @@ async def test_sending_a_review_email_again_waits_for_a_person(client, session, 
     assert done.json()["status"] == "confirmed" and done.json()["result"]["people"] == 1
     resend = await session.scalar(select(ReviewResends).where(ReviewResends.event_id == world.ids.upcoming))
     assert resend is not None and resend.recipients == 1 and resend.stage == "REQUEST_RECEIVED"
+
+
+async def test_a_resend_for_a_deleted_event_cannot_be_approved(client, session, world, monkeypatch):
+    monkeypatch.setattr(settings, "MCP_GUEST_REQUESTS_ENABLED", True)
+    c = await connect(client, "robotics@example.com")
+    event = await session.scalar(select(Events).where(Events.id == world.ids.upcoming))
+    event.requires_approval = True
+    session.add(RegistrationRequests(event_id=world.ids.upcoming, full_name="Waiting Wendy", email="wendy@example.com", status=PENDING, token="t" * 40))
+    await session.commit()
+    out = _ok(await call(client, c.access_token, "request_resend_review_email", {"event_id": world.ids.upcoming, "key": "request_received"}))
+    token = out["confirm_url"].rsplit("/", 1)[1]
+    h = auth_header(await _owner_token(session, world))
+    event.is_deleted = True
+    await session.commit()
+    page = (await client.get(f"{API}/clubs/pending-actions/{token}", headers=h)).json()
+    # Soft-deleted rows are never read: the event is gone, and so is Approve.
+    assert page["status"] == "pending" and page["target"] == {}
+    assert page["can_decide"] is False
+    assert page["cannot_decide_reason"] == "This action is no longer possible."
