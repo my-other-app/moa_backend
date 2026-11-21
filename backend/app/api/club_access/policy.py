@@ -343,6 +343,28 @@ MCP_TOOLS = {
     "draft_announcement": ("POST", "/api/v1/clubs/notifications/events/0/send"),
     "request_publish_event": ("PATCH", "/api/v1/events/0/closeout/settings"),
     "request_send_announcement": ("POST", "/api/v1/clubs/notifications/events/0/send"),
+    # An event's designs (app/api/mcp/design_tools.py): the board's own
+    # requests. The poster's are the same rules under /designs/poster/.
+    "list_design_starters": ("GET", "/api/v1/events/0/designs/ticket/layout"),
+    "get_design_guide": ("GET", "/api/v1/events/0/designs/ticket/layout"),
+    "get_event_design": ("GET", "/api/v1/events/0/designs/ticket/layout"),
+    "list_design_revisions": ("GET", "/api/v1/events/0/designs/ticket/layout"),
+    "preview_event_design": ("POST", "/api/v1/events/0/designs/ticket/layout/preview"),
+    "update_event_design": ("PUT", "/api/v1/events/0/designs/ticket/layout"),
+    "apply_design_starter": ("PUT", "/api/v1/events/0/designs/ticket/layout"),
+    "revert_event_design": ("PUT", "/api/v1/events/0/designs/ticket/layout"),
+    "request_issue_certificates": ("POST", "/api/v1/events/0/certificates/issue"),
+    # An event's emails and the club's library (app/api/mcp/email_tools.py).
+    "list_event_emails": ("GET", "/api/v1/events/0/emails"),
+    "get_event_email": ("GET", "/api/v1/events/0/emails/00000000-0000-0000-0000-000000000000"),
+    "preview_event_email": ("POST", "/api/v1/events/0/emails/preview"),
+    "update_event_email": ("PUT", "/api/v1/events/0/emails/00000000-0000-0000-0000-000000000000"),
+    "send_test_email": ("POST", "/api/v1/events/0/emails/test"),
+    "request_resend_review_email": ("POST", "/api/v1/events/0/emails/review/REQUEST_RECEIVED/resend"),
+    "list_library_emails": ("GET", "/api/v1/clubs/me/emails"),
+    "get_library_email": ("GET", "/api/v1/clubs/me/emails/00000000-0000-0000-0000-000000000000"),
+    "preview_library_email": ("POST", "/api/v1/clubs/me/emails/preview"),
+    "update_library_email": ("PUT", "/api/v1/clubs/me/emails/00000000-0000-0000-0000-000000000000"),
 }
 
 #: Each scope's dashboard request: a scope is offered at consent only to a
@@ -355,6 +377,10 @@ MCP_SCOPES = {
     "store:write": ("POST", "/api/v1/clubs/store"),
     "comms:write": ("POST", "/api/v1/clubs/notifications/events/0/send"),
     "team:read": ("GET", "/api/v1/clubs/access"),
+    "designs:read": ("GET", "/api/v1/events/0/designs/ticket/layout"),
+    "designs:write": ("PUT", "/api/v1/events/0/designs/ticket/layout"),
+    "emails:read": ("GET", "/api/v1/events/0/emails"),
+    "emails:write": ("PUT", "/api/v1/events/0/emails/00000000-0000-0000-0000-000000000000"),
 }
 
 #: An event's money, as the event's own finance page reads it.
@@ -363,6 +389,8 @@ EVENT_MONEY = ("GET", "/api/v1/events/0/finance")
 MCP_ACTIONS = {
     "publish_event": ("PATCH", "/api/v1/events/0/closeout/settings"),
     "send_announcement": ("POST", "/api/v1/clubs/notifications/events/0/send"),
+    "issue_certificates": ("POST", "/api/v1/events/0/certificates/issue"),
+    "resend_review_email": ("POST", "/api/v1/events/0/emails/review/REQUEST_RECEIVED/resend"),
 }
 
 

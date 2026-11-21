@@ -41,7 +41,8 @@ PASSWORD = "Password123!"
 LEGACY = "2025-11-25"
 MODERN = "2026-07-28"
 NOW = datetime.now(timezone.utc)
-ALL_SCOPES = ["events:read", "events:write", "attendees:read", "finance:read", "store:read", "store:write", "comms:write", "team:read"]
+ALL_SCOPES = ["events:read", "events:write", "attendees:read", "finance:read", "store:read", "store:write", "comms:write", "team:read",
+              "designs:read", "designs:write", "emails:read", "emails:write"]
 
 
 @pytest.fixture(autouse=True)
@@ -507,7 +508,7 @@ async def test_door_staff_are_offered_reads_only_and_cannot_write(client, sessio
     _, challenge = pkce()
     consent_page = await sign_in(client, await open_authorize(client, client_id, challenge), "door@robotics.example.com")
     offered = re.findall(r"name=scope value='([^']+)'", consent_page.text)
-    assert offered == ["events:read", "store:read"]
+    assert offered == ["events:read", "store:read", "designs:read", "emails:read"]
     assert "Not available to your role (Door)" in consent_page.text
     c = await connect(client, "door@robotics.example.com")
     names = await tools_list(client, c.access_token)
@@ -574,11 +575,12 @@ async def test_every_tool_through_the_protocol(client, session, world, era, monk
         init = r.json()["result"]
         assert init["serverInfo"]["name"] == "myotherapp-clubs" and "user_written" in init["instructions"] and "tools" in init["capabilities"]
     listed = (await rpc(client, c.access_token, "tools/list", era=era)).json()["result"]["tools"]
-    assert len(listed) == 16
+    # Every tool but the two requests switched off by default (APP_MCP_GUEST_REQUESTS_ENABLED).
+    assert len(listed) == 33
     for t in listed:
         assert t["inputSchema"]["type"] == "object" and t["inputSchema"]["additionalProperties"] is False, t["name"]
         hints = t["annotations"]
-        assert hints["readOnlyHint"] is (t["name"].startswith(("list_", "get_", "event_stats", "finance_"))), t["name"]
+        assert hints["readOnlyHint"] is (t["name"].startswith(("list_", "get_", "event_stats", "finance_", "preview_"))), t["name"]
         assert hints["destructiveHint"] is False and "idempotentHint" in hints and t["description"]
 
     events = await call(client, c.access_token, "list_events", {"status": "upcoming"}, era=era)
@@ -656,7 +658,7 @@ async def test_the_official_sdk_client_connects_and_calls(client, world):
     http = httpx2.AsyncClient(transport=httpx2.ASGITransport(app=application), base_url="http://testserver", headers={"Authorization": f"Bearer {c.access_token}"})
     async with http, Client(streamable_http_client("http://testserver/mcp", http_client=http), mode="legacy") as sdk:
         tools = await sdk.list_tools()
-        assert len(tools.tools) == 16
+        assert len(tools.tools) == 33
         result = await sdk.call_tool("list_events", {"status": "all"})
         assert not result.is_error and {e["name"] for e in result.structured_content["events"]} >= {"Bot Build Night", "Draft Demo Day"}
     http = httpx2.AsyncClient(transport=httpx2.ASGITransport(app=application), base_url="http://testserver", headers={"Authorization": f"Bearer {c.access_token}"})
@@ -1139,16 +1141,19 @@ def test_every_tool_stands_for_a_dashboard_request_under_a_known_scope():
     from app.api.mcp.scopes import ALL
     from app.api.mcp.tools import TOOLS
 
-    assert len(TOOLS) == 16 and set(TOOLS) == set(policy.MCP_TOOLS)
+    # The design and email tools (tests/test_mcp_designs.py, tests/test_mcp_emails.py) are 19 more.
+    assert len(TOOLS) == 35 and set(TOOLS) == set(policy.MCP_TOOLS)
     assert all(t.scope in ALL for t in TOOLS.values())
     writes = {n for n, t in TOOLS.items() if not t.read_only}
     assert writes == {"create_event_draft", "update_event_draft", "create_store_item", "offer_store_items", "draft_announcement",
-                      "request_publish_event", "request_send_announcement"}
+                      "request_publish_event", "request_send_announcement",
+                      "update_event_design", "apply_design_starter", "revert_event_design", "request_issue_certificates",
+                      "update_event_email", "update_library_email", "send_test_email", "request_resend_review_email"}
     assert not any(policy.allows_tool("door", n) for n in writes)
     assert all(policy.allows_tool(role, n) for role in ("owner", "admin") for n in TOOLS)
     assert policy.allows_tool("editor", "create_event_draft") and not policy.allows_tool("editor", "finance_summary")
     assert not policy.allows_tool("editor", "list_team") and not policy.allows_tool("nobody", "list_events")
-    assert [s for s in ALL if policy.allows_scope("door", s)] == ["events:read", "store:read"]
+    assert [s for s in ALL if policy.allows_scope("door", s)] == ["events:read", "store:read", "designs:read", "emails:read"]
     assert not policy.allows_contacts("door") and policy.allows_contacts("editor")
     assert policy.allows_action("editor", "publish_event") and not policy.allows_action("door", "send_announcement")
 

@@ -1,4 +1,6 @@
-"""What an assistant can do for a club: fifteen tools.
+"""What an assistant can do for a club: the events, store, team and
+announcement tools here, and the design and email tools of design_tools.py
+and email_tools.py (registered into the same TOOLS).
 
 Each tool is scoped to the token's club -- an id from another club is "not
 found", never refused as someone else's -- and is checked, on every call, in
@@ -22,7 +24,8 @@ draft, a store item is created off sale, an announcement is saved unsent.
 Publishing an event and sending an announcement are `request_*` tools,
 which make a pending action a person approves in the dashboard (actions.py).
 Nothing here refunds, pays out, deletes, changes a live event, changes the
-team, or sends anything.
+team, or sends anything. (Designs and emails are changed as the dashboard
+changes them -- design_tools.py and email_tools.py say how far.)
 
 Text people typed -- an event's description, a review, a form answer -- is
 always returned inside `{"user_written": true, "text": ...}`, never loose,
@@ -112,6 +115,15 @@ def from_http(e: CustomHTTPException) -> ToolError:
     return ToolError(e.message or "That was refused.", e.error_code or f"HTTP_{e.status_code}", e.errors if isinstance(e.errors, dict) else {})
 
 
+@dataclass
+class WithImage:
+    """A tool's answer with a picture: `data` is the JSON as any answer's,
+    `png` goes beside it as MCP image content (server.py)."""
+
+    data: dict
+    png: bytes
+
+
 @dataclass(frozen=True)
 class Tool:
     name: str
@@ -124,17 +136,24 @@ class Tool:
     destructive: bool = False
     idempotent: bool = True
     validator: Draft202012Validator = field(default=None, compare=False, repr=False)
+    #: Whether the tool is offered at all right now (a setting): None, always.
+    available: Callable[[], bool] | None = field(default=None, compare=False, repr=False)
+
+    def offered(self) -> bool:
+        return self.available is None or bool(self.available())
 
 
 TOOLS: dict[str, Tool] = {}
 
 
-def tool(name: str, *, title: str, scope: str, description: str, schema: dict, read_only: bool = True, idempotent: bool = True):
+def tool(name: str, *, title: str, scope: str, description: str, schema: dict, read_only: bool = True, idempotent: bool = True,
+         available: Callable[[], bool] | None = None):
     def register(fn):
         Draft202012Validator.check_schema(schema)
         TOOLS[name] = Tool(
             name=name, title=title, description=description, scope=scope, schema=schema, run=fn,
             read_only=read_only, destructive=False, idempotent=idempotent, validator=Draft202012Validator(schema),
+            available=available,
         )
         return fn
 
@@ -1028,3 +1047,7 @@ async def request_send_announcement(call: Call, args: dict) -> dict:
     )
     await call.session.commit()
     return actions.requested_out(row, token)
+
+
+# The design and email tools register themselves into TOOLS.
+from app.api.mcp import design_tools, email_tools  # noqa: E402,F401

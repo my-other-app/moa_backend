@@ -1049,6 +1049,18 @@ class AppConfig(BaseSettings):
     # (OAuth Client ID Metadata Documents): the document is fetched when one
     # first asks to connect. False: only registered (RFC 7591) clients.
     MCP_CLIENT_METADATA_DOCUMENTS: bool = True
+    # The requests that reach guests once a person approves them in the
+    # dashboard, beyond publishing and announcements: issuing an event's
+    # certificates and sending a registration review email again
+    # (app/api/mcp/actions.py). Off: their tools are not offered. On once the
+    # dashboard's confirm page shows those two kinds.
+    MCP_GUEST_REQUESTS_ENABLED: bool = False
+    # Test emails an assistant may send to the person who connected it, per
+    # address (limits' syntax, ";" between limits).
+    MCP_TEST_EMAIL_LIMIT: str = "3 per 10 minutes;10/day"
+    # The longest side, in pixels, of a design's preview picture an assistant
+    # is handed (the render is scaled down to it).
+    MCP_PREVIEW_MAX_PX: int = 1200
 
     # ─── The Integrations API (app/api/partner, docs/INTEGRATIONS_API.md) ──
     # The kill switch. Off: /partner/v1 and /partner/oauth answer 404 (the
