@@ -85,6 +85,13 @@ def fcm(monkeypatch):
     return fake
 
 
+def _calls(n: int) -> list[int]:
+    """The firebase-admin calls a push to `n` devices makes: FCM_SEND_BATCH
+    devices a call (never past FCM's 500), the rest in the last."""
+    size = min(push.FCM_SEND_BATCH, push.FCM_BATCH)
+    return [size] * (n // size) + ([n % size] if n % size else [])
+
+
 # ─── 1. Push past 500 devices ──────────────────────────────────────────────
 
 
@@ -95,7 +102,7 @@ async def test_a_push_reaches_more_than_500_devices_in_batches_off_the_loop(sess
     sent = await push.send_notification_to_users(session, ids, "Hello", "World")
 
     assert sent == 1200
-    assert sorted(fcm.batches) == [200, 500, 500]
+    assert sorted(fcm.batches) == sorted(_calls(1200)) and max(fcm.batches) <= push.FCM_BATCH
     # The SDK blocks until FCM answers: never on the event loop's thread.
     assert fcm.threads and loop_thread not in fcm.threads
 
@@ -170,7 +177,7 @@ async def test_followers_are_told_in_one_insert(session, make_club, make_event, 
     finally:
         stop()
     assert len(seen) == 1, seen
-    assert fcm.batches == [300]
+    assert sorted(fcm.batches) == sorted(_calls(300))
     rows = await session.scalar(select(func.count()).select_from(Notifications).where(Notifications.from_club_id == club.id, Notifications.type == "new_event"))
     assert rows == 300
     # Once per event: told again (a retry, a second call), nobody gets a second row.

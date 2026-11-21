@@ -19,6 +19,8 @@ from app.response import CustomHTTPException
 from tests.conftest import auth_header
 
 START = datetime(2026, 11, 20, 18, 0, tzinfo=timezone.utc)
+#: A card counts as printed (and is claimed) only when its link says record=true.
+RECORD = {"record": "true"}
 
 
 @pytest.fixture(autouse=True)
@@ -87,7 +89,7 @@ async def test_tickets_and_certificates_are_drawn_with_no_transaction_open(clien
 
 async def test_id_cards_are_drawn_with_no_transaction_open_and_recorded_after(client, session, world, drawing):
     url = f"/api/v1/events/{world['event'].id}/idcards"
-    one = await client.get(f"{url}/{world['reg'].id}.pdf", headers=world["club"])
+    one = await client.get(f"{url}/{world['reg'].id}.pdf", params=RECORD, headers=world["club"])
     assert one.status_code == 200, one.text
     batch = await client.get(f"{url}/batch.pdf", params={"scope": "not_printed", "record": "true"}, headers=world["club"])
     assert batch.status_code == 200 and batch.headers["x-cards"] == "1", batch.text
@@ -114,14 +116,14 @@ async def test_a_card_claim_is_let_go_when_its_render_fails(client, session, wor
 
     real = idcards._draw_card
     monkeypatch.setattr(idcards, "_draw_card", broken)
-    failed = await client.get(f"{url}/{world['reg'].id}.pdf", headers=world["club"])
+    failed = await client.get(f"{url}/{world['reg'].id}.pdf", params=RECORD, headers=world["club"])
     assert failed.status_code == 503 and during == [(False, True)]
     row = await session.scalar(select(EventRegistrationsLink).where(EventRegistrationsLink.id == world["reg"].id).execution_options(populate_existing=True))
     assert row.badge_printed_at is None
     # Their one card was not used up: it prints once the render works again.
     monkeypatch.setattr(idcards, "_draw_card", real)
-    assert (await client.get(f"{url}/{world['reg'].id}.pdf", headers=world["club"])).status_code == 200
-    assert (await client.get(f"{url}/{world['reg'].id}.pdf", headers=world["club"])).status_code == 403
+    assert (await client.get(f"{url}/{world['reg'].id}.pdf", params=RECORD, headers=world["club"])).status_code == 200
+    assert (await client.get(f"{url}/{world['reg'].id}.pdf", params=RECORD, headers=world["club"])).status_code == 403
 
 
 async def test_a_ticket_picture_that_cannot_be_drawn_in_time_is_a_503(client, world, monkeypatch):

@@ -20,7 +20,10 @@ from tests.legacy_layouts import ticket_starter
 from app.core.mail import links
 from tests.conftest import auth_header
 
-START = datetime(2026, 11, 20, 18, 0, tzinfo=timezone.utc)
+#: The event starts a week from whenever the suite runs (18:00 UTC), so its
+#: timed emails are always still to go. A fixed date here passed on 20 Nov
+#: 2026 and took the overview's queue with it.
+START = (datetime.now(timezone.utc) + timedelta(days=7)).replace(hour=18, minute=0, second=0, microsecond=0)
 
 
 @pytest.fixture
@@ -254,7 +257,7 @@ async def test_a_timed_email_goes_out_once_when_due(client, session, world, outb
     saved = await client.put(_url(world, f"/{pre['id']}"), json=body, headers=world["club"])
     assert saved.status_code == 200, saved.text
     due = _stage(await _journey(client, world), "PRE_EVENT")["dueAt"]
-    assert due is not None and due.startswith("2026-11-19T18:00")
+    assert due is not None and due.startswith((START - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M"))
 
     assert await service.sweep(session, now=START - timedelta(hours=25)) == 0
     assert await service.sweep(session, now=START - timedelta(hours=23)) == 1

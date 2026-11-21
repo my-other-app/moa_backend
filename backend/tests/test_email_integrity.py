@@ -814,16 +814,11 @@ async def test_the_lifespan_ends_with_the_shutdown(monkeypatch):
     async def forever():
         await asyncio.sleep(3600)
 
-    loops = (
-        ("app.api.emails.service", "sweep_loop"), ("app.api.closeout.service", "sweep_loop"), ("app.api.live.service", "sweep_loop"),
-        ("app.api.subscriptions.sweep", "sweep_loop"), ("app.api.discover.counters", "check_loop"), ("app.api.club_domains.sweep", "sweep_loop"),
-        ("app.api.store.sweep", "sweep_loop"), ("app.api.payments.sweep", "sweep_loop"), ("app.api.auth.retention", "sweep_loop"),
-        ("app.api.ledger.jobs", "daily_loop"),
-        ("app.api.search.sync", "loop"), ("app.api.events.doc_cache_sweep", "sweep_loop"),
-        ("app.api.club_whatsapp.sweep", "sweep_loop"), ("app.api.club_mailbox.sweep", "sweep_loop"),
-        ("app.api.ticketing.sweep", "sweep_loop"), ("app.api.social.sweep", "sweep_loop"), ("app.api.support.sweep", "sweep_loop"),
-        ("app.api.webhooks_out.sweep", "sweep_loop"),
-    )
+    # Every loop start_loops imports, read from doth.py itself: a loop added
+    # there is stubbed and counted here without a second list to keep up
+    # (test_cov_sweeps checks each one has its own row).
+    loops = _loops_doth_starts()
+    assert ("app.api.emails.service", "sweep_loop") in loops
     for module, name in loops:
         monkeypatch.setattr(__import__(module, fromlist=[name]), name, forever)
     monkeypatch.setattr(seed, "seed_badges", nothing)
@@ -849,8 +844,22 @@ async def test_the_lifespan_ends_with_the_shutdown(monkeypatch):
     finally:
         gc.unfreeze()
         jobs.use(before)
+    # One shutdown, handed every loop started, each one of the stubs (none
+    # left running for real), and all of them over.
     assert len(calls) == 1 and len(calls[0]) == len(loops) and all(t.done() for t in calls[0])
+    assert all(t.get_coro().__name__ == "forever" for t in calls[0])
     assert isinstance(runners[0], jobs.Runner)
+
+
+def _loops_doth_starts() -> list[tuple[str, str]]:
+    """(module, name) of each loop doth.start_loops imports and starts. doth.py
+    is read, not imported, the same way test_cov_sweeps reads it."""
+    import ast
+    from pathlib import Path
+
+    tree = ast.parse((Path(__file__).resolve().parents[1] / "doth.py").read_text())
+    [fn] = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "start_loops"]
+    return [(n.module, a.name) for n in ast.walk(fn) if isinstance(n, ast.ImportFrom) for a in n.names]
 
 
 async def test_the_lifespan_leaves_jobs_and_sweeps_to_the_worker_when_told(monkeypatch):

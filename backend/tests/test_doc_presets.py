@@ -333,7 +333,8 @@ async def test_a_card_prints_the_person_with_their_profile_photo(client, session
     h, ticket_id = world["club"], world["a"].ticket_id
     assert (await client.put(_designs(world, "badge", "/preset"), json={"id": "badge/01-ticket-stub"}, headers=h)).status_code == 200
 
-    card = await client.get(f"/api/v1/events/{world['event'].id}/idcards/{world['a'].id}.pdf", params={"source": "manual"}, headers=h)
+    # Printed for real (record=true): the card carries the time it printed.
+    card = await client.get(f"/api/v1/events/{world['event'].id}/idcards/{world['a'].id}.pdf", params={"source": "manual", "record": "true"}, headers=h)
     assert card.status_code == 200, card.text
     assert card.content[:4] == b"%PDF"
     design_id, v, _, _, _ = designs.fills[-1]

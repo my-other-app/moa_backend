@@ -341,15 +341,18 @@ async def test_the_scan_answers_before_the_check_in_hooks_and_fcm_runs_on_a_thre
 
     badges: list = []
 
-    async def send(token, title, body, data=None, dead=None, badge=None):
+    # The SDK's own call, which blocks until FCM answers: _send_to_token
+    # hands it to a worker thread itself (push._bounded).
+    def send(message, *args, **kwargs):
         sent_on.append(threading.get_ident())
-        badges.append(badge)
-        return True
+        badges.append(message.apns.payload.aps.badge)
+        return "projects/test/messages/1"
 
     monkeypatch.setattr(checkins, "scan", scan)
     monkeypatch.setattr(notes, "create_notification", create_notification)
     monkeypatch.setattr(push, "get_fcm_token_for_user", token)
-    monkeypatch.setattr(push, "_send_to_token", send)
+    monkeypatch.setattr(push, "initialize_firebase", lambda: True)
+    monkeypatch.setattr(push.messaging, "send", send)
     r = await client.post(f"{API}/events/{world['event'].id}/gate/scan", json=_scan(world["a"].ticket_id), headers=world["h"])
     assert r.json()["outcome"] == "CHECKED_IN"
     assert order == ["answered", "noted"]
@@ -638,15 +641,18 @@ async def test_the_kiosk_pin_is_hashed_and_five_wrong_tries_lock_the_kiosk(clien
     assert (await client.post(f"{API}/kiosk/staff", json={"pin": "2468"}, headers=k)).status_code == 200
 
 
-async def test_gate_keys_come_in_a_header_and_only_a_framed_card_may_carry_one(client, session, world):
+async def test_gate_keys_come_in_a_header_never_in_the_address(client, session, world):
     door = await client.post(f"{API}/events/{world['event'].id}/doors", json={"name": "Loading bay", "kind": "door"}, headers=world["h"])
     key = (await client.post(f"{API}/events/{world['event'].id}/doors/{door.json()['id']}/link", json={"can_walkup": False}, headers=world["h"])).json()["key"]
     ctx = f"{API}/events/{world['event'].id}/gate/context"
     assert (await client.get(ctx, headers={"X-Gate-Key": key})).status_code == 200
     assert (await client.get(ctx, params={"key": key})).status_code == 401
     assert (await client.post(f"{API}/events/{world['event'].id}/gate/scan", params={"key": key}, json=_scan(world["a"].ticket_id))).status_code == 401
-    # The console's card frame, deprecated: still served while it prints that way.
-    card = await client.get(f"{API}/events/{world['event'].id}/idcards/{world['a'].id}.pdf", params={"key": key, "record": "false"})
+    # The card too: the console sends the key in the header (the ?key= frame
+    # it once used is no longer read).
+    card_url = f"{API}/events/{world['event'].id}/idcards/{world['a'].id}.pdf"
+    assert (await client.get(card_url, params={"key": key, "record": "false"})).status_code == 401
+    card = await client.get(card_url, params={"record": "false"}, headers={"X-Gate-Key": key})
     assert card.status_code == 200 and card.content[:4] == b"%PDF"
 
 

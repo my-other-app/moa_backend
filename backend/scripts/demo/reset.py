@@ -255,6 +255,13 @@ CLASSIFICATION: dict[str, str] = {
     "event_partners": WIPE,
     # Clubs invited to co-host an event, and their answers (app/api/cohosts).
     "event_cohosts": WIPE,
+    # "I'm attending" posters (app/api/guest_posters): an event's switch and
+    # words, its designs, and each guest's poster -- the rows for their
+    # photo, share link and renders (the files are in the private bucket
+    # under guest_posters/<event>/<registration>/). All an event's or a guest's.
+    "poster_settings": WIPE,
+    "poster_designs": WIPE,
+    "guest_posters": WIPE,
     "event_ratings_link": WIPE,
     "event_registrations_link": WIPE,
     "event_speakers": WIPE,
