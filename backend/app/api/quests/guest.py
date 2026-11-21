@@ -278,27 +278,27 @@ async def card(session, event, user, *, view_all: bool = False, reg=None) -> dic
     return out
 
 
+async def waitlist_position(session, claim) -> Optional[int]:
+    """A waitlisted claim's place in its item's queue (1 = next), in the order units are held (§4.2); else None."""
+    if claim.status != WAITLISTED:
+        return None
+    ahead = await session.scalar(
+        select(func.count())
+        .select_from(QuestClaims)
+        .where(
+            QuestClaims.merch_item_id == claim.merch_item_id,
+            QuestClaims.status == WAITLISTED,
+            (QuestClaims.unlocked_at < claim.unlocked_at) | ((QuestClaims.unlocked_at == claim.unlocked_at) & (QuestClaims.id < claim.id)),
+        )
+    )
+    return int(ahead or 0) + 1
+
+
 async def _claim_out(session, claim, st: stock.Stock) -> Optional[dict]:
     if claim is None or claim.status == RELEASED:
         return None
     v = st.variant(claim.variant_id) if claim.variant_id is not None else None
-    position = None
-    if claim.status == WAITLISTED:
-        position = (
-            int(
-                await session.scalar(
-                    select(func.count())
-                    .select_from(QuestClaims)
-                    .where(
-                        QuestClaims.merch_item_id == claim.merch_item_id,
-                        QuestClaims.status == WAITLISTED,
-                        (QuestClaims.unlocked_at < claim.unlocked_at) | ((QuestClaims.unlocked_at == claim.unlocked_at) & (QuestClaims.id < claim.id)),
-                    )
-                )
-                or 0
-            )
-            + 1
-        )
+    position = await waitlist_position(session, claim)
     return {
         "claim_id": claim.id,
         "status": claim.status,

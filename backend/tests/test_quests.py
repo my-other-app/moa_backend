@@ -522,6 +522,9 @@ async def test_waitlist_is_served_in_order_when_a_unit_frees(client, session, wo
     assert [claims[r.id].status for r in (ra, rb, rc)] == ["reserved", "waitlisted", "waitlisted"]
     cb = await card(client, w, "c")
     assert cb["milestones"][0]["rewards"][0]["claim"]["waitlist_position"] == 2
+    # The swag desk sees the same place in line.
+    desk = await ok(await client.get(url(w, f"/gate/quests/{rc.id}"), headers={**w["club"], **NEW}))
+    assert [(x["status"], x["waitlist_position"]) for x in desk["swag"]["rewards"]] == [("waitlisted", 2)]
     # Asha's tick is taken back: her unit goes to Ben, the first in line.
     await ok(await client.post(url(w, f"/quests/guests/{ra.id}/tasks/{t['id']}/revoke"), json={"note": "Mistake"}, headers=w["club"]))
     claims = {c.registration_id: c for c in (await session.scalars(select(QuestClaims).execution_options(populate_existing=True))).all()}

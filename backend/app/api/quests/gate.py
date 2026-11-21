@@ -263,6 +263,7 @@ async def _collection_brief(session, claim) -> dict:
 
 
 async def claim_row(session, claim, reward, milestone, item, variants) -> dict:
+    from app.api.quests.guest import waitlist_position
     from app.core.storage import objects
 
     st = stock.Stock(item, variants)
@@ -280,6 +281,7 @@ async def claim_row(session, claim, reward, milestone, item, variants) -> dict:
         "needs_size": needs_size,
         "variant_label": v.label if v is not None else None,
         "choices": st.choices() if (claim.status == RESERVED and st.sized) else [],
+        "waitlist_position": await waitlist_position(session, claim),
         "collected_at": None,
         "collected_by": None,
         "door": None,
