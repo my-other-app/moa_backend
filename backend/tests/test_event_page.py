@@ -140,7 +140,7 @@ async def test_the_page_by_slug(client, session, world):
     assert r.status_code == 200, r.text
     page = r.json()
     assert set(page) == {"event", "club", "speakers", "agenda", "team", "team_source", "sponsors", "partners", "cohosts", "more_from_club", "similar", "quest"}
-    assert page["quest"] == {"enabled": False, "can_take_part": None}
+    assert page["quest"] == {"enabled": False, "can_take_part": None, "held": None}
     # None named: both lists are there, empty (docs/EVENT_PARTNERS.md).
     assert page["sponsors"] == [] and page["partners"] == []
     assert page["cohosts"] == []

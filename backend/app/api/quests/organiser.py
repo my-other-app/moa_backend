@@ -834,7 +834,8 @@ async def _audit_rows(session, quest, *, registration_id=None, limit=50, offset=
     return [
         {
             "at": a.created_at,
-            "by": {"id": a.by_user_id, "name": a.by_name},
+            # A handover through a door link has no person: `name` is null and `detail.door` says where.
+            "by": {"id": a.by_user_id, "name": a.by_name if (a.by_user_id is not None or a.action != "handover") else None},
             "action": a.action,
             "registration_id": a.registration_id,
             "name": name,

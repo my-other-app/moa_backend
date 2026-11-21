@@ -137,12 +137,25 @@ def _me_task(p) -> dict:
 
 
 async def _rank(session, quest, entry) -> Optional[int]:
+    """The guest's place in the leaderboard's own order (§8.4): 1 + everyone
+    with a higher score, or the same score reached sooner (`score_at`, then
+    the registration's id). No two guests share a place."""
+    from app.api.events.models import EventRegistrationsLink as R
+
     if entry is None or not entry.score:
         return None
-    higher = (
-        await session.scalar(select(func.count()).select_from(QuestEntries).where(QuestEntries.quest_id == quest.id, QuestEntries.score > entry.score)) or 0
+    E = QuestEntries
+    if entry.score_at is None:
+        sooner = E.score_at.isnot(None) | (E.registration_id < entry.registration_id)
+    else:
+        sooner = (E.score_at < entry.score_at) | ((E.score_at == entry.score_at) & (E.registration_id < entry.registration_id))
+    ahead = await session.scalar(
+        select(func.count())
+        .select_from(E)
+        .join(R, R.id == E.registration_id)
+        .where(E.quest_id == quest.id, R.is_deleted == False, (E.score > entry.score) | ((E.score == entry.score) & sooner))  # noqa: E712
     )
-    return int(higher) + 1
+    return int(ahead or 0) + 1
 
 
 #: When this process last looked, per (quest, registration): no write on a read.
@@ -173,7 +186,8 @@ async def card(session, event, user, *, view_all: bool = False, reg=None) -> dic
     """GET /events/{id}/quest. `reg` given: the organiser's view of that guest (§9.3)."""
     quest = await engine.quest_of(session, event.id)
     if quest is None or (not quest.enabled and not view_all):
-        return {"enabled": False}
+        paused = await _paused(session, event, quest, user) if quest is not None and user is not None else None
+        return {"enabled": False, "paused": paused} if paused else {"enabled": False}
     d = await engine.definition(session, quest)
     if reg is None and user is not None:
         reg = await registration_for(session, event.id, user)
@@ -201,6 +215,8 @@ async def card(session, event, user, *, view_all: bool = False, reg=None) -> dic
         }
     stations = await _stations(session, event.id)
     items = await _items(session, {r.merch_item_id for rs in d.rewards.values() for r in rs})
+    # Where each collected reward was handed over ("at Swag desk"), in one read.
+    desk_of = await _desks_of(session, [c.collection_id for c in claims.values() if c.status == COLLECTED and c.collection_id is not None])
     from app.core.storage import objects
 
     milestones = []
@@ -221,7 +237,7 @@ async def card(session, event, user, *, view_all: bool = False, reg=None) -> dic
                     "sizes": st.sized,
                     "sold_out_mode": r.sold_out_mode,
                     "sold_out": r.sold_out_mode == FIRST_COME and st.pool() <= 0,
-                    "claim": await _claim_out(session, claims.get(r.id), st)
+                    "claim": await _claim_out(session, claims.get(r.id), st, door=desk_of.get(getattr(claims.get(r.id), "collection_id", None)))
                     if unlocked or (claims.get(r.id) is not None and claims[r.id].status == COLLECTED)
                     else None,
                 }
@@ -294,7 +310,17 @@ async def waitlist_position(session, claim) -> Optional[int]:
     return int(ahead or 0) + 1
 
 
-async def _claim_out(session, claim, st: stock.Stock) -> Optional[dict]:
+async def _desks_of(session, collection_ids: list) -> dict:
+    """{merch collection id: the door it was handed over at}."""
+    from app.api.merch.models import MerchCollections
+
+    if not collection_ids:
+        return {}
+    rows = await session.execute(select(MerchCollections.id, MerchCollections.door_label).where(MerchCollections.id.in_(collection_ids)))
+    return {i: label for i, label in rows.all()}
+
+
+async def _claim_out(session, claim, st: stock.Stock, *, door: Optional[str] = None) -> Optional[dict]:
     if claim is None or claim.status == RELEASED:
         return None
     v = st.variant(claim.variant_id) if claim.variant_id is not None else None
@@ -307,6 +333,28 @@ async def _claim_out(session, claim, st: stock.Stock) -> Optional[dict]:
         "choices": st.choices() if claim.status == RESERVED and st.sized else [],
         "waitlist_position": position,
         "collected_at": claim.collected_at,
+        # Where it was handed over (a collected claim's door), never who: the guest needs no staff names.
+        "door": door if claim.status == COLLECTED else None,
+    }
+
+
+async def _paused(session, event, quest, user) -> Optional[dict]:
+    """The quest is switched off, but rewards stay held (CONTRACT §2): what is
+    still held, or waited for, for this guest, so the card can say where to
+    collect it. None when there is nothing (or no registration)."""
+    from app.api.quests import gate
+
+    reg = await registration_for(session, event.id, user)
+    if reg is None:
+        return None
+    rows = [r for r in await gate.claims_of(session, event, reg) if r[0].status in (RESERVED, WAITLISTED)]
+    if not rows:
+        return None
+    stations = await _stations(session, event.id)
+    return {
+        "title": quest.title,
+        "rewards": [await gate.claim_row(session, *r) for r in rows],
+        "collect_at": [{"door_id": s["door_id"], "name": s["name"]} for s in stations.values() if s["purpose"] == SWAG_DESK and s["active"]],
     }
 
 
@@ -430,12 +478,11 @@ async def leaderboard(session, quest, *, limit: int = 20, full_names: Optional[b
             .limit(max(1, min(limit, 100)))
         )
     ).all()
-    out, rank, last, seen = [], 0, None, 0
-    for reg_id, score, name in rows:
-        seen += 1
-        if score != last:
-            rank, last = seen, score
-        out.append({"rank": rank, "name": (name or "A guest") if full else short_name(name), "score": int(score), "me": reg is not None and reg_id == reg.id})
+    # Ties go by who reached the score first (score_at, then the registration): every row its own place, 1, 2, 3...
+    out = [
+        {"rank": i, "name": (name or "A guest") if full else short_name(name), "score": int(score), "me": reg is not None and reg_id == reg.id}
+        for i, (reg_id, score, name) in enumerate(rows, start=1)
+    ]
     me = None
     if reg is not None:
         entry = await session.scalar(select(QuestEntries).where(QuestEntries.quest_id == quest.id, QuestEntries.registration_id == reg.id))

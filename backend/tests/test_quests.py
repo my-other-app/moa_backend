@@ -891,14 +891,135 @@ async def test_the_event_says_whether_it_has_a_quest_and_reading_the_card_writes
 
     w = world
     info = await ok(await client.get(f"{API}/events/info/{w['event'].id}", headers=w["g"]["a"][2]))
-    assert info["quest"] == {"enabled": False, "can_take_part": False}
+    assert info["quest"] == {"enabled": False, "can_take_part": False, "held": False}
     await setup(client, w, milestones=(), tasks=[{"kind": "follow_club"}])
     info = await ok(await client.get(f"{API}/events/info/{w['event'].id}", headers=w["g"]["a"][2]))
-    assert info["quest"] == {"enabled": True, "can_take_part": True}
+    assert info["quest"] == {"enabled": True, "can_take_part": True, "held": False}
     outsider = await make_user(email="q-info@example.com")
     info = await ok(await client.get(f"{API}/events/info/{w['event'].id}", headers=auth_header(await mint_token(outsider))))
-    assert info["quest"] == {"enabled": True, "can_take_part": False}
-    assert await quests_public.flag(session, w["event"].id, per_viewer=False) == {"enabled": True, "can_take_part": None}
+    assert info["quest"] == {"enabled": True, "can_take_part": False, "held": False}
+    assert await quests_public.flag(session, w["event"].id, per_viewer=False) == {"enabled": True, "can_take_part": None, "held": None}
     # Opening the card with nothing done makes no row; the first progress does.
     await card(client, w, "c")
     assert not await session.scalar(select(func.count()).select_from(QuestEntries))
+
+
+# ─── Tidy-ups after the screenshots ─────────────────────────────────────
+
+
+async def test_door_staff_are_told_how_the_quest_scores(client, session, world):
+    """Points mean something only in points mode: the station, the desk and the context say which (§7.2, §7.3, §7.5)."""
+    w = world
+    (t,) = await setup(client, w, tasks=[{"kind": "manual", "points": 10}], milestones=((1, "sticker", "first_come"),))
+    st = await _station(client, w)
+    desk = await _station(client, w, name="Swag desk", purpose="swag_desk", task=False)
+    st_h = {"X-Gate-Key": st["link"]["key"], **NEW}
+    ctx = await ok(await client.get(url(w, "/gate/context"), headers=st_h))
+    assert ctx["quests"]["mode"] == "checkmarks"
+    r = await ok(await client.post(url(w, "/gate/scan"), json=scan(w["g"]["a"][1].ticket_id), headers=st_h))
+    assert r["station"]["mode"] == "checkmarks" and r["station"]["task"]["points"] == 10
+    again = await ok(await client.post(url(w, "/gate/scan"), json=scan(w["g"]["a"][1].ticket_id), headers=st_h))
+    assert again["station"]["result"] == "ALREADY_VISITED" and again["station"]["mode"] == "checkmarks"
+    await ok(await client.post(url(w, f"/quests/guests/{w['g']['a'][1].id}/tasks/{t['id']}/grant"), json={}, headers=w["club"]))
+    swag = await ok(await client.post(url(w, "/gate/scan"), json=scan(w["g"]["a"][1].ticket_id), headers={"X-Gate-Key": desk["link"]["key"], **NEW}))
+    assert swag["swag"]["mode"] == "checkmarks"
+    await ok(await client.patch(url(w, "/quests"), json={"mode": "points"}, headers=w["club"]))
+    r = await ok(await client.post(url(w, "/gate/scan"), json=scan(w["g"]["b"][1].ticket_id), headers=st_h))
+    assert r["station"]["mode"] == "points"
+    by_reg = await ok(await client.get(url(w, f"/gate/quests/{w['g']['a'][1].id}"), headers={**w["club"], **NEW}))
+    assert by_reg["swag"]["mode"] == "points"
+
+
+async def test_a_swag_desk_link_hands_over_at_the_desk_not_by_it(client, session, world):
+    """A door link has no person: the reward is collected at the desk, by nobody named; someone signed in is named."""
+    w = world
+    (t,) = await setup(client, w, tasks=[{"kind": "manual"}], milestones=((1, "shirt", "waitlist"),))
+    ra, rb = w["g"]["a"][1], w["g"]["b"][1]
+    for r in (ra, rb):
+        await ok(await client.post(url(w, f"/quests/guests/{r.id}/tasks/{t['id']}/grant"), json={}, headers=w["club"]))
+    desk = await _station(client, w, name="Swag desk", purpose="swag_desk", task=False)
+    h = {"X-Gate-Key": desk["link"]["key"], **NEW}
+    (reward,) = (await ok(await client.post(url(w, "/gate/scan"), json=scan(ra.ticket_id), headers=h)))["swag"]["rewards"]
+    done = await ok(await client.post(url(w, f"/gate/quests/claims/{reward['claim_id']}/handover"), json={"variant_label": "M"}, headers=h))
+    assert done["claim"]["door"] == "Swag desk" and done["claim"]["collected_by"] is None
+    rescan = (await ok(await client.post(url(w, "/gate/scan"), json=scan(ra.ticket_id), headers=h)))["swag"]["rewards"][0]
+    assert (rescan["status"], rescan["door"], rescan["collected_by"]) == ("collected", "Swag desk", None)
+    # The guest's card says where, never who.
+    claim = (await card(client, w, "a"))["milestones"][0]["rewards"][0]["claim"]
+    assert claim["status"] == "collected" and claim["door"] == "Swag desk" and "collected_by" not in claim
+    # The club's own console at the desk: a person, named.
+    (rb_reward,) = (await ok(await client.get(url(w, f"/gate/quests/{rb.id}"), headers={**w["club"], **NEW})))["swag"]["rewards"]
+    mine = await ok(
+        await client.post(url(w, f"/gate/quests/claims/{rb_reward['claim_id']}/handover"), json={"variant_label": "L", "door": "Swag desk"}, headers={**w["club"], **NEW})
+    )
+    assert mine["claim"]["door"] == "Swag desk" and mine["claim"]["collected_by"]
+    audit = (await ok(await client.get(url(w, "/quests/audit"), headers=w["club"])))["items"]
+    handovers = [a for a in audit if a["action"] == "handover"]
+    assert [(a["name"], a["by"]["name"] is None, a["detail"]["door"]) for a in handovers] == [("Ben Thomas", False, "Swag desk"), ("Asha Kumar", True, "Swag desk")]
+    # A row written before this change (the door's name stored as the person) reads the same.
+    row = await session.scalar(select(QuestAudit).where(QuestAudit.action == "handover", QuestAudit.by_user_id.is_(None)))
+    row.by_name = "Swag desk"
+    await session.commit()
+    guest = await ok(await client.get(url(w, f"/quests/guests/{ra.id}"), headers=w["club"]))
+    assert [a["by"]["name"] for a in guest["audit"] if a["action"] == "handover"] == [None]
+
+
+async def test_a_quest_switched_off_still_shows_what_is_held(client, session, world):
+    """Off freezes the quest but keeps rewards held: the guest's card says so, compactly, and where to collect (§8.1 `paused`)."""
+    w = world
+    (t,) = await setup(client, w, tasks=[{"kind": "manual", "title": "Demoed"}], milestones=((1, "sticker", "waitlist"),))
+    ra, rb = w["g"]["a"][1], w["g"]["b"][1]
+    for r in (ra, rb):
+        await ok(await client.post(url(w, f"/quests/guests/{r.id}/tasks/{t['id']}/grant"), json={"note": "Demo"}, headers=w["club"]))
+    # Marked done by the organisers: the card says how it came.
+    assert task_me(await card(client, w, "a"), t["id"])["source"] == "grant"
+    desk = await _station(client, w, name="Swag desk", purpose="swag_desk", task=False)
+    await ok(await client.patch(url(w, "/quests"), json={"enabled": False, "title": "DevFest Quest"}, headers=w["club"]))
+    switch.forget()
+    a = await card(client, w, "a")
+    assert a["enabled"] is False and a["paused"]["title"] == "DevFest Quest" and "tasks" not in a
+    (held,) = a["paused"]["rewards"]
+    assert (held["name"], held["status"], held["milestone"], held["waitlist_position"]) == ("Sticker", "reserved", "Tier 1", None)
+    assert a["paused"]["collect_at"] == [{"door_id": desk["door"]["id"], "name": "Swag desk"}]
+    (waiting,) = (await card(client, w, "b"))["paused"]["rewards"]
+    assert (waiting["status"], waiting["waitlist_position"]) == ("waitlisted", 1)
+    # Nothing held: no card at all, as before.
+    assert await card(client, w, "c") == {"enabled": False}
+    assert (await client.get(url(w, "/quest"))).json() == {"enabled": False}
+    # The event's info says there is something to show, so clients that skip the card for an off quest ask for it.
+    info = lambda key: client.get(f"{API}/events/info/{w['event'].id}", headers=w["g"][key][2])  # noqa: E731
+    assert (await ok(await info("a")))["quest"] == {"enabled": False, "can_take_part": False, "held": True}
+    assert (await ok(await info("c")))["quest"] == {"enabled": False, "can_take_part": False, "held": False}
+    # Handed over at the desk while off: nothing held any more, no card.
+    done = await ok(await client.post(url(w, f"/gate/quests/claims/{held['claim_id']}/handover"), json={}, headers={"X-Gate-Key": desk["link"]["key"], **NEW}))
+    assert done["result"] == "HANDED_OVER"
+    assert await card(client, w, "a") == {"enabled": False}
+    assert (await ok(await info("a")))["quest"]["held"] is False
+    # Switched on again: the full card, as before.
+    await ok(await client.patch(url(w, "/quests"), json={"enabled": True}, headers=w["club"]))
+    switch.forget()
+    back = await card(client, w, "a")
+    assert back["enabled"] is True and "paused" not in back
+
+
+async def test_leaderboard_ties_go_by_who_got_there_first(client, session, world):
+    """No shared places: the same score is ordered by who reached it first, and each guest's own rank is that row's (§8.4)."""
+    w = world
+    (t,) = await setup(client, w, mode="points", leaderboard=True, milestones=(), tasks=[{"kind": "manual", "points": 10}])
+    for key in ("c", "a", "b"):
+        await ok(await client.post(url(w, f"/quests/guests/{w['g'][key][1].id}/tasks/{t['id']}/grant"), json={}, headers=w["club"]))
+    board = await ok(await client.get(url(w, "/quest/leaderboard"), headers=w["g"]["a"][2]))
+    assert [(r["rank"], r["name"], r["score"]) for r in board["rows"]] == [(1, "Chen L.", 10), (2, "Asha K.", 10), (3, "Ben T.", 10)]
+    assert board["me"] == {"rank": 2, "score": 10}
+    assert (await card(client, w, "b"))["me"]["rank"] == 3
+    club = await ok(await client.get(url(w, "/quests/leaderboard"), headers=w["club"]))
+    assert [r["rank"] for r in club["rows"]] == [1, 2, 3]
+    # Reached at the same instant: the registration decides, the same way in the list and in each guest's own rank.
+    same = datetime.now(timezone.utc)
+    for e in (await session.scalars(select(QuestEntries))).all():
+        e.score_at = same
+    await session.commit()
+    board = await ok(await client.get(url(w, "/quest/leaderboard"), headers=w["club"]))
+    order = sorted(("a", "b", "c"), key=lambda k: w["g"][k][1].id)
+    assert [r["name"] for r in board["rows"]] == [{"a": "Asha K.", "b": "Ben T.", "c": "Chen L."}[k] for k in order]
+    assert [(await card(client, w, k))["me"]["rank"] for k in order] == [1, 2, 3]

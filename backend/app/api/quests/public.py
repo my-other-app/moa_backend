@@ -18,24 +18,47 @@ logger = logging.getLogger(__name__)
 
 
 async def flag(session, event_id: Optional[int], user=None, *, per_viewer: bool = True) -> dict:
-    """{"enabled", "can_take_part"}: on, and (for a signed-in viewer) whether
-    they hold a live ticket for it. `can_take_part` is null on a page that
-    is the same for everyone (`per_viewer=False`)."""
+    """{"enabled", "can_take_part", "held"}: on, and (for a signed-in viewer)
+    whether they hold a live ticket for it; while it is switched off, `held`:
+    whether a reward is still held (or waited for) for them, so the client
+    asks for the card, which says so (§8.1 `paused`). `can_take_part` and
+    `held` are null on a page that is the same for everyone (`per_viewer=False`)."""
     from app.api.events.models import EventRegistrationsLink as R
     from app.api.quests import switch
 
     enabled = bool(event_id) and await switch.enabled_quest_id(session, event_id) is not None
-    can = None
+    can = held = None
     if per_viewer:
-        can = False
-        if enabled and user is not None and getattr(user, "id", None) is not None:
+        can = held = False
+        uid = getattr(user, "id", None) if user is not None else None
+        if uid is not None and enabled:
             can = (
                 await session.scalar(
-                    select(R.id).where(R.event_id == event_id, R.user_id == user.id, R.is_deleted == False, R.ticket_revoked_at.is_(None))  # noqa: E712
+                    select(R.id).where(R.event_id == event_id, R.user_id == uid, R.is_deleted == False, R.ticket_revoked_at.is_(None))  # noqa: E712
                 )
                 is not None
             )
-    return {"enabled": enabled, "can_take_part": can}
+        elif uid is not None and await switch.has_quest(session, event_id):
+            # Off, but there is a quest (the same cached read): one indexed look for this guest's held rewards.
+            held = await held_for(session, event_id, uid)
+    return {"enabled": enabled, "can_take_part": can, "held": held}
+
+
+async def held_for(session, event_id: int, user_id: int) -> bool:
+    """Whether this account's registration still has a reward held or on the waiting list at this event's quest."""
+    from app.api.events.models import EventRegistrationsLink as R
+    from app.api.quests.models import RESERVED, WAITLISTED, QuestClaims, Quests
+
+    return (
+        await session.scalar(
+            select(QuestClaims.id)
+            .join(Quests, Quests.id == QuestClaims.quest_id)
+            .join(R, R.id == QuestClaims.registration_id)
+            .where(Quests.event_id == event_id, R.user_id == user_id, R.is_deleted == False, QuestClaims.status.in_((RESERVED, WAITLISTED)))  # noqa: E712
+            .limit(1)
+        )
+        is not None
+    )
 
 
 async def network_progress(session, event_id: Optional[int], user_id: int, *, evaluate: bool) -> Optional[dict]:

@@ -141,7 +141,7 @@ async def record_visit(session, event, door: Doors, reg, *, actor, via, client_r
     """One visit per station and guest; a replay of a scan answers as it did."""
     V = QuestStationVisits
     now = _now()
-    out = {"door_id": door.id, "name": door.name, "result": "VISITED", "reason": None, "visited_at": None, "task": None, "replayed": False}
+    out = {"door_id": door.id, "name": door.name, "result": "VISITED", "reason": None, "visited_at": None, "task": None, "mode": None, "replayed": False}
     if client_ref:
         same = await session.scalar(select(V).where(V.client_ref == client_ref))
         if same is not None and same.door_id == door.id and same.registration_id == reg.id:
@@ -194,6 +194,8 @@ async def _describe_credit(session, event, door: Doors, reg, out: dict, *, fresh
                 )
             ).all()
         )
+    # How the quest scores: a task's points mean something only in points mode (staff see them only then).
+    out["mode"] = quest.mode if quest is not None else None
     if tasks:
         t = tasks[0]
         out["task"] = {"id": t.id, "title": t.title, "points": t.points}
@@ -222,7 +224,7 @@ async def _describe_credit(session, event, door: Doors, reg, out: dict, *, fresh
 # ─── The swag desk ─────────────────────────────────────────────────────
 
 
-async def _claims_of(session, event, reg) -> list:
+async def claims_of(session, event, reg) -> list:
     from app.api.merch.models import MerchItems, MerchVariants
 
     rows = (
@@ -259,7 +261,8 @@ async def _collection_brief(session, claim) -> dict:
     if row is None:
         return {"collected_at": claim.collected_at, "collected_by": None, "door": None}
     c, user = row
-    return {"collected_at": c.collected_at, "collected_by": (user.full_name or user.email) if user else (c.door_label or None), "door": c.door_label}
+    # Who: a person only. A door link has nobody signed in, so it is "at Swag desk", never "by Swag desk".
+    return {"collected_at": c.collected_at, "collected_by": (user.full_name or user.email) if user else None, "door": c.door_label}
 
 
 async def claim_row(session, claim, reward, milestone, item, variants) -> dict:
@@ -296,11 +299,12 @@ async def swag_block(session, event, door: Optional[Doors], reg) -> dict:
 
     quest = await engine.quest_of(session, event.id)
     entry = await session.scalar(select(QuestEntries).where(QuestEntries.quest_id == quest.id, QuestEntries.registration_id == reg.id)) if quest else None
-    rewards = [await claim_row(session, *r) for r in await _claims_of(session, event, reg) if r[0].status != RELEASED]
+    rewards = [await claim_row(session, *r) for r in await claims_of(session, event, reg) if r[0].status != RELEASED]
     return {
         "door_id": door.id if door is not None else None,
         "name": door.name if door is not None else None,
         "enabled": bool(quest and quest.enabled),
+        "mode": quest.mode if quest else None,
         "points": entry.points if entry else 0,
         "tasks_done": entry.tasks_done if entry else 0,
         "rewards": rewards,
@@ -388,7 +392,8 @@ async def handover(session, event, claim_id, actor, *, variant_label: Optional[s
             reward_id=reward.id,
             action="handover",
             by_user_id=actor.user_id,
-            by_name=(actor.name or "")[:120],
+            # A door link is a door, not a person: the row says where (`detail.door`), and by whom only when someone signed in.
+            by_name=(actor.name or "")[:120] if actor.user is not None else None,
             detail={"door": door.name if door else door_label},
         )
     )
@@ -405,6 +410,7 @@ async def context_block(session, event, actor) -> Optional[dict]:
         return None
     return {
         "enabled": bool(quest and quest.enabled),
+        "mode": quest.mode if quest else None,
         "door_purpose": door.purpose if door is not None else None,
         "door_name": door.name if door is not None else None,
         "can_hand_over": may_hand_over(actor),
