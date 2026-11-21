@@ -262,6 +262,19 @@ CLASSIFICATION: dict[str, str] = {
     "poster_settings": WIPE,
     "poster_designs": WIPE,
     "guest_posters": WIPE,
+    # Event quests (app/api/quests): an event's quest, its tasks, milestones
+    # and rewards, each guest's entry, progress, unlocks and claims, station
+    # visits and the quest's own log. All an event's or a guest's.
+    "quests": WIPE,
+    "quest_tasks": WIPE,
+    "quest_milestones": WIPE,
+    "quest_rewards": WIPE,
+    "quest_entries": WIPE,
+    "quest_progress": WIPE,
+    "quest_unlocks": WIPE,
+    "quest_claims": WIPE,
+    "quest_station_visits": WIPE,
+    "quest_audit": WIPE,
     "event_ratings_link": WIPE,
     "event_registrations_link": WIPE,
     "event_speakers": WIPE,
