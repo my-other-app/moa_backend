@@ -289,6 +289,8 @@ def token_attendee(registration) -> TokenAttendee:
         seat_label=None,
         custom_fields=details,
         team=str(details.get("team_name") or details.get("team") or "") or None,
+        game_qr=(getattr(registration, "_game", None) or ("", ""))[0] or None,
+        game_pin=(getattr(registration, "_game", None) or ("", ""))[1] or None,
     )
 
 

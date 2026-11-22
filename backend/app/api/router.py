@@ -20,6 +20,9 @@ from app.api.organisers.router import router as organisers_router
 from app.api.event_partners.router import router as event_partners_router
 from app.api.cohosts.router import club_router as cohost_invitations_router, router as cohosts_router
 from app.api.merch.router import router as merch_router, gate_router as merch_gate_router
+from app.api.games.admin import router as games_admin_router
+from app.api.games.organiser import router as games_organiser_router
+from app.api.games.router import router as games_router
 from app.api.quests.router import gate_router as quests_gate_router, public_router as quests_public_router, router as quests_router
 from app.api.closeout.router import router as closeout_router
 from app.api.hooks.router import router as hooks_router
@@ -255,6 +258,10 @@ api_router.include_router(router=merch_gate_router, tags=["merch"])
 api_router.include_router(router=quests_router)
 api_router.include_router(router=quests_gate_router)
 api_router.include_router(router=quests_public_router)
+# The event games, Hero Cards and the Scavenger Hunt (app/api/games): players and screens, the organiser's, the admin overview.
+api_router.include_router(router=games_router)
+api_router.include_router(router=games_organiser_router)
+api_router.include_router(router=games_admin_router)
 api_router.include_router(router=closeout_router, tags=["closeout"])
 api_router.include_router(router=hooks_router, tags=["hooks"])
 api_router.include_router(router=contacts_router, tags=["contacts"])

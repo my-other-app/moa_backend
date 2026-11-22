@@ -77,6 +77,8 @@ class PlanFeaturesIn(CustomBaseModel):
     networking: bool = False
     social_autopost: bool = False
     social_x: bool = False
+    game_cards: bool = False
+    game_hunt: bool = False
     # competitions
     teams: bool = False
     judging: bool = False

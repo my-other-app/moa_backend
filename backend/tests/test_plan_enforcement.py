@@ -223,7 +223,9 @@ def test_every_built_paid_feature_has_a_gate_here():
     are made and switched on (tests/test_ticketing.py)."""
     gated = set(ACTIONS) | {"networking", "ai_assist", "ai_byok", "mcp", "whatsapp_own", "mailbox", "coupons", "waitlist",
                             # social posting: where an account connects and a post is scheduled (tests/test_social.py)
-                            "social_autopost", "social_x"}
+                            "social_autopost", "social_x",
+                            # the event games: where a game is switched on and used (tests/test_games_access.py)
+                            "game_cards", "game_hunt"}
     assert gated | gates.ALWAYS_ALLOWED == set(LABELS)
 
 
@@ -879,7 +881,7 @@ def test_the_actions_split_into_event_scoped_and_club_wide():
     assert set(EVENT_SCOPED_ACTIONS) <= gates.EVENT_SCOPED_FEATURES
     # mcp, whatsapp_own and mailbox are club-wide too; their gates are tested where
     # they hold (tests/test_mcp.py, tests/test_club_whatsapp.py, tests/test_club_mailbox.py).
-    assert set(CLUB_WIDE_ACTIONS) - {"tickets"} == gates.CLUB_WIDE_FEATURES - {"mcp", "whatsapp_own", "mailbox", "social_autopost", "social_x"}
+    assert set(CLUB_WIDE_ACTIONS) - {"tickets"} == gates.CLUB_WIDE_FEATURES - {"mcp", "whatsapp_own", "mailbox", "social_autopost", "social_x", "game_cards", "game_hunt"}
     assert not gates.EVENT_SCOPED_FEATURES & gates.CLUB_WIDE_FEATURES
 
 

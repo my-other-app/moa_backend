@@ -88,7 +88,7 @@ EVENT_SCOPED_LIMITS = frozenset({"registrations_per_event", "merch_items_per_eve
 #: announcements per month, committee seats, website templates,
 #: registrations per month -- though a registration to a grandfathered event
 #: is never refused, it still counts in `usage`).
-CLUB_WIDE_FEATURES = frozenset({"website", "custom_domain", "roles", "finance", "mcp", "whatsapp_own", "mailbox", "social_autopost", "social_x"})
+CLUB_WIDE_FEATURES = frozenset({"website", "custom_domain", "roles", "finance", "mcp", "whatsapp_own", "mailbox", "social_autopost", "social_x", "game_cards", "game_hunt"})
 
 #: The limits nothing enforces, and why (see the module docstring).
 NOT_ENFORCED: dict[str, str] = {}
@@ -130,6 +130,8 @@ _SUBJECTS = {
     "mailbox": ("A club mailbox", "is"),
     "social_autopost": ("Automatic posting to social media", "is"),
     "social_x": ("Automatic posting to X", "is"),
+    "game_cards": ("The hero card game", "is"),
+    "game_hunt": ("The scavenger hunt", "is"),
     "coupons": ("Discount codes", "are"),
     "waitlist": ("Waiting lists", "are"),
 }

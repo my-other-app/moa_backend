@@ -161,6 +161,9 @@ async def registration_of(session, event: Events, registration_id) -> EventRegis
     )
     if reg is None:
         raise CustomHTTPException(404, message="Registration not found")
+    from app.api.games import card_values
+
+    await card_values.prime(session, event, [reg])
     return reg
 
 
@@ -266,7 +269,11 @@ async def batch_targets(session, event: Events, *, scope: str, role: Optional[st
         q = q.where(EventRegistrationsLink.badge_printed_at.is_(None))
     if role:
         q = q.where(EventRegistrationsLink.role == RegistrationRole(role))
-    return list(await session.scalars(q.order_by(EventRegistrationsLink.full_name)))
+    regs = list(await session.scalars(q.order_by(EventRegistrationsLink.full_name)))
+    from app.api.games import card_values
+
+    await card_values.prime(session, event, regs)
+    return regs
 
 
 async def batch_pdf(session, event: Events, *, scope: str, role: Optional[str], record: bool, actor: GateActor) -> tuple[bytes, int]:
