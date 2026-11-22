@@ -45,6 +45,15 @@ ROUTES = {
     "DELETE /api/v1/events/{event_id}/cohosts/{invite_id}": HOST_ONLY,
     # analytics
     "GET /api/v1/events/{event_id}/figures": ALLOW,
+    # print stations (PR #221): a co-host prints cards for its guests as the host does
+    "GET /api/v1/events/{event_id}/idcards/printers": ALLOW,
+    "GET /api/v1/events/{event_id}/idcards/print-requests": ALLOW,
+    "POST /api/v1/events/{event_id}/idcards/print-requests": ALLOW,
+    "POST /api/v1/events/{event_id}/idcards/print-requests/{request_id}/cancel": ALLOW,
+    "POST /api/v1/events/{event_id}/idcards/print-requests/{request_id}/retry": ALLOW,
+    "POST /api/v1/events/{event_id}/gate/print-request/{registration_id}": ALLOW,
+    # one person, everything about them (app/api/people): read as the attendee list is
+    "GET /api/v1/events/{event_id}/people/{ref}": ALLOW,
     "GET /api/v1/events/{event_id}/summary": ALLOW,
     # social posting (app/api/social): a co-host plans the event's posts from its own accounts
     "GET /api/v1/clubs/social/events/{event_id}/posts": ALLOW,

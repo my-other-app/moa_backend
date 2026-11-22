@@ -51,6 +51,8 @@ MASKED_SHAPES = (
     r"^/api/v1/events/\d+/(?:check-ins|certificates|deliveries|results|competition)$",
     r"^/api/v1/events/\d+/(?:store/orders|store/summary|merch/collections)$",
     r"^/api/v1/events/\d+/messages/[^/]+$",
+    # One person on an event, in full (app/api/people).
+    r"^/api/v1/events/\d+/people/[^/]+$",
     # A quest's guests, and one guest's quest (app/api/quests).
     r"^/api/v1/events/\d+/quests/guests(?:/[^/]+)?$",
 )
