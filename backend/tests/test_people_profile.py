@@ -91,6 +91,7 @@ async def test_a_registration_comes_back_in_the_contracts_shape(client, world):
     assert body["person"]["account"] == {"kind": "app", "user_id": world["user"].id}
     assert body["status"] == {
         "stage": "confirmed", "checked_in": False, "card_printed": False, "certificate": "none", "paid": None, "ticket_revoked": False,
+        "email_bounced": False,
     }
     assert body["answers"] == [
         {"key": "college", "label": "College", "value": "CET", "missing": False},
@@ -319,6 +320,8 @@ async def test_print_queue_steps_and_print_jobs_are_one_log_without_double_count
     assert station["printer"] == "Desk printer" and station["door"] == "Desk" and station["by"] == world["owner"].full_name
     assert body["prints"][1]["error"] == "Out of paper" and body["prints"][1]["printer"] == "Desk printer"
     assert body["prints"][0]["printer"] is None and body["prints"][0]["by"] == world["owner"].full_name
+    # Queue requests carry their id (Retry acts on it); a card printed another way has none.
+    assert station["id"] and body["prints"][1]["id"] and body["prints"][0]["id"] is None
     assert body["status"]["card_printed"] is True
     assert kinds(body).count("print_queued") == 2 and kinds(body).count("print_printed") == 2
     assert {"print_printing", "print_failed"} <= set(kinds(body))
@@ -417,6 +420,7 @@ async def test_a_revoked_ticket_and_a_bounced_address_are_in_the_log(client, ses
     await session.commit()
     body = (await _get(client, world)).json()
     assert body["status"]["ticket_revoked"] is True and body["ticket"]["pdf_url"] is None and body["ticket"]["revoked_at"] is not None
+    assert body["status"]["email_bounced"] is True
     assert row(body, "ticket_revoked")["tone"] == "danger" and row(body, "email_bounced")["detail"] == "Mailbox does not exist"
     assert body["actions"]["can_print"] is False and body["actions"]["can_resend_ticket"] is False and body["actions"]["can_check_in"] is False
 

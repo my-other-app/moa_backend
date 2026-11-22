@@ -130,14 +130,15 @@ def prints_of(d, names: Names) -> tuple[list[dict], set]:
         done = aware(r.printed_at) if r.status == "printed" else None
         at = done or (aware(r.updated_at) if r.status in ("failed", "cancelled", "printing") else None) or aware(r.created_at)
         out.append({
-            "at": at, "status": r.status, "source": r.source, "door": station[1] if station else None,
+            # The print-station request's id: what Retry and Cancel act on.
+            "id": str(r.id), "at": at, "status": r.status, "source": r.source, "door": station[1] if station else None,
             "printer": station[0] if station else None, "by": by, "error": r.error,
         })
     for j in d.print_jobs:
         if j.id in taken:
             continue
         out.append({
-            "at": aware(j.created_at), "status": "failed" if j.error else "printed", "source": PRINT_SOURCE.get(_value(j.source), _value(j.source)),
+            "id": None, "at": aware(j.created_at), "status": "failed" if j.error else "printed", "source": PRINT_SOURCE.get(_value(j.source), _value(j.source)),
             "door": j.door_label, "printer": None, "by": names.user(j.requested_by), "error": j.error,
         })
     out.sort(key=lambda p: p["at"], reverse=True)

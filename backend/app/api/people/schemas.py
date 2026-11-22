@@ -29,6 +29,7 @@ class Status(BaseModel):
     certificate: Literal["none", "issued", "revoked"]
     paid: Optional[bool] = None
     ticket_revoked: bool
+    email_bounced: bool = False
 
 
 class Answer(BaseModel):
@@ -66,6 +67,8 @@ class CheckIn(BaseModel):
 
 
 class Print(BaseModel):
+    # The print-station request (Retry / Cancel act on it); null for a card printed another way.
+    id: Optional[str] = None
     at: datetime
     status: Literal["printed", "queued", "printing", "failed", "cancelled"]
     source: str

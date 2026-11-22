@@ -95,11 +95,16 @@ def status_of(d, prints: list[dict], checked_in: bool) -> dict:
         paid = bool(reg.is_paid) if (event.has_fee or float(reg.actual_amount or 0) > 0) else None
         printed = reg.badge_printed_at is not None or any(p["status"] == "printed" for p in prints)
         revoked = reg.ticket_revoked_at is not None
+        bounced = reg.email_bounced_at is not None
     else:
         cert, printed, revoked = "none", False, False
         paid = False if req.amount is not None else None
+        bounced = False
     return {
         "stage": stage_of(d), "checked_in": checked_in, "card_printed": printed, "certificate": cert, "paid": paid, "ticket_revoked": revoked,
+        # The "Email bounced" chip. The provider's reason (it can carry an address) is in the timeline,
+        # where door staff see it masked.
+        "email_bounced": bounced,
     }
 
 
