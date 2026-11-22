@@ -16,7 +16,7 @@ from app.api.events.models import EventRegistrationsLink, Events
 from app.api.events.tickets import poster_url
 from app.api.idcards.models import PrintJobs, ReprintPolicy
 from app.api.idcards.service import may_print_again
-from app.api.kiosk import pins
+from app.api.kiosk import pins, print_requests
 from app.api.kiosk.auth import kiosk_actor, new_token
 from app.api.kiosk.models import KioskDevices, SelfCheckInVerify
 from app.config import settings
@@ -40,7 +40,7 @@ def device_out(d: KioskDevices) -> dict:
         "id": d.id, "event_id": d.event_id, "name": d.name, "door_id": d.door_id, "door_label": d.door_label, "token_prefix": d.token_prefix,
         "expires_at": d.expires_at, "last_seen_at": d.last_seen_at, "revoked_at": d.revoked_at,
         "online": bool(d.last_seen_at and now - d.last_seen_at < timedelta(seconds=90)), "active": d.revoked_at is None and d.expires_at > now,
-        "created_at": d.created_at,
+        "created_at": d.created_at, "role": d.role or "kiosk",
     }
 
 
@@ -49,21 +49,25 @@ async def list_devices(session, event: Events) -> list[dict]:
     return [device_out(d) for d in rows]
 
 
-def pair_url(token: str) -> str:
-    return f"{settings.PUBLIC_WEB_URL.rstrip('/')}/kiosk?token={token}"
+def pair_url(token: str, role: str = "kiosk") -> str:
+    return f"{settings.PUBLIC_WEB_URL.rstrip('/')}/{'print-station' if role == 'printer' else 'kiosk'}?token={token}"
 
 
-async def create_device(session, event: Events, *, name: str, door_label: Optional[str], door_id, shift_hours: int, created_by) -> dict:
-    """Bound to one event, rotated per shift, revocable. The token is shown once."""
-    if door_id is not None:
+async def create_device(session, event: Events, *, name: str, door_label: Optional[str], door_id, shift_hours: int, created_by, role: str = "kiosk") -> dict:
+    """Bound to one event, rotated per shift, revocable. The token is shown
+    once. A print station is no door: it makes none, and its label is only
+    the "where" on the cards it prints."""
+    if role == "printer":
+        door = None
+    elif door_id is not None:
         door = await doors_mod.door_of(session, event, door_id)
     else:
         door = await doors_mod.resolve(session, event.id, door_label or name, DoorKind.kiosk)
     token, h, prefix = new_token()
-    device = KioskDevices(id=uuid.uuid4(), event_id=event.id, name=" ".join(name.split())[:60], door_id=door.id if door else None, door_label=door.name if door else (door_label or name)[:40], token_hash=h, token_prefix=prefix, created_by=created_by, expires_at=datetime.now(timezone.utc) + timedelta(hours=shift_hours))
+    device = KioskDevices(id=uuid.uuid4(), role=role, event_id=event.id, name=" ".join(name.split())[:60], door_id=door.id if door else None, door_label=door.name if door else (door_label or name)[:40], token_hash=h, token_prefix=prefix, created_by=created_by, expires_at=datetime.now(timezone.utc) + timedelta(hours=shift_hours))
     session.add(device)
     await session.commit()
-    return {"device": device_out(device), "token": token, "url": pair_url(token)}
+    return {"device": device_out(device), "token": token, "url": pair_url(token, role)}
 
 
 async def device_of(session, event: Events, device_id) -> KioskDevices:
@@ -79,7 +83,7 @@ async def rotate_device(session, event: Events, device_id, *, shift_hours: int) 
     d.token_hash, d.token_prefix, d.revoked_at, d.last_seen_at = h, prefix, None, None
     d.expires_at = datetime.now(timezone.utc) + timedelta(hours=shift_hours)
     await session.commit()
-    return {"device": device_out(d), "token": token, "url": pair_url(token)}
+    return {"device": device_out(d), "token": token, "url": pair_url(token, d.role or "kiosk")}
 
 
 async def revoke_device(session, event: Events, device_id) -> dict:
@@ -160,6 +164,7 @@ async def context(session, device: KioskDevices) -> dict:
         # The run of show plays while a card prints; the programme replaces the plain banner once one is saved.
         "agenda": await agenda_service.upcoming(session, event),
         "has_programme": await agenda_service.saved(session, event),
+        "printers": {"online": await print_requests.printers_online(session, event.id)},
     }
 
 

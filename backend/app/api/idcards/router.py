@@ -8,6 +8,8 @@ from app.api.checkins.gate_auth import GateFrameAuth
 from app.api.deliveries import service as deliveries
 from app.api.idcards import service
 from app.api.idcards.models import PrintSource
+from app.api.kiosk import print_requests
+from app.api.kiosk.schemas import DashboardPrintBody, PrinterOut, PrintRequestList, PrintRequestOut
 from app.api.idcards.schemas import CardSettings, CardSettingsUpdate, CardSummary, PrintJobOut
 from app.api.subscriptions import gates
 from app.core.auth.dependencies import ClubAuth
@@ -34,6 +36,42 @@ async def settings(session: SessionDep, user: ClubAuth, event_id: int, body: Car
 async def jobs(session: SessionDep, user: ClubAuth, event_id: int) -> list[PrintJobOut]:
     event = await deliveries.event_for_club(session, user, event_id)
     return [PrintJobOut(**j) for j in await service.recent_jobs(session, event)]
+
+
+@router.get("/printers", summary="The print stations paired to this event, and whether they are online")
+async def printers(session: SessionDep, user: ClubAuth, event_id: int) -> list[PrinterOut]:
+    event = await deliveries.event_for_club(session, user, event_id)
+    return [PrinterOut(**p) for p in await print_requests.list_printers(session, event)]
+
+
+@router.post("/print-requests", summary="Send a guest's card to a print station", status_code=201)
+async def print_request(session: SessionDep, user: ClubAuth, event_id: int, body: DashboardPrintBody, response: Response) -> PrintRequestOut:
+    """Staff are organisers for the reprint rule (`override` opens it for one
+    card). 201 queued; 200 with the open request when one is already waiting."""
+    event = await deliveries.event_for_club(session, user, event_id)
+    await gates.require_feature(session, event.club_id, "badges", actor=user, event=event)
+    reg = await print_requests.registration_in(session, event, body.registration_id)
+    out, created = await print_requests.ask(session, event, reg, source="dashboard", user_id=user.id, printer_id=body.printer_id, override=body.override, by_organiser=True)
+    response.status_code = 201 if created else 200
+    return PrintRequestOut(**out)
+
+
+@router.get("/print-requests", summary="The print queue, newest first")
+async def print_queue(session: SessionDep, user: ClubAuth, event_id: int, status: str = Query("open", pattern="^(open|done|failed|all)$"), limit: int = Query(50, ge=1, le=200)) -> PrintRequestList:
+    event = await deliveries.event_for_club(session, user, event_id)
+    return PrintRequestList(**await print_requests.listing(session, event, status, limit))
+
+
+@router.post("/print-requests/{request_id}/retry", summary="Queue a failed or cancelled card again")
+async def print_retry(session: SessionDep, user: ClubAuth, event_id: int, request_id: UUID) -> PrintRequestOut:
+    event = await deliveries.event_for_club(session, user, event_id)
+    return PrintRequestOut(**await print_requests.retry(session, event, request_id))
+
+
+@router.post("/print-requests/{request_id}/cancel", summary="Take a card out of the queue")
+async def print_cancel(session: SessionDep, user: ClubAuth, event_id: int, request_id: UUID) -> PrintRequestOut:
+    event = await deliveries.event_for_club(session, user, event_id)
+    return PrintRequestOut(**await print_requests.cancel(session, event, request_id))
 
 
 @router.get("/batch.pdf", summary="Every card, a page each")

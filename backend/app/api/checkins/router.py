@@ -2,7 +2,7 @@
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Query, Request, Response
 from slowapi.util import get_remote_address
 
 from app.api.checkins import doors as doors_mod
@@ -33,6 +33,7 @@ from app.api.checkins.schemas import (
     WalkupResult,
 )
 from app.api.deliveries import service as deliveries
+from app.api.kiosk.schemas import DoorPrintBody, PrintRequestOut
 from app.core.auth.dependencies import ClubAuth
 from app.core.rate_limit import limiter
 from app.db.core import SessionDep
@@ -167,6 +168,19 @@ async def gate_check_in(request: Request, session: SessionDep, actor: GateAuth, 
     if not actor.permissions["check_in"]:
         raise CustomHTTPException(403, message="You may not check guests in at this door.")
     return ScanResult(**await service.check_in_by_hand(session, _event(request), registration_id, body.door, actor, background=background_tasks))
+
+
+@router.post("/gate/print-request/{registration_id}", summary="Send a guest's card to a print station", status_code=201)
+async def gate_print_request(request: Request, session: SessionDep, actor: GateAuth, event_id: int, registration_id: UUID, body: DoorPrintBody, response: Response) -> PrintRequestOut:
+    """Who may print a card at the door today may queue it: the club, a
+    volunteer, a door's gate link. Only the club may override the reprint rule."""
+    from app.api.kiosk import print_requests
+
+    event = _event(request)
+    reg = await print_requests.registration_in(session, event, registration_id)
+    out, created = await print_requests.ask(session, event, reg, source="door", user_id=actor.user_id, override=body.override and actor.full, by_organiser=actor.full)
+    response.status_code = 201 if created else 200
+    return PrintRequestOut(**out)
 
 
 @router.delete("/gate/check-in/{registration_id}", summary="Take a check-in back")

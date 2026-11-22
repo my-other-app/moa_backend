@@ -6,9 +6,10 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Query, Request, Response
 
 from app.api.deliveries import service as deliveries
-from app.api.kiosk import self_service, service
-from app.api.kiosk.auth import KioskAuth, KioskFrameAuth
+from app.api.kiosk import print_requests, self_service, service
+from app.api.kiosk.auth import KioskAuth, KioskFrameAuth, PrinterAuth
 from app.api.kiosk.schemas import (
+    ClaimResult,
     KioskContext,
     KioskCreate,
     KioskDeviceOut,
@@ -17,7 +18,10 @@ from app.api.kiosk.schemas import (
     KioskSettingsUpdate,
     LookupBody,
     PairedKiosk,
+    PrintDoneBody,
     PrintedBody,
+    PrintRequestBody,
+    PrintRequestOut,
     RedeemBody,
     RedeemResult,
     SelfQr,
@@ -47,7 +51,7 @@ async def list_kiosks(session: SessionDep, user: ClubAuth, event_id: int) -> lis
 @admin_router.post("", summary="Pair a kiosk: a token shown once")
 async def create_kiosk(session: SessionDep, user: ClubAuth, event_id: int, body: KioskCreate) -> PairedKiosk:
     event = await deliveries.event_for_club(session, user, event_id)
-    return PairedKiosk(**await service.create_device(session, event, name=body.name, door_label=body.door_label, door_id=body.door_id, shift_hours=body.shift_hours, created_by=user.id))
+    return PairedKiosk(**await service.create_device(session, event, name=body.name, door_label=body.door_label, door_id=body.door_id, shift_hours=body.shift_hours, created_by=user.id, role=body.role))
 
 
 @admin_router.get("/settings", summary="Self check-in and the staff PIN")
@@ -129,6 +133,47 @@ async def kiosk_self_card(session: SessionDep, device: KioskFrameAuth, session_i
 async def kiosk_self_printed(session: SessionDep, device: KioskAuth, body: PrintedBody) -> dict:
     await self_service.mark_printed(session, device, body.session)
     return {"ok": True}
+
+
+# --- print requests from the tablet ---------------------------------------------------------
+
+
+@kiosk_router.post("/print-requests", summary="Send a guest's ID card to a print station", status_code=201)
+async def kiosk_print_request(session: SessionDep, device: KioskAuth, body: PrintRequestBody, response: Response) -> PrintRequestOut:
+    """201 when queued; 200 with the open request when this guest's card is already waiting (a double tap)."""
+    out, created = await print_requests.kiosk_ask(session, device, redemption=body.redemption, session_id=body.session)
+    response.status_code = 201 if created else 200
+    return PrintRequestOut(**out)
+
+
+@kiosk_router.get("/print-requests/{request_id}", summary="Where a card this kiosk asked for has got to")
+async def kiosk_print_request_status(session: SessionDep, device: KioskAuth, request_id: UUID) -> PrintRequestOut:
+    return PrintRequestOut(**await print_requests.of_device(session, device, request_id))
+
+
+# --- the print station (a device paired as a printer) -----------------------------------------
+
+
+@kiosk_router.post("/printer/claim", summary="A print station's heartbeat, and the next card to print")
+async def printer_claim(session: SessionDep, device: PrinterAuth) -> ClaimResult:
+    return ClaimResult(**await print_requests.claim(session, device))
+
+
+@kiosk_router.get("/printer/requests/{request_id}/card.pdf", summary="The card this station has claimed")
+async def printer_card(session: SessionDep, device: PrinterAuth, request_id: UUID) -> Response:
+    pdf = await print_requests.card_for(session, device, request_id)
+    return Response(content=pdf, media_type="application/pdf", headers={"Cache-Control": "no-store"})
+
+
+@kiosk_router.post("/printer/requests/{request_id}/done", summary="Printed, or failed")
+async def printer_done(session: SessionDep, device: PrinterAuth, request_id: UUID, body: PrintDoneBody) -> PrintRequestOut:
+    return PrintRequestOut(**await print_requests.done(session, device, request_id, ok=body.ok, error=body.error))
+
+
+@kiosk_router.post("/printer/test", summary="A sample card to print as a test; nothing is recorded")
+async def printer_test(session: SessionDep, device: PrinterAuth) -> Response:
+    pdf = await print_requests.test_card(session, device)
+    return Response(content=pdf, media_type="application/pdf", headers={"Cache-Control": "no-store"})
 
 
 # --- the guest's phone --------------------------------------------------------------------
