@@ -259,6 +259,8 @@ FEATURE_GROUPS: dict[str, tuple[str, ...]] = {
         "networking",
         "social_autopost",
         "social_x",
+        "game_cards",
+        "game_hunt",
     ),
     "competitions": (
         "teams",
@@ -328,6 +330,8 @@ FEATURE_CATALOG: tuple[tuple[str, str], ...] = (
     ("mailbox", "A club mailbox: yourclub@myotherapp.in, in the dashboard"),
     ("social_autopost", "Automatic posting to Facebook, Instagram and LinkedIn"),
     ("social_x", "Automatic posting to X (Twitter)"),
+    ("game_cards", "Hero card game"),
+    ("game_hunt", "Scavenger hunt"),
 )
 
 #: Flags in the editor with no feature behind them yet:
@@ -378,6 +382,11 @@ class PlanFeatures(AbstractSQLModel, TimestampsMixin):
     social_autopost = _flag()
     #: The same to X, which costs MyOtherApp per post: the top plan.
     social_x = _flag()
+    #: The event games (app/api/games), from migration games: Hero Cards, the
+    #: collectible card game, and the Scavenger Hunt. Off on every plan; a
+    #: platform admin ticks them on the plans that get them.
+    game_cards = _flag()
+    game_hunt = _flag()
 
     # competitions
     teams = _flag()

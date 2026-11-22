@@ -62,6 +62,10 @@ TICKET_TOKENS: list[dict] = [
      "aliases": ["issue_date", "certificate_date"]},
     {"key": "checked_in_date", "group": "Certificate", "label": "Attended on", "sample": "16 Sept 2026",
      "note": "The day they checked in; the event date when they never did."},
+    {"key": "game_qr", "group": "Game", "label": "Game QR (address)", "sample": "https://myotherapp.in/g/b.0.sample",
+     "note": "The address of the guest's game badge. Empty unless a game is on. Bind a QR layer to it with holder.game_qr."},
+    {"key": "game_pin", "group": "Game", "label": "Game PIN", "sample": "4821",
+     "note": "The guest's four-digit game PIN. Empty unless a game is on."},
     {"key": "placing", "group": "Certificate", "label": "Placing", "sample": "First", "aliases": ["position", "rank"]},
 ]
 
@@ -309,6 +313,9 @@ class TokenAttendee:
     seat_label: Optional[str] = None
     custom_fields: dict = field(default_factory=dict)
     team: Optional[str] = None
+    #: The game badge's address and the PIN (app/api/games), when a game is on.
+    game_qr: Optional[str] = None
+    game_pin: Optional[str] = None
 
 
 @dataclass
@@ -363,6 +370,8 @@ def ticket_token_values(
         "organiser": event.organiser or "",
         "org_name": org_name,
         "team_name": attendee.team or "",
+        "game_qr": attendee.game_qr or "",
+        "game_pin": attendee.game_pin or "",
         "certificate_no": certificate.number if certificate else "",
         "issued_date": format_date(certificate.issued_at, tz) if certificate else "",
         "checked_in_date": format_date(certificate.checked_in_at or event.starts_at, tz) if certificate else "",

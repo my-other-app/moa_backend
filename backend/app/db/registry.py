@@ -99,3 +99,5 @@ from app.api.admin_ops import models as _admin_ops_models  # noqa: F401
 # search_text, the search outbox and the grid cells: their triggers go in after every table.
 from app.api.search import outbox as _search_outbox, text as _search_text  # noqa: F401
 from app.api.discover import cells as _geo_cells  # noqa: F401
+# The event games: Hero Cards and the Scavenger Hunt (app/api/games).
+from app.api.games import models as _games_models  # noqa: F401

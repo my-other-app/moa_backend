@@ -42,6 +42,8 @@ from app.core.layout.tokens import field_slug
 EVENT_TIMEZONE = "Asia/Kolkata"
 #: The badge value a Personal QR layer encodes (profiles-networking contract: holder.profile_qr_url).
 PROFILE_QR_VALUE = "holder.profile_qr_url"
+#: The badge value a game QR layer encodes (app/api/games/card_values.py).
+GAME_QR_VALUE = "holder.game_qr"
 PLACINGS = {1: "First", 2: "Second", 3: "Third"}
 ROLE_LABELS = {"attendee": "Attendee", "speaker": "Speaker", "staff": "Staff"}
 
@@ -64,7 +66,7 @@ BADGE_TOKENS = (
     "org_founded_year", "city", "chapter", "membership_tier", "member_id", "member_since_year", "joined_date",
     "valid_thru", "valid_year", "zone", "hall", "day_label", "doors_open_time", "session_hall", "session_time",
     "checkin_time", "kiosk_id", "booth_no", "table_no", "track", "team_name", "bib_number", "category", "wave",
-    "start_time",
+    "start_time", "game_qr", "game_pin",
 )
 #: Certificate tokens we have no data for: the club binds them (a fixed
 #: text) or they are left out.
@@ -103,6 +105,9 @@ class Subject:
     #: code when the registration is an app user's with scanning on, else
     #: None. A badge's Personal QR layer draws it (values "holder.profile_qr_url").
     profile_qr_url: Optional[str] = None
+    #: The game badge's address and the PIN, when a game is on for the event.
+    game_qr: Optional[str] = None
+    game_pin: Optional[str] = None
 
 
 @dataclass
@@ -274,12 +279,16 @@ def subject_of(registration, event=None) -> Subject:
         team=str(details.get("team_name") or details.get("team") or ""),
         email=getattr(registration, "email", None),
         profile_qr_url=profile_qr_url_of(user, profile),
+        game_qr=(getattr(registration, "_game", None) or ("", ""))[0] or None,
+        game_pin=(getattr(registration, "_game", None) or ("", ""))[1] or None,
     )
 
 
 #: The editor's sample guest's personal QR: a code that can never be real
 #: (it holds letters the codes leave out), so the board can draw the layer.
 SAMPLE_PROFILE_QR = "https://myotherapp.in/p/samplecode"
+#: The editor's sample game badge: not a genuine token, so it can never be scanned into a game.
+SAMPLE_GAME_QR = "https://myotherapp.in/g/b.0.SAMPLE.0.SAMPLE"
 
 
 def profile_qr_url_of(user, profile) -> Optional[str]:
@@ -329,6 +338,8 @@ def sample_subject(event, kind: str, role: str = "attendee") -> Subject:
         team="Team Nova",
         email="aisha.rahman@example.com",
         profile_qr_url=SAMPLE_PROFILE_QR,
+        game_qr=SAMPLE_GAME_QR,
+        game_pin="4821",
     )
 
 
@@ -354,6 +365,8 @@ def ticket_values(event, subject: Subject) -> Mapped:
         "ticket_type": ticket_type_of(subject),
         "ticket_id": subject.ticket_code,
         "attendee_name": subject.full_name,
+        "game_qr": subject.game_qr or "",
+        "game_pin": subject.game_pin or "",
         **subject.answers,
     }
     return Mapped(values=values, images={}, qr_text=subject.ticket_code)
@@ -460,6 +473,10 @@ def badge_values(event, subject: Subject, *, door: Optional[str] = None, printed
         # The Personal QR layer's payload (a v2 qr layer with bind
         # "holder.profile_qr_url"); empty: the layer is not drawn.
         PROFILE_QR_VALUE: subject.profile_qr_url or "",
+        # The game QR layer's payload (bind "holder.game_qr") and the text tokens; empty: not drawn.
+        GAME_QR_VALUE: subject.game_qr or "",
+        "game_qr": subject.game_qr or "",
+        "game_pin": subject.game_pin or "",
     }
     return Mapped(values=values, images={"photo_url": ("photo", subject)}, qr_text=subject.ticket_code)
 

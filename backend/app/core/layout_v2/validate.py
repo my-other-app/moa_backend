@@ -124,7 +124,12 @@ def problems(layout: Union[LayoutV2, dict, Any], kind: str = "ticket") -> list[d
         out += poster.contact_problems(lay)
     px_per_mm = c.width / page.width_mm
     qrs = [i for i, l in enumerate(lay.layers) if isinstance(l, QrLayer) and not l.bind]
-    personal = [i for i, l in enumerate(lay.layers) if isinstance(l, QrLayer) and l.bind]
+    personal = [i for i, l in enumerate(lay.layers) if isinstance(l, QrLayer) and l.bind == "holder.profile_qr_url"]
+    game = [i for i, l in enumerate(lay.layers) if isinstance(l, QrLayer) and l.bind == "holder.game_qr"]
+    if game and kind != "badge":
+        out.append(_p("qr_profile_kind", f"layers.{game[0]}", "A game QR code is for ID cards only.", layer=lay.layers[game[0]].id))
+    if len(game) > 1:
+        out.append(_p("qr_extra", f"layers.{game[1]}", "A design has one game QR code.", layer=lay.layers[game[1]].id))
     if kind in QR_KINDS and not qrs:
         out.append(_p("qr_missing", "layers", "This design needs its QR code: it is what the gate scans."))
     if len(qrs) > 1:
