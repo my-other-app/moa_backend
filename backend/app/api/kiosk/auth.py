@@ -42,8 +42,14 @@ async def device_by_token(session, token: str) -> KioskDevices | None:
 
 async def kiosk_device(request: Request, session: SessionDep) -> KioskDevices:
     """The token from the X-Kiosk-Token header only: in the query string it
-    lands in every access log between the tablet and here."""
-    return await _device(request, session, request.headers.get(KIOSK_TOKEN_HEADER) or "")
+    lands in every access log between the tablet and here. Kiosks only: a
+    print station's token is refused here."""
+    return await _device(request, session, request.headers.get(KIOSK_TOKEN_HEADER) or "", role="kiosk")
+
+
+async def printer_device(request: Request, session: SessionDep) -> KioskDevices:
+    """A print station: the same header, and only a device paired as a printer."""
+    return await _device(request, session, request.headers.get(KIOSK_TOKEN_HEADER) or "", role="printer", heartbeat=True)
 
 
 async def kiosk_device_for_frame(request: Request, session: SessionDep) -> KioskDevices:
@@ -55,16 +61,19 @@ async def kiosk_device_for_frame(request: Request, session: SessionDep) -> Kiosk
     if not token and request.query_params.get("token"):
         token = request.query_params.get("token") or ""
         logger.info("kiosk token read from the query string (deprecated) for %s", request.url.path)
-    return await _device(request, session, token)
+    return await _device(request, session, token, role="kiosk")
 
 
-async def _device(request: Request, session, token: str) -> KioskDevices:
+async def _device(request: Request, session, token: str, role: str = "kiosk", heartbeat: bool = False) -> KioskDevices:
     device = await device_by_token(session, token)
     if device is None:
         raise CustomHTTPException(401, message="This kiosk is not paired, or its shift has ended. Pair it again from Team & doors.", error_code="KIOSK_UNPAIRED")
+    if (device.role or "kiosk") != role:
+        raise CustomHTTPException(403, message="This device is paired as a print station. It cannot do this." if role == "kiosk" else "This device is a kiosk. It cannot do this.", error_code="WRONG_DEVICE_ROLE")
     now = datetime.now(timezone.utc)
-    # A heartbeat, but not a write on every poll.
-    if device.last_seen_at is None or (now - device.last_seen_at).total_seconds() > 60:
+    # A heartbeat, but not a write on every poll. A print station beats on
+    # every claim (it is "online" for 30 seconds), so it writes each time.
+    if heartbeat or device.last_seen_at is None or (now - device.last_seen_at).total_seconds() > 60:
         device.last_seen_at = now
         await session.commit()
     request.state.gate_event = device.event
@@ -73,6 +82,7 @@ async def _device(request: Request, session, token: str) -> KioskDevices:
 
 KioskAuth = Annotated[KioskDevices, Depends(kiosk_device)]
 KioskFrameAuth = Annotated[KioskDevices, Depends(kiosk_device_for_frame)]
+PrinterAuth = Annotated[KioskDevices, Depends(printer_device)]
 
 
 def kiosk_actor(device: KioskDevices) -> GateActor:

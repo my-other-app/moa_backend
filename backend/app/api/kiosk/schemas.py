@@ -18,6 +18,7 @@ class KioskDeviceOut(BaseModel):
     online: bool
     active: bool
     created_at: Optional[datetime] = None
+    role: Literal["kiosk", "printer"] = "kiosk"
 
 
 class PairedKiosk(BaseModel):
@@ -31,6 +32,7 @@ class KioskCreate(BaseModel):
     door_id: Optional[UUID] = None
     door_label: Optional[str] = Field(default=None, max_length=40)
     shift_hours: int = Field(default=12, ge=1, le=72)
+    role: Literal["kiosk", "printer"] = "kiosk"
 
 
 class KioskRotate(BaseModel):
@@ -58,6 +60,7 @@ class KioskContext(BaseModel):
     counters: dict
     agenda: list = []
     has_programme: bool = False
+    printers: dict = {"online": 0}
 
 
 class RedeemBody(BaseModel):
@@ -106,3 +109,74 @@ class VerifyBody(SessionBody):
 
 class PrintedBody(BaseModel):
     session: str = Field(min_length=10, max_length=200)
+
+
+class PrintRequestBody(BaseModel):
+    """From a kiosk: the redemption of a ticket it just read, or a phone session it serves."""
+
+    redemption: Optional[str] = Field(default=None, min_length=10, max_length=2000)
+    session: Optional[str] = Field(default=None, min_length=10, max_length=200)
+
+
+class PrinterRef(BaseModel):
+    id: UUID
+    name: str
+
+
+class PrintRequestOut(BaseModel):
+    id: UUID
+    registration_id: UUID
+    name: str
+    ticket_code: str
+    source: str
+    status: str
+    attempts: int
+    printer: Optional[PrinterRef] = None
+    error: Optional[str] = None
+    created_at: Optional[datetime] = None
+    printed_at: Optional[datetime] = None
+    position: Optional[int] = None
+
+
+class PrintRequestList(BaseModel):
+    items: list[PrintRequestOut]
+    printers_online: int
+
+
+class PrintDoneBody(BaseModel):
+    ok: bool
+    error: Optional[str] = Field(default=None, max_length=2000)
+
+
+class ClaimOut(BaseModel):
+    id: UUID
+    registration_id: UUID
+    name: str
+    ticket_code: str
+    source: str
+    attempt: int
+    card_url: str
+
+
+class ClaimResult(BaseModel):
+    request: Optional[ClaimOut] = None
+    queued: int = 0
+
+
+class DashboardPrintBody(BaseModel):
+    registration_id: UUID
+    printer_id: Optional[UUID] = None
+    override: bool = False
+
+
+class DoorPrintBody(BaseModel):
+    override: bool = False
+
+
+class PrinterOut(BaseModel):
+    id: UUID
+    name: str
+    door_label: str
+    online: bool
+    last_seen_at: Optional[datetime]
+    expires_at: datetime

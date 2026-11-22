@@ -260,6 +260,9 @@ class GateContext(BaseModel):
     has_store: bool = False
     # The quest at this door, for a console that sent `X-Gate-Features: quests`.
     quests: Optional[dict] = None
+    # Print stations paired to the event and seen in the last 30 s: the console offers
+    # "Send to the print station" only when one is online.
+    printers: dict = {"online": 0}
 
 
 class GateSearchRow(AttendeeSummary):
