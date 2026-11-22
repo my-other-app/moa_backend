@@ -616,7 +616,14 @@ async def context(session, event: Events, actor: GateActor) -> dict:
         "has_merch": await _has_merch(session, event.id),
         "has_store": bool(getattr(event, "merch_enabled", False)),
         "quests": await quest_gate.context_block(session, event, actor) if knows_quests else None,
+        "printers": {"online": await _printers_online(session, event.id)},
     }
+
+
+async def _printers_online(session, event_id: int) -> int:
+    from app.api.kiosk import print_requests
+
+    return await print_requests.printers_online(session, event_id)
 
 
 async def _has_merch(session, event_id: int) -> bool:

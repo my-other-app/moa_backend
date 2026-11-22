@@ -533,6 +533,15 @@ async def test_the_dashboard_lists_printers_and_the_queue(client, session, world
     assert (await client.post(_ev(world, "/idcards/print-requests"), json={"registration_id": str(uuid.uuid4())}, headers=h)).status_code == 404
 
 
+async def test_the_door_console_knows_when_a_print_station_is_online(client, session, world):
+    ctx = _ev(world, "/gate/context")
+    assert (await client.get(ctx, headers=world["club"])).json()["printers"] == {"online": 0}
+    await _beat(session, world["printer_id"])
+    assert (await client.get(ctx, headers=world["club"])).json()["printers"] == {"online": 1}
+    await _beat(session, world["printer_id"], seconds_ago=45)
+    assert (await client.get(ctx, headers=world["club"])).json()["printers"] == {"online": 0}
+
+
 async def test_the_door_console_queues_a_card_with_the_door_permission(client, session, world):
     await _beat(session, world["printer_id"])
     h = world["club"]
