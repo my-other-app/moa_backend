@@ -324,9 +324,11 @@ async def test_a_draft_never_invents_what_the_notes_do_not_say(client, session, 
 
 async def test_a_draft_keeps_only_live_slugs_and_reads_the_date_in_india(client, session, world, hub):
     await on_plan(session, world, "starter")
+    # A date a month ahead: a fixed one turns into "in the past" once it goes by.
+    when = (datetime.now(IST) + timedelta(days=30)).date()
     hub.answers["draft"] = {
         **DRAFT,
-        "date": "2026-11-21", "start_time": "18:00", "end_time": "21:30", "format": "in_person",
+        "date": when.isoformat(), "start_time": "18:00", "end_time": "21:30", "format": "in_person",
         "venue_name": "Main Hall", "fee": 0, "capacity": 120, "category": "workshop",
         "topics": ["technology", "Technology", "space"], "interests": ["ai-ml", "blockchain", "web"],
         "agenda": [{"at": "18:00", "title": "Doors", "by": ""}, {"at": "6pm", "title": "Bad time", "by": ""}, {"at": "19:15", "title": "Talk", "by": "Asha"}],
@@ -342,7 +344,7 @@ async def test_a_draft_keeps_only_live_slugs_and_reads_the_date_in_india(client,
     r = await client.post(f"{API}/clubs/ai/event-draft", data={"text": "Workshop on 21 Nov, 6 to 9:30 pm, Main Hall, free, 120 seats"}, headers=world.h)
     assert r.status_code == 200, r.text
     draft, warnings = r.json()["draft"], r.json()["warnings"]
-    assert draft["event_datetime"] == "2026-11-21T18:00:00+05:30"
+    assert draft["event_datetime"] == f"{when.isoformat()}T18:00:00+05:30"
     assert draft["duration_hours"] == 3.5 and draft["format"] == "in_person" and draft["fee"] == 0 and draft["capacity"] == 120
     assert draft["category"] == "Workshop"
     assert draft["topics"] == ["technology"] and draft["interests"] == ["ai-ml", "web"]
