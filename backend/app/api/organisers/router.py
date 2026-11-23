@@ -2,7 +2,7 @@ from fastapi import APIRouter
 
 from app.api.deliveries import service as deliveries
 from app.api.organisers import service
-from app.api.organisers.schemas import OrganiserOut, OrganisersIn
+from app.api.organisers.schemas import CandidateOut, OrganiserOut, OrganisersIn
 from app.core.auth.dependencies import ClubAuth
 from app.db.core import SessionDep
 
@@ -15,8 +15,14 @@ async def list_organisers(session: SessionDep, user: ClubAuth, event_id: int) ->
     return [OrganiserOut(**o) for o in await service.list_organisers(session, event)]
 
 
+@router.get("/candidates", summary="Everyone who can be named: the host's team, then each co-host's")
+async def list_candidates(session: SessionDep, user: ClubAuth, event_id: int) -> list[CandidateOut]:
+    event = await deliveries.event_for_club(session, user, event_id)
+    return [CandidateOut(**c) for c in await service.candidates(session, event)]
+
+
 @router.put("", summary="Name the event's organisers; the list replaces the last one, in its order")
 async def set_organisers(session: SessionDep, user: ClubAuth, event_id: int, body: OrganisersIn) -> list[OrganiserOut]:
-    """Everyone must be on the club's team. The event page shows them in place of the club's whole team."""
+    """Everyone must be on the host's team or a co-host's. The event page shows them in place of the club's whole team."""
     event = await deliveries.event_for_club(session, user, event_id)
     return [OrganiserOut(**o) for o in await service.replace(session, event, body.members)]
