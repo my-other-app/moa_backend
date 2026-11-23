@@ -1,9 +1,11 @@
-"""Who from the club's team runs an event, in the order its page lists them."""
+"""Who runs an event, in the order its page lists them: picked from the host
+club's team and, for a co-hosted event, from each co-host club's team too."""
 from typing import Optional
 
 from sqlalchemy import delete, select
 
-from app.api.clubs.models import ClubTeamMembers
+from app.api.clubs.models import Clubs, ClubTeamMembers
+from app.api.cohosts.access import cohost_club_ids
 from app.api.events.models import Events
 from app.api.organisers.models import EventTeamMembers
 from app.response import CustomHTTPException
@@ -16,16 +18,43 @@ def _photo(m: ClubTeamMembers) -> Optional[str]:
     return p.get("thumbnail") or p.get("medium") or None
 
 
-async def rows_for(session, event: Events) -> list[tuple[EventTeamMembers, ClubTeamMembers]]:
-    """The event's organisers with their team entries; someone since taken off the team drops out."""
+async def team_club_ids(session, event: Events) -> list[int]:
+    """The clubs whose teams the organisers come from: the host first, then the co-hosts as they accepted."""
     if event.club_id is None:
+        return []
+    return [event.club_id, *[c for c in await cohost_club_ids(session, event.id) if c != event.club_id]]
+
+
+async def candidates(session, event: Events) -> list[dict]:
+    """Everyone who can be named: the host's team, then each co-host's, each in its own order."""
+    clubs = await team_club_ids(session, event)
+    if not clubs:
+        return []
+    names = dict((await session.execute(select(Clubs.id, Clubs.name).where(Clubs.id.in_(clubs)))).all())
+    rank = {c: i for i, c in enumerate(clubs)}
+    members = (await session.scalars(
+        select(ClubTeamMembers).where(ClubTeamMembers.club_id.in_(clubs), ClubTeamMembers.is_deleted == False)  # noqa: E712
+    )).all()
+    members = sorted(members, key=lambda m: (rank[m.club_id], m.sort_order or 0, m.id))
+    return [
+        dict(member_id=m.id, name=m.name, club_role=m.role, photo=_photo(m),
+             club_id=m.club_id, club_name=names.get(m.club_id), host=m.club_id == event.club_id)
+        for m in members
+    ]
+
+
+async def rows_for(session, event: Events) -> list[tuple[EventTeamMembers, ClubTeamMembers]]:
+    """The event's organisers with their team entries; someone since taken off a team, or whose
+    club stopped co-hosting, drops out."""
+    clubs = await team_club_ids(session, event)
+    if not clubs:
         return []
     return list((await session.execute(
         select(EventTeamMembers, ClubTeamMembers)
         .join(ClubTeamMembers, ClubTeamMembers.id == EventTeamMembers.member_id)
         .where(
             EventTeamMembers.event_id == event.id,
-            ClubTeamMembers.club_id == event.club_id,
+            ClubTeamMembers.club_id.in_(clubs),
             ClubTeamMembers.is_deleted == False,  # noqa: E712
         )
         .order_by(EventTeamMembers.sort_order, EventTeamMembers.id)
@@ -45,16 +74,20 @@ async def replace(session, event: Events, members: list) -> list[dict]:
     if len(set(ids)) != len(ids):
         raise CustomHTTPException(422, message="Each person can be listed once.")
     if ids:
+        clubs = await team_club_ids(session, event)
         on_team = set((await session.scalars(
             select(ClubTeamMembers.id).where(
-                ClubTeamMembers.id.in_(ids), ClubTeamMembers.club_id == event.club_id, ClubTeamMembers.is_deleted == False,  # noqa: E712
+                ClubTeamMembers.id.in_(ids), ClubTeamMembers.club_id.in_(clubs), ClubTeamMembers.is_deleted == False,  # noqa: E712
             )
         )).all())
         missing = [i for i in ids if i not in on_team]
         if missing:
             raise CustomHTTPException(
                 422,
-                message=f"Not on this club's team: {', '.join(str(i) for i in missing)}. Organisers are picked from the club's team.",
+                message=(
+                    f"Not on the team of this event's host or co-hosts: {', '.join(str(i) for i in missing)}. "
+                    "Organisers are picked from the host's and the co-hosts' teams."
+                ),
             )
     await session.execute(delete(EventTeamMembers).where(EventTeamMembers.event_id == event.id))
     for i, x in enumerate(members):

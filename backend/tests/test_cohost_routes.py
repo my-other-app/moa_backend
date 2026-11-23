@@ -326,6 +326,7 @@ ROUTES = {
     # organisers
     "GET /api/v1/events/{event_id}/organisers": ALLOW,
     "PUT /api/v1/events/{event_id}/organisers": ALLOW,
+    "GET /api/v1/events/{event_id}/organisers/candidates": ALLOW,
     # event_partners
     "GET /api/v1/events/{event_id}/partners": ALLOW,
     "POST /api/v1/events/{event_id}/partners": ALLOW,

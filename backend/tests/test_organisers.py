@@ -147,3 +147,66 @@ async def test_a_duplicated_event_keeps_its_organisers(client, world):
     assert [(o["member_id"], o["role"]) for o in copy] == [(tech.id, "Event lead"), (lead.id, None)]
     # The original is untouched.
     assert len((await client.get(_url(event), headers=h)).json()) == 2
+
+
+async def _cohost(session, world, make_club, mint_token, *, status="accepted"):
+    from datetime import datetime, timedelta, timezone
+
+    from app.api.cohosts.models import EventCohosts
+
+    co_owner, co_club = await make_club(name="Beat Collective", email="org-co@example.com")
+    now = datetime.now(timezone.utc)
+    mate = ClubTeamMembers(club_id=co_club.id, name="Mira Pillai", role="Co lead", sort_order=0)
+    session.add_all([
+        mate,
+        EventCohosts(event_id=world["event"].id, club_id=co_club.id, status=status, invited_at=now,
+                     expires_at=now + timedelta(days=14), responded_at=now),
+    ])
+    await session.commit()
+    return co_club, mate, auth_header(await mint_token(co_owner))
+
+
+async def test_a_cohosted_event_names_people_from_the_host_and_the_cohost(client, session, world, make_club, mint_token):
+    h, event, lead, tech = world["h"], world["event"], world["lead"], world["tech"]
+    co_club, mate, co_h = await _cohost(session, world, make_club, mint_token)
+
+    # Everyone who can be named: the host's team first, then the co-host's; nobody deleted, nobody from a stranger.
+    for headers in (h, co_h):
+        r = await client.get(_url(event) + "/candidates", headers=headers)
+        assert r.status_code == 200, r.text
+        rows = r.json()
+        assert [(c["member_id"], c["host"]) for c in rows] == [(lead.id, True), (tech.id, True), (mate.id, False)]
+        assert rows[2]["club_name"] == "Beat Collective" and rows[2]["club_id"] == co_club.id and rows[2]["club_role"] == "Co lead"
+
+    # The co-host saves a list mixing both teams, and both read it back the same.
+    body = {"members": [{"member_id": mate.id, "role": "Event lead"}, {"member_id": lead.id}]}
+    r = await client.put(_url(event), json=body, headers=co_h)
+    assert r.status_code == 200, r.text
+    assert [o["member_id"] for o in r.json()] == [mate.id, lead.id]
+    assert (await client.get(_url(event), headers=h)).json() == r.json()
+
+    # A stranger's team is still refused.
+    bad = await client.put(_url(event), json={"members": [{"member_id": world["theirs"].id}]}, headers=co_h)
+    assert bad.status_code == 422 and str(world["theirs"].id) in bad.json()["message"]
+
+
+async def test_a_club_that_stops_cohosting_takes_its_people_off_the_page(client, session, world, make_club, mint_token):
+    from sqlalchemy import update
+
+    from app.api.cohosts.models import EventCohosts
+
+    h, event, lead = world["h"], world["event"], world["lead"]
+    _, mate, _ = await _cohost(session, world, make_club, mint_token)
+    assert (await client.put(_url(event), json={"members": [{"member_id": lead.id}, {"member_id": mate.id}]}, headers=h)).status_code == 200
+
+    await session.execute(update(EventCohosts).where(EventCohosts.event_id == event.id).values(status="left"))
+    await session.commit()
+    assert [o["member_id"] for o in (await client.get(_url(event), headers=h)).json()] == [lead.id]
+    assert [c["member_id"] for c in (await client.get(_url(event) + "/candidates", headers=h)).json()] == [lead.id, world["tech"].id]
+
+
+async def test_an_unanswered_invite_does_not_open_the_team(client, session, world, make_club, mint_token):
+    h, event = world["h"], world["event"]
+    _, mate, _ = await _cohost(session, world, make_club, mint_token, status="invited")
+    assert mate.id not in [c["member_id"] for c in (await client.get(_url(event) + "/candidates", headers=h)).json()]
+    assert (await client.put(_url(event), json={"members": [{"member_id": mate.id}]}, headers=h)).status_code == 422

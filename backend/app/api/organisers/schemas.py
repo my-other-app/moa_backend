@@ -30,3 +30,15 @@ class OrganiserOut(BaseModel):
     club_role: Optional[str] = None
     role: Optional[str] = None
     photo: Optional[str] = None
+
+
+class CandidateOut(BaseModel):
+    """Someone who can be named an organiser, and the club whose team they are on."""
+    member_id: int
+    name: str
+    club_role: Optional[str] = None
+    photo: Optional[str] = None
+    club_id: int
+    club_name: Optional[str] = None
+    # On the host club's team (else a co-host's).
+    host: bool
