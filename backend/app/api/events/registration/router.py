@@ -259,6 +259,7 @@ async def list_event_registration(
     event_id: int,
     is_attended: bool | None = Query(None),
     is_paid: bool | None = Query(None),  # Changed to None to show all by default
+    has_app: bool | None = Query(None, description="true: signed in to the MyOtherApp app on a phone; false: not"),
     search: str | None = Query(None, description="Search by name, email, phone or ticket ID"),
     role: RegistrationRole | None = Query(None),
     delivery: str | None = Query(None, pattern="^(not_delivered)$", description="Only guests not reached on any channel"),
@@ -273,6 +274,7 @@ async def list_event_registration(
         event_id=event_id,
         is_attended=is_attended,
         is_paid=is_paid,
+        has_app=has_app,
         limit=pagination.limit,
         offset=pagination.offset,
         search=search,
@@ -336,6 +338,7 @@ async def export_event_registrations(
     event_id: int,
     is_attended: bool | None = Query(None),
     is_paid: bool | None = Query(None, description="true for paid guests only, false for unpaid only; everyone when left out"),
+    has_app: bool | None = Query(None, description="true: guests signed in to the app; false: the rest; everyone when left out"),
     session: SessionDep = SessionDep,
 ) -> FileResponse:
     """The guest list as an .xlsx: a column per answer to the event's own
@@ -346,7 +349,7 @@ async def export_event_registrations(
     guest's name, email, phone and answers."""
     ensure_admin_can(user, EXPORT_DATA)
     path = await export.write_export(
-        session, user.id, event_id, is_attended=is_attended, is_paid=is_paid, as_admin=is_admin_user(user)
+        session, user.id, event_id, is_attended=is_attended, is_paid=is_paid, has_app=has_app, as_admin=is_admin_user(user)
     )
     return FileResponse(
         path,

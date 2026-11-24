@@ -221,3 +221,28 @@ async def test_a_ticket_sent_to_someone_since_removed_counts_for_nobody(client, 
     # One sent (Ananya), one failed (Chitra); the removed guest's send is neither,
     # and the two on the list with nothing yet are still "unsent".
     assert (email["sent"], email["failed"], email["unsent"]) == (1, 1, 2)
+
+
+async def test_guests_can_be_filtered_by_whether_they_use_the_app(client, session, world):
+    """A guest signed in to the app on a phone holds a live push token; one who
+    signed out there has only a removed one, and counts as not on the app."""
+    from app.api.users.models import UserDeviceTokens
+
+    event, a, b = world["event"], world["a"], world["b"]
+    session.add_all([
+        UserDeviceTokens(user_id=a.user_id, fcm_token="tok-ananya-phone", platform="android"),
+        UserDeviceTokens(user_id=b.user_id, fcm_token="tok-bala-old", platform="ios", is_deleted=True),
+    ])
+    await session.commit()
+
+    def names(r):
+        assert r.status_code == 200, r.text
+        return sorted(x["full_name"] for x in r.json()["items"])
+
+    base = f"/api/v1/events/registration/{event.id}/list"
+    assert names(await client.get(base, params={"has_app": "true"}, headers=world["club"])) == ["Ananya Iyer"]
+    assert names(await client.get(base, params={"has_app": "false"}, headers=world["club"])) == ["Bala Krishnan", "Chitra Nair", "Walk-up Nine"]
+    assert len(names(await client.get(base, headers=world["club"]))) == 4
+
+    s = (await client.get(_url(world, "/summary"), headers=world["club"])).json()
+    assert s["app"] == {"with_app": 1}
