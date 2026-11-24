@@ -117,6 +117,7 @@ class Actions(BaseModel):
     can_decline: bool
     can_ask_missing: bool
     can_remove: bool
+    can_message: bool = False
 
 
 class PersonProfile(BaseModel):
