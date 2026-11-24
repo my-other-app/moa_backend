@@ -46,6 +46,14 @@ async def get_person(request: Request, session: SessionDep, user: ClubAuth, even
         d, role=club_access.role_of(request), platform_admin=is_admin_user(user),
         cohost=cohosts.granted(event.id, user.id), door_view=door_view, printers_online=online,
     )
+    # Whether an app notification can reach them (app/api/users/app_use): the "Message" dialog offers it only then.
+    uid = getattr(reg, "user_id", None) if reg is not None else getattr(req, "user_id", None)
+    if uid is not None:
+        from sqlalchemy import select
+
+        from app.api.users.app_use import on_app
+
+        out["status"]["on_app"] = bool(await session.scalar(select(on_app(uid))))
     if door_view and out["ticket"] is not None:
         # The ticket code is the entry credential itself: the last four characters only.
         out["ticket"]["code"] = door.mask_ticket(out["ticket"]["code"])

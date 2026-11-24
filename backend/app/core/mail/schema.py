@@ -10,6 +10,7 @@ the doors open, and a thank-you afterwards.
 The wire format is camelCase, shared with the editor; this is the Python
 half of Muster's email contract.
 """
+from uuid import UUID
 from typing import Annotated, Literal, Optional, Union
 
 from pydantic import Field, StringConstraints, field_validator, model_validator
@@ -248,6 +249,9 @@ class EmailAudience(Wire):
     who: Literal["ALL", "CHECKED_IN", "NOT_CHECKED_IN"] = "ALL"
     # Narrows to these roles; empty means everyone.
     roles: list[str] = Field(default_factory=list, max_length=10)
+    # Narrows to these guests (a message to one person, or a few picked on
+    # the guest list); empty means the audience above.
+    registration_ids: list[UUID] = Field(default_factory=list, max_length=500)
 
 
 class EmailTrigger(Wire):

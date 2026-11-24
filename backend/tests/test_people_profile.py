@@ -91,7 +91,7 @@ async def test_a_registration_comes_back_in_the_contracts_shape(client, world):
     assert body["person"]["account"] == {"kind": "app", "user_id": world["user"].id}
     assert body["status"] == {
         "stage": "confirmed", "checked_in": False, "card_printed": False, "certificate": "none", "paid": None, "ticket_revoked": False,
-        "email_bounced": False,
+        "email_bounced": False, "on_app": False,
     }
     assert body["answers"] == [
         {"key": "college", "label": "College", "value": "CET", "missing": False},
@@ -722,3 +722,12 @@ async def test_a_person_with_hundreds_of_events_costs_the_same_queries_as_one_wi
     # And the many really is many: every source has more rows, and nothing was dropped silently.
     assert len(many["timeline"]) == 200 and many["timeline_truncated"] is True and len(few["timeline"]) < 40
     assert len(many["merch"]) == 40 and len(many["prints"]) >= 40
+
+
+async def test_the_profile_says_whether_an_app_notification_can_reach_them(client, session, world):
+    from app.api.users.models import UserDeviceTokens
+
+    assert (await _get(client, world)).json()["status"]["on_app"] is False
+    session.add(UserDeviceTokens(user_id=world["reg"].user_id, fcm_token="tok-profile-phone", platform="android"))
+    await session.commit()
+    assert (await _get(client, world)).json()["status"]["on_app"] is True
