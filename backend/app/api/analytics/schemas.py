@@ -115,6 +115,11 @@ class TicketFigures(BaseModel):
     design_version: int
 
 
+class AppUse(BaseModel):
+    #: Guests on the list signed in to the MyOtherApp app on a phone.
+    with_app: int = 0
+
+
 class RetentionFigures(BaseModel):
     mode: str
     state: Optional[str]
@@ -136,6 +141,7 @@ class EventSummary(BaseModel):
     by_source: list[SourceFigures]
     merch: list[MerchFigures]
     tickets: TicketFigures
+    app: AppUse = AppUse()
     #: Registration requests waiting for the club (docs/APPROVALS.md).
     requests_pending: int = 0
     #: Every request's figure for the funnel; null for an event that never

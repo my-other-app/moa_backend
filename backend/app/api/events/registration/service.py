@@ -743,6 +743,7 @@ async def list_event_registrations(
     event_id: int,
     is_attended: bool | None = None,
     is_paid: bool | None = None,  # None: everyone
+    has_app: bool | None = None,  # None: everyone; True: signed in to the app on a phone
     limit: int = 10,
     offset: int = 0,
     search: str | None = None,
@@ -781,6 +782,11 @@ async def list_event_registrations(
     # never applied, so both showed every guest.
     if is_paid is not None:
         conditions.append(EventRegistrationsLink.is_paid == is_paid)
+    if has_app is not None:
+        from app.api.users.app_use import on_app
+
+        uses = on_app(EventRegistrationsLink.user_id)
+        conditions.append(uses if has_app else ~uses)
     if role is not None:
         conditions.append(EventRegistrationsLink.role == role)
     if search and whole_codes:

@@ -342,6 +342,12 @@ async def summary(session, event: Events, now: Optional[datetime] = None) -> dic
     return await hot_reads.kept(("console", event.id), hot_reads.CONSOLE_SECONDS, lambda: _summary(session, event, None))
 
 
+async def _with_app(session, event_id: int) -> int:
+    from app.api.users.app_use import on_app
+
+    return await session.scalar(select(func.count()).select_from(_regs(event_id).where(on_app(EventRegistrationsLink.user_id)).subquery())) or 0
+
+
 async def _summary(session, event: Events, now: Optional[datetime]) -> dict:
     from app.api.ticketing import places as ticket_places
 
@@ -365,6 +371,8 @@ async def _summary(session, event: Events, now: Optional[datetime]) -> dict:
         "by_source": await _by_source(session, event),
         "merch": await _merch(session, event),
         "tickets": await tickets(session, event, registered),
+        # Guests on the list signed in to the app on a phone (app/api/users/app_use).
+        "app": {"with_app": await _with_app(session, event.id)},
         # Registration requests waiting for the club (app/api/approvals).
         "requests_pending": (await approvals.pending_counts(session, [event.id])).get(event.id, 0),
         # Every request's figure, for the funnel (null: never confirmed each place).

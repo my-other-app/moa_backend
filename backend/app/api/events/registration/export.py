@@ -122,7 +122,7 @@ class _Writer:
 
 async def write_export(
     session: AsyncSession, user_id: int, event_id: int, *,
-    is_attended: bool | None = None, is_paid: bool | None = None, as_admin: bool = False,
+    is_attended: bool | None = None, is_paid: bool | None = None, has_app: bool | None = None, as_admin: bool = False,
 ) -> str:
     """The event's registrations as an .xlsx file on disk; the caller sends
     it and removes it. Owner (or admin) only."""
@@ -136,6 +136,10 @@ async def write_export(
         where.append(R.is_attended == is_attended)
     if is_paid is not None:
         where.append(R.is_paid == is_paid)
+    if has_app is not None:
+        from app.api.users.app_use import on_app
+
+        where.append(on_app(R.user_id) if has_app else ~on_app(R.user_id))
     answer_keys = await _answer_keys(session, event, where)
     from app.api.missing_answers.state import Form
 
