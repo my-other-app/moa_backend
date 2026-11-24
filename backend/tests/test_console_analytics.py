@@ -192,3 +192,32 @@ async def test_the_status_clock_rides_along_on_lists_and_detail(client, world):
     assert {r["name"]: r["status"] for r in rows} == {"Build Day": "live", "Demo Day": "closed"}
     detail = (await client.get(_url(world).replace(f"/events/{world['event'].id}", f"/events/info/{world['event'].id}"), headers=world["club"])).json()
     assert detail["status"] == "live" and detail["status_clock"] is True and detail["retention_mode"] == "keep"
+
+
+async def test_a_ticket_sent_to_someone_since_removed_counts_for_nobody(client, session, world, make_user, make_registration):
+    """A guest who got their ticket and then cancelled (or was taken off the
+    list) leaves a sent delivery behind. It must not count as a ticket held by
+    someone on the list, nor stand in for a guest still waiting for one: the
+    DevFest overview read "274 have a ticket" with 269 on the list."""
+    event = world["event"]
+    gone_user = await make_user(email="gone-guest@example.com")
+    gone = await make_registration(event=event, user=gone_user, full_name="Gone Guest")
+    session.add(Deliveries(event_id=event.id, registration_id=gone.id, kind=DeliveryKind.ticket, channel=DeliveryChannel.email,
+                           status=DeliveryStatus.sent, design_version=0))
+    await session.commit()
+    s = (await client.get(_url(world, "/summary"), headers=world["club"])).json()
+    assert s["registered"] == 5 and s["tickets"]["issued"] == 2 and s["tickets"]["missing"] == 3
+
+    gone.is_deleted = True
+    await session.commit()
+    s = (await client.get(_url(world, "/summary"), headers=world["club"])).json()
+    assert s["registered"] == 4
+    # Back to the four still on the list: one holds a ticket, three do not.
+    assert s["tickets"] == {"issued": 1, "missing": 3, "pending": 0, "older_design": 0, "revoked": 0, "design_version": 0}
+
+    from app.api.deliveries import service as deliveries
+
+    email = next(c for c in (await deliveries.summary(session, event, DeliveryKind.ticket))["channels"] if c["channel"] == "email")
+    # One sent (Ananya), one failed (Chitra); the removed guest's send is neither,
+    # and the two on the list with nothing yet are still "unsent".
+    assert (email["sent"], email["failed"], email["unsent"]) == (1, 1, 2)

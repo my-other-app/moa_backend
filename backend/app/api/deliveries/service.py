@@ -1184,7 +1184,13 @@ async def summary(session, event: Events, kind: DeliveryKind) -> dict:
     rows = (
         await session.execute(
             select(Deliveries.channel, Deliveries.status, func.count())
-            .where(Deliveries.event_id == event.id, Deliveries.kind == kind)
+            .where(
+                Deliveries.event_id == event.id, Deliveries.kind == kind,
+                # Guests still on the list: what reached someone since
+                # removed is neither counted as sent nor stands in for an
+                # unsent guest who is still here.
+                Deliveries.registration_id.in_(_active(event.id).with_only_columns(EventRegistrationsLink.id).scalar_subquery()),
+            )
             .group_by(Deliveries.channel, Deliveries.status)
         )
     ).all()

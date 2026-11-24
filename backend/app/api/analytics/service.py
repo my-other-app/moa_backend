@@ -249,13 +249,16 @@ async def tickets(session, event: Events, registered: Optional[int] = None) -> d
         registered, _ = await _head_count(session, event.id)
     revoked = await session.scalar(select(func.count()).select_from(_regs(event.id).where(EventRegistrationsLink.ticket_revoked_at.isnot(None)).subquery())) or 0
     sent = Deliveries.kind == DeliveryKind.ticket
-    issued = await session.scalar(select(func.count(func.distinct(Deliveries.registration_id))).where(Deliveries.event_id == event.id, sent, Deliveries.status == DeliveryStatus.sent)) or 0
-    pending = await session.scalar(select(func.count()).where(Deliveries.event_id == event.id, sent, Deliveries.status.in_(UNFINISHED))) or 0
+    # Only guests still on the list: a ticket sent to someone who has since
+    # cancelled or been removed is not a ticket anyone on the list holds.
+    on_list = Deliveries.registration_id.in_(_regs(event.id).with_only_columns(EventRegistrationsLink.id).scalar_subquery())
+    issued = await session.scalar(select(func.count(func.distinct(Deliveries.registration_id))).where(Deliveries.event_id == event.id, sent, Deliveries.status == DeliveryStatus.sent, on_list)) or 0
+    pending = await session.scalar(select(func.count()).where(Deliveries.event_id == event.id, sent, Deliveries.status.in_(UNFINISHED), on_list)) or 0
     version = await _ticket_version(session, event.id)
     older = 0
     if version > 0:
         older = await session.scalar(
-            select(func.count(func.distinct(Deliveries.registration_id))).where(Deliveries.event_id == event.id, sent, Deliveries.status == DeliveryStatus.sent, Deliveries.design_version < version)
+            select(func.count(func.distinct(Deliveries.registration_id))).where(Deliveries.event_id == event.id, sent, Deliveries.status == DeliveryStatus.sent, Deliveries.design_version < version, on_list)
         ) or 0
     return {"issued": int(issued), "missing": max(0, int(registered) - int(revoked) - int(issued)), "pending": int(pending), "older_design": int(older), "revoked": int(revoked), "design_version": version}
 
