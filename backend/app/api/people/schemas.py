@@ -30,6 +30,8 @@ class Status(BaseModel):
     paid: Optional[bool] = None
     ticket_revoked: bool
     email_bounced: bool = False
+    # Signed in to the MyOtherApp app on a phone: an app notification can reach them.
+    on_app: bool = False
 
 
 class Answer(BaseModel):
@@ -115,6 +117,7 @@ class Actions(BaseModel):
     can_decline: bool
     can_ask_missing: bool
     can_remove: bool
+    can_message: bool = False
 
 
 class PersonProfile(BaseModel):

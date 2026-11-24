@@ -91,7 +91,7 @@ async def test_a_registration_comes_back_in_the_contracts_shape(client, world):
     assert body["person"]["account"] == {"kind": "app", "user_id": world["user"].id}
     assert body["status"] == {
         "stage": "confirmed", "checked_in": False, "card_printed": False, "certificate": "none", "paid": None, "ticket_revoked": False,
-        "email_bounced": False,
+        "email_bounced": False, "on_app": False,
     }
     assert body["answers"] == [
         {"key": "college", "label": "College", "value": "CET", "missing": False},
@@ -104,7 +104,7 @@ async def test_a_registration_comes_back_in_the_contracts_shape(client, world):
     assert body["timeline_truncated"] is False
     assert set(body["actions"]) == {
         "can_print", "can_send_to_station", "printers_online", "can_resend_ticket", "can_check_in", "can_undo_check_in", "can_edit",
-        "can_confirm", "can_decline", "can_ask_missing", "can_remove",
+        "can_confirm", "can_decline", "can_ask_missing", "can_remove", "can_message",
     }
     assert [r["kind"] for r in body["timeline"]][:2] == ["ticket_issued", "registered"]
     for line in body["timeline"]:
@@ -554,7 +554,7 @@ async def test_the_organiser_sees_everything_a_door_member_sees_it_masked(client
     assert masked["ticket"]["code"].startswith("••••") and masked["ticket"]["code"] != whole["ticket"]["code"]
     assert masked["ticket"]["pdf_url"] is None and whole["ticket"]["pdf_url"] is not None
     assert masked["actions"]["can_edit"] is False and masked["actions"]["can_remove"] is False and masked["actions"]["can_print"] is False
-    assert masked["actions"]["can_confirm"] is False and masked["actions"]["can_decline"] is False
+    assert masked["actions"]["can_confirm"] is False and masked["actions"]["can_decline"] is False and masked["actions"]["can_message"] is False
     # Door staff may check people in and send a ticket again, as their own role allows.
     assert masked["actions"]["can_check_in"] is True
     for line in masked["timeline"]:
@@ -722,3 +722,22 @@ async def test_a_person_with_hundreds_of_events_costs_the_same_queries_as_one_wi
     # And the many really is many: every source has more rows, and nothing was dropped silently.
     assert len(many["timeline"]) == 200 and many["timeline_truncated"] is True and len(few["timeline"]) < 40
     assert len(many["merch"]) == 40 and len(many["prints"]) >= 40
+
+
+async def test_the_profile_says_whether_an_app_notification_can_reach_them(client, session, world):
+    from app.api.users.models import UserDeviceTokens
+
+    assert (await _get(client, world)).json()["status"]["on_app"] is False
+    session.add(UserDeviceTokens(user_id=world["reg"].user_id, fcm_token="tok-profile-phone", platform="android"))
+    await session.commit()
+    assert (await _get(client, world)).json()["status"]["on_app"] is True
+
+
+async def test_messaging_one_guest_follows_who_may_use_messages(client, session, world):
+    """The club may write to a guest on the list; nobody writes to a revoked ticket."""
+    from datetime import datetime, timezone
+
+    assert (await _get(client, world)).json()["actions"]["can_message"] is True
+    world["reg"].ticket_revoked_at = datetime.now(timezone.utc)
+    await session.commit()
+    assert (await _get(client, world)).json()["actions"]["can_message"] is False

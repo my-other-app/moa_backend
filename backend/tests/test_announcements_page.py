@@ -77,3 +77,22 @@ async def test_what_a_send_would_reach(client, world):
     assert a["by_audience"]["attendees"] == {"people": 1, "reachable": 1}
     assert a["by_audience"]["non_attendees"] == {"people": 2, "reachable": 1}
     assert (await client.get("/api/v1/clubs/notifications/events/999999/audience", headers=world["h"])).status_code == 404
+
+
+async def test_an_app_notification_can_go_to_one_picked_guest(client, session, world):
+    from sqlalchemy import select
+
+    from app.api.events.models import EventRegistrationsLink
+
+    regs = {r.user_id: r for r in (await session.scalars(select(EventRegistrationsLink).where(EventRegistrationsLink.event_id == world["event"].id))).all()}
+    one = regs[world["users"][1].id]
+    url = f"/api/v1/clubs/notifications/events/{world['event'].id}/send"
+    r = await client.post(url, json={"title": "Your table", "body": "Table 4", "registration_ids": [str(one.id)]}, headers=world["h"])
+    assert r.status_code == 200, r.text
+    assert r.json()["success"] is True and r.json()["notifications_sent"] == 1 and "guest" in r.json()["message"]
+
+    # Someone not on this event's list: nothing sent, a plain reason, no ids in it.
+    from uuid import uuid4
+
+    r = await client.post(url, json={"title": "x", "body": "y", "registration_ids": [str(uuid4())]}, headers=world["h"])
+    assert r.json()["success"] is False and r.json()["notifications_sent"] == 0

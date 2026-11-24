@@ -6,6 +6,7 @@ import logging
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 from typing import Optional, Literal, List
+from uuid import UUID
 from enum import Enum
 from datetime import datetime
 
@@ -47,6 +48,10 @@ class SendNotificationRequest(BaseModel):
     audience: AudienceType = Field(
         AudienceType.ALL,
         description="Target audience: 'all' (registrants), 'attendees', or 'non_attendees'"
+    )
+    registration_ids: Optional[List[UUID]] = Field(
+        None, max_length=500,
+        description="Only these guests of the event (a message to one person, or a few picked); the audience is then ignored",
     )
 
 
@@ -114,6 +119,19 @@ async def send_notification_to_participants(
 
     await gates.require_within(session, event.club_id, "announcements_per_month", actor=user)
 
+    picked_users = None
+    if request_body.registration_ids:
+        from app.api.events.models import EventRegistrationsLink
+
+        picked_users = list(dict.fromkeys((await session.scalars(
+            select(EventRegistrationsLink.user_id).where(
+                EventRegistrationsLink.event_id == event_id, EventRegistrationsLink.is_deleted == False,  # noqa: E712
+                EventRegistrationsLink.id.in_(request_body.registration_ids), EventRegistrationsLink.user_id.isnot(None),
+            )
+        )).all()))
+        if not picked_users:
+            return SendNotificationResponse(success=False, message="None of these guests are on this event's list.", notifications_sent=0)
+
     # Send notifications with audience targeting
     logger.info(f"Calling notify_event_participants for event {event_id}")
     sent_count, participant_ids = await notify_event_participants(
@@ -122,7 +140,8 @@ async def send_notification_to_participants(
         title=request_body.title,
         body=request_body.body,
         image_url=request_body.image_url,
-        audience=request_body.audience.value,
+        audience="picked" if picked_users else request_body.audience.value,
+        user_ids=picked_users,
     )
     
     participant_count = len(participant_ids)
@@ -132,6 +151,8 @@ async def send_notification_to_participants(
         "attendees": "attendees",
         "non_attendees": "non-attendees",
     }.get(request_body.audience.value, "participants")
+    if picked_users:
+        audience_label = "guest" if len(picked_users) == 1 else "picked guests"
     
     logger.info(f"Announcement sent to {sent_count} of {participant_count} {audience_label}")
     
@@ -145,7 +166,7 @@ async def send_notification_to_participants(
     if sent_count == 0:
         return SendNotificationResponse(
             success=False, # Treat as warning/failure to alert user
-            message=f"Found {participant_count} {audience_label} (IDs: {participant_ids}), but none have active push notifications (mobile app login required).",
+            message=f"Found {participant_count} {audience_label}, but none is signed in to the app on a phone, so nothing was sent. Send an email instead.",
             notifications_sent=0,
         )
         

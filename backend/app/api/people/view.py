@@ -144,6 +144,8 @@ def actions_of(d, *, role: str, platform_admin: bool, cohost: bool, printers_onl
             askable and ((ticket_ok) or (reg is None and req is not None and req.status in ("pending", "approved"))) and ok("POST", f"{base}/answers/asks")
         ),
         "can_remove": bool(live and ok("DELETE", f"/api/v1/events/registration/{eid}/info/{rid}")),
+        # Write to this one guest (email through Messages, or an app notification): whoever may use Messages.
+        "can_message": bool(ticket_ok and ok("POST", f"{base}/messages")),
     }
 
 

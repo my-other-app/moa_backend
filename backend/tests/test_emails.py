@@ -651,3 +651,22 @@ def test_own_design_keeps_the_club_and_event_folders_only():
     assert kept(service.own_design(design, event_id=0, club_id=None)) == [None, None, None, None]
     # The design asked about is left as it was.
     assert kept(design) == keys
+
+
+async def test_a_message_can_go_to_one_picked_guest(client, world, outbox, background):
+    """The guest profile's "Message": one person, whatever else the audience says."""
+    b = world["b"]
+    count = await client.post(_url(world, "/audience"), json={"who": "ALL", "roles": [], "registrationIds": [str(b.id)]}, headers=world["club"])
+    assert count.json() == {"recipients": 1, "withoutEmail": 0}
+    body = {"subject": "A note for you, {{first_name}}", "body": "Your table is 4.", "audience": {"who": "ALL", "registrationIds": [str(b.id)]}}
+    r = await client.post(f"/api/v1/events/{world['event'].id}/messages", json=body, headers=world["club"])
+    assert r.status_code == 200, r.text
+    assert r.json()["recipients"] == 1 and r.json()["audience"] == "PICKED"
+    assert [m["recipients"] for m in outbox["sent"]] == [[b.email]]
+    assert outbox["sent"][0]["subject"] == "A note for you, Bala"
+
+    # Another event's guest is never reached through this one.
+    from uuid import uuid4
+
+    stray = await client.post(_url(world, "/audience"), json={"who": "ALL", "registrationIds": [str(uuid4())]}, headers=world["club"])
+    assert stray.json()["recipients"] == 0

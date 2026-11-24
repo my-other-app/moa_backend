@@ -721,6 +721,8 @@ def audience_query(event_id: int, audience: EmailAudience):
         except ValueError:
             raise CustomHTTPException(422, message="Pick roles from attendee, speaker and staff.", errors={"fields": {"roles": "unknown role"}})
         q = q.where(EventRegistrationsLink.role.in_(wanted))
+    if audience.registration_ids:
+        q = q.where(EventRegistrationsLink.id.in_(list(audience.registration_ids)))
     return q
 
 
@@ -789,7 +791,7 @@ async def start_message(
     msg = Messages(
         id=uuid.uuid4(), event_id=event.id, client_ref=client_ref, kind=kind, template_id=template.id if template else None,
         design=design.model_dump(by_alias=True), attachments=attachments.model_dump(by_alias=True), scheduled=scheduled,
-        subject=subject, body=body, audience=audience.who, roles=list(audience.roles), channels=["email"],
+        subject=subject, body=body, audience="PICKED" if audience.registration_ids else audience.who, roles=list(audience.roles), channels=["email"],
         status=MessageStatus.SENDING, recipients=0, sent_count=0, failed_count=0, skipped_count=0, created_by=created_by,
         created_at=now, updated_at=now,
     )
