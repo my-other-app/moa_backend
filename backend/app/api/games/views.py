@@ -105,7 +105,41 @@ async def screen(session, event, settings: Optional[GameSettings]) -> dict:
         "feed": await feed_body(session, event, settings),
         "hunt_timer": await hunt_body(session, event, settings),
         "server_now": common.now(),
+        # The logo strip along the screen's foot (old screens ignore both).
+        "club": await club_of(session, event),
+        "partners": await partners_of(session, event),
     }
+
+
+#: The most partner logos one screen shows, in the event page's order.
+SCREEN_PARTNERS_MAX = 12
+
+
+async def club_of(session, event) -> Optional[dict]:
+    """The host club: its name and the logo the event page shows."""
+    from app.api.clubs.models import Clubs
+    from app.api.event_partners.service import _logo_url
+
+    if not event.club_id:
+        return None
+    club = await session.get(Clubs, event.club_id)
+    if club is None:
+        return None
+    return {"name": club.name, "logo_url": _logo_url(club.logo)}
+
+
+async def partners_of(session, event) -> list[dict]:
+    """The event's sponsors then partners, as on its page; only those with a logo."""
+    from app.api.event_partners.service import _logo_url, list_rows
+
+    out = []
+    for p in await list_rows(session, event.id):
+        url = _logo_url(p.logo)
+        if url:
+            out.append({"name": p.name, "logo_url": url, "kind": p.kind, "label": p.label})
+        if len(out) >= SCREEN_PARTNERS_MAX:
+            break
+    return out
 
 
 async def topic(session, event, settings, name: str):
