@@ -95,6 +95,9 @@ class GameSettings(AbstractSQLModel):
     board_rows = Column(Integer, nullable=False, default=7, server_default="7")
     ticker_on = Column(Boolean, nullable=False, default=True, server_default=sa.true())
     join_box_on = Column(Boolean, nullable=False, default=True, server_default=sa.true())
+    #: The venue screen's own colours over the theme: {background, surface, text,
+    #: accent, gold, silver, bronze}, each "#RRGGBB" or absent (null: the theme's).
+    colors = Column(JSONB, nullable=True)
     screen_version = Column(Integer, nullable=False, default=1, server_default="1")
     #: The last player number handed out: players are numbered 1, 2, 3 per event.
     player_seq = Column(Integer, nullable=False, default=0, server_default="0")
@@ -104,7 +107,7 @@ class GameSettings(AbstractSQLModel):
     __table_args__ = (
         sa.CheckConstraint("theme IN ('neon_arcade', 'sunset_pop', 'ocean_glow', 'mono_night')", name="ck_game_settings_theme"),
         sa.CheckConstraint("board_layout IN ('podium', 'list')", name="ck_game_settings_layout"),
-        sa.CheckConstraint("board_rows IN (5, 7, 10)", name="ck_game_settings_rows"),
+        sa.CheckConstraint("board_rows IN (0, 5, 7, 10, 25, 50)", name="ck_game_settings_rows"),
     )
 
 

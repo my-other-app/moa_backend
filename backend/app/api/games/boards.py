@@ -28,6 +28,8 @@ from app.response import CustomHTTPException
 SNAPSHOT_EVERY = 60
 SNAPSHOT_TOP = 50
 MAX_LIMIT = 50
+#: A venue screen set to show everyone gets at most this many rows per board.
+SCREEN_MAX = 500
 
 
 def _tables(game: str):
@@ -103,9 +105,9 @@ async def _baseline(session, event_id: int, game: str, ranks: dict) -> Optional[
     return None
 
 
-async def board(session, event_id: int, game: str, limit: int = 10, me: Optional[object] = None) -> dict:
-    """The top `limit` of one board, and the caller's own place when `me` (a registration id) is given."""
-    limit = max(1, min(int(limit or 10), MAX_LIMIT))
+async def board(session, event_id: int, game: str, limit: int = 10, me: Optional[object] = None, cap: int = MAX_LIMIT) -> dict:
+    """The top `limit` of one board (at most `cap`), and the caller's own place when `me` (a registration id) is given."""
+    limit = max(1, min(int(limit or 10), cap))
     top = await _top(session, event_id, game, max(limit, SNAPSHOT_TOP))
     current = {str(r[0]): i + 1 for i, r in enumerate(top)}
     before = await _baseline(session, event_id, game, current)
