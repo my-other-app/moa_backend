@@ -108,6 +108,8 @@ async def screen(session, event, settings: Optional[GameSettings]) -> dict:
         # The logo strip along the screen's foot (old screens ignore both).
         "club": await club_of(session, event),
         "partners": await partners_of(session, event),
+        "cohosts": await cohosts_of(session, event),
+        "footer_image_url": common.logo_of(getattr(settings, "footer_image_url", None)) if settings else None,
     }
 
 
@@ -126,6 +128,28 @@ async def club_of(session, event) -> Optional[dict]:
     if club is None:
         return None
     return {"name": club.name, "logo_url": _logo_url(club.logo)}
+
+
+async def cohosts_of(session, event) -> list[dict]:
+    """The clubs co-hosting the event (accepted), in the order they joined; only those with a logo."""
+    from app.api.clubs.models import Clubs
+    from sqlalchemy import select
+
+    from app.api.cohosts.models import ACCEPTED, EventCohosts
+    from app.api.event_partners.service import _logo_url
+
+    ids = list((await session.scalars(
+        select(EventCohosts.club_id)
+        .where(EventCohosts.event_id == event.id, EventCohosts.status == ACCEPTED, EventCohosts.club_id != event.club_id)
+        .order_by(EventCohosts.created_at, EventCohosts.id)
+    )).all())
+    out = []
+    for club_id in ids:
+        club = await session.get(Clubs, club_id)
+        url = _logo_url(club.logo) if club is not None else None
+        if url:
+            out.append({"name": club.name, "logo_url": url})
+    return out[:SCREEN_PARTNERS_MAX]
 
 
 async def partners_of(session, event) -> list[dict]:

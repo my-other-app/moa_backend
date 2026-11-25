@@ -503,6 +503,8 @@ class Screen(BaseModel):
     # The logo strip along the screen's foot: the host club, then sponsors and partners.
     club: Optional[dict] = None
     partners: list[dict] = Field(default_factory=list)
+    cohosts: list[dict] = Field(default_factory=list)
+    footer_image_url: Optional[str] = None
 
 
 # --- the look ----------------------------------------------------------------------
@@ -555,6 +557,7 @@ class ScreenControl(BaseModel):
     slide_seconds: int = 12
     wall_size: int = 6
     logo_footer: bool = True
+    footer_image_url: Optional[str] = None
 
 
 class ScreenControlPatch(BaseModel):

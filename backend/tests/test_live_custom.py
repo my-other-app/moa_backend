@@ -789,9 +789,31 @@ async def test_the_screen_carries_the_host_club_and_partner_logos_until_turned_o
     assert (await client.put(_u(world, "/screen/control"), json={"logo_footer": "maybe"}, headers=world["hv"])).status_code == 422
 
 
+
+async def test_a_footer_image_stands_in_for_the_logos_and_survives_control_changes(client, session, world, fake_s3):
+    from PIL import Image
+
+    out = io.BytesIO()
+    Image.new("RGB", (3000, 300), (10, 120, 200)).save(out, "PNG")
+    up = await client.post(_u(world, "/screen/footer-image"), files={"image": ("strip.png", out.getvalue(), "image/png")}, headers=world["hv"])
+    assert up.status_code == 200, up.text
+    url = up.json()["footer_image_url"]
+    assert "events/live/footers/" in url and up.json()["logo_footer"] is True
+    screen = (await client.get(_u(world, "/screen"), headers=world["hv"])).json()
+    assert screen["footer_image_url"] == url and "_footer_image" not in screen["control"] and screen["cohosts"] == []
+    # Another control change keeps it.
+    assert (await client.put(_u(world, "/screen/control"), json={"ticker": True}, headers=world["hv"])).json()["footer_image_url"] == url
+    assert (await client.get(_u(world, "/screen/control"), headers=world["hv"])).json()["footer_image_url"] == url
+    bad = await client.post(_u(world, "/screen/footer-image"), files={"image": ("x.txt", b"hi", "text/plain")}, headers=world["hv"])
+    assert bad.status_code == 422
+    gone = await client.delete(_u(world, "/screen/footer-image"), headers=world["hv"])
+    assert gone.status_code == 200 and gone.json()["footer_image_url"] is None
+    assert (await client.get(_u(world, "/screen"), headers=world["hv"])).json()["footer_image_url"] is None
+
+
 async def test_the_screens_controls_and_what_it_shows(client, session, world):
     control = (await client.get(_u(world, "/screen/control"), headers=world["hv"])).json()
-    assert control == {"mode": "auto", "results": "hidden", "ticker": False, "idle_slides": [], "slide_seconds": 12, "wall_size": 6, "logo_footer": True}
+    assert control == {"mode": "auto", "results": "hidden", "ticker": False, "idle_slides": [], "slide_seconds": 12, "wall_size": 6, "logo_footer": True, "footer_image_url": None}
     assert (await client.get(_u(world, "/screen"), headers=world["hv"])).json()["shows"] == "qa"
     bad = await client.put(_u(world, "/screen/control"), json={"idle_slides": ["agenda", "agenda"]}, headers=world["hv"])
     assert bad.status_code == 422

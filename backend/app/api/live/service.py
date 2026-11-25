@@ -2442,7 +2442,8 @@ async def screen(session, event: Events, now: Optional[datetime] = None) -> dict
     the screen's controls and what it shows (`shows`), the Q&A wall, the
     updates for a ticker, the agenda and sponsors for idle slides, and the
     board across rounds."""
-    from app.api.games.views import club_of, partners_of
+    from app.api.games.common import logo_of
+    from app.api.games.views import club_of, cohosts_of, partners_of
     from app.api.live import looks
 
     now = now or now_utc()
@@ -2499,4 +2500,6 @@ async def screen(session, event: Events, now: Optional[datetime] = None) -> dict
         # The logo strip (the same as the games screen's); empty when the organiser turns it off.
         "club": await club_of(session, event) if control["logo_footer"] else None,
         "partners": await partners_of(session, event) if control["logo_footer"] else [],
+        "cohosts": await cohosts_of(session, event) if control["logo_footer"] else [],
+        "footer_image_url": logo_of(control.get("_footer_image")) if control["logo_footer"] else None,
     }

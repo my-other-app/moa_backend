@@ -573,3 +573,36 @@ async def test_a_screen_without_a_club_logo_or_partners_sends_an_empty_strip(mak
     token = (await w.client.get(org(w.eid, "/screen"), headers=w.club_h)).json()["token"]
     screen = (await w.client.get(gp(f"/screen/{token}"))).json()
     assert screen["club"] == {"name": w.club.name, "logo_url": None} and screen["partners"] == []
+
+
+async def test_a_screen_lists_the_cohost_clubs_with_logos_and_a_footer_image_stands_in_for_the_logos(make_world, make_club, fake_s3):
+    from app.api.cohosts.models import EventCohosts
+
+    def png(w=200, h=200):
+        out = io.BytesIO()
+        Image.new("RGB", (w, h), (10, 120, 200)).save(out, "PNG")
+        return out.getvalue()
+
+    w = await make_world()
+    await w.turn_on()
+    _, with_logo = await make_club(name="Co Club", email="co-club@example.com")
+    _, no_logo = await make_club(name="Plain Club", email="plain-club@example.com")
+    _, invited = await make_club(name="Invited Club", email="invited-club@example.com")
+    with_logo.logo = {"bytes": png(), "filename": "logo.png"}
+    for club, status in ((with_logo, "accepted"), (no_logo, "accepted"), (invited, "invited")):
+        w.session.add(EventCohosts(event_id=w.eid, club_id=club.id, status=status, invited_at=datetime.now(timezone.utc), expires_at=datetime.now(timezone.utc)))
+    await w.session.commit()
+    token = (await w.client.get(org(w.eid, "/screen"), headers=w.club_h)).json()["token"]
+    screen = (await w.client.get(gp(f"/screen/{token}"))).json()
+    assert [c["name"] for c in screen["cohosts"]] == ["Co Club"] and screen["cohosts"][0]["logo_url"]
+    assert screen["footer_image_url"] is None
+
+    r = await w.client.post(org(w.eid, "/settings/footer-image"), files={"image": ("strip.png", png(3000, 300), "image/png")}, headers=w.club_h)
+    assert r.status_code == 200, r.text
+    assert "events/games/footers/" in r.json()["footer_image_url"]
+    assert (await w.client.get(gp(f"/screen/{token}"))).json()["footer_image_url"] == r.json()["footer_image_url"]
+    bad = await w.client.post(org(w.eid, "/settings/footer-image"), files={"image": ("x.txt", b"hello", "text/plain")}, headers=w.club_h)
+    assert bad.status_code == 422 and bad.json()["error_code"] == "FOOTER_NOT_IMAGE"
+    gone = await w.client.delete(org(w.eid, "/settings/footer-image"), headers=w.club_h)
+    assert gone.status_code == 200 and gone.json()["footer_image_url"] is None
+    assert (await w.client.get(gp(f"/screen/{token}"))).json()["footer_image_url"] is None
