@@ -91,6 +91,8 @@ class GameSettings(AbstractSQLModel):
     theme = Column(String(16), nullable=False, default="neon_arcade", server_default="neon_arcade")
     accent = Column(String(9), nullable=True)
     logo_url = Column(String(500), nullable=True)
+    #: One wide picture shown in place of the logo strip at the screen's foot (null: the logos).
+    footer_image_url = Column(String(500), nullable=True)
     board_layout = Column(String(8), nullable=False, default="podium", server_default="podium")
     board_rows = Column(Integer, nullable=False, default=7, server_default="7")
     ticker_on = Column(Boolean, nullable=False, default=True, server_default=sa.true())

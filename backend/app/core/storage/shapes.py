@@ -27,6 +27,9 @@ LOGO = (1080, 1080)
 POSTER = (1080, 1350)
 COVER = (1500, 500)
 
+#: A screen's footer image: one wide strip, fitted inside the box, never cropped.
+FOOTER_SIZES = {"large": {"width": 3000, "height": 1000}}
+
 #: A club's logo: a 40-px row at 3x, a 160-px header at 3x, the full upload.
 LOGO_SIZES = {
     "thumbnail": {"width": 150, "height": 150},

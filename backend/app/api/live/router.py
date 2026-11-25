@@ -702,6 +702,21 @@ async def public_theme(session: SessionDep, event_id: int) -> Response:
     return Response(content=body, media_type="application/json", headers={"Cache-Control": BANNER_CACHE})
 
 
+@router.post("/screen/footer-image", summary="One wide picture at the big screen's foot in place of the logos")
+async def upload_screen_footer_image(session: SessionDep, user: ClubAuth, event_id: int, image: UploadFile = File(...)) -> ScreenControl:
+    from app.api.games.organiser import store_footer_image
+
+    event = await deliveries.event_for_club(session, user, event_id)
+    key = await store_footer_image(image, "events/live/footers/")
+    return ScreenControl(**await looks.set_footer_image(session, event, key))
+
+
+@router.delete("/screen/footer-image", summary="Back to the logos at the big screen's foot")
+async def delete_screen_footer_image(session: SessionDep, user: ClubAuth, event_id: int) -> ScreenControl:
+    event = await deliveries.event_for_club(session, user, event_id)
+    return ScreenControl(**await looks.set_footer_image(session, event, None))
+
+
 @router.get("/screen", summary="The big screen")
 async def screen(request: Request, session: SessionDep, user: ClubAuth, event_id: int) -> Screen:
     event = await deliveries.event_for_club(session, user, event_id)

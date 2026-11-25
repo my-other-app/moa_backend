@@ -252,7 +252,7 @@ async def public_theme(session, event_id: int) -> dict:
 
 #: `results: hidden` is the screen as it always was: an open question's tally
 #: from time-up (service.screen_shown). An organiser may show it live.
-SCREEN_DEFAULTS = {"mode": "auto", "results": "hidden", "ticker": False, "idle_slides": [], "slide_seconds": 12, "wall_size": 6}
+SCREEN_DEFAULTS = {"mode": "auto", "results": "hidden", "ticker": False, "idle_slides": [], "slide_seconds": 12, "wall_size": 6, "logo_footer": True}
 SLIDES = ("agenda", "sponsors", "join")
 
 
@@ -265,7 +265,7 @@ def _sc_bad(field: str, message: str) -> CustomHTTPException:
 
 
 def clean_control(c: dict) -> dict:
-    unknown = set(c) - set(SCREEN_DEFAULTS) - {"_set_at"}
+    unknown = set(c) - set(SCREEN_DEFAULTS) - {"_set_at", "_footer_image"}
     if unknown:
         raise _sc_bad(sorted(unknown)[0], f"Unknown control: {sorted(unknown)[0]}.")
     if c["mode"] not in ("auto", "quiz", "poll", "qa", "idle", "leaderboard"):
@@ -274,6 +274,8 @@ def clean_control(c: dict) -> dict:
         raise _sc_bad("results", "results is live or hidden.")
     if not isinstance(c["ticker"], bool):
         raise _sc_bad("ticker", "ticker is true or false.")
+    if not isinstance(c["logo_footer"], bool):
+        raise _sc_bad("logo_footer", "logo_footer is true or false.")
     slides = c["idle_slides"]
     if not isinstance(slides, list) or len(set(slides)) != len(slides) or any(s not in SLIDES for s in slides):
         raise _sc_bad("idle_slides", "idle_slides lists agenda, sponsors and join, each at most once.")
@@ -292,7 +294,29 @@ async def get_control(session, event_id: int) -> dict:
 
 
 def public_control(c: dict) -> dict:
-    return {k: v for k, v in c.items() if not k.startswith("_")}
+    """The controls as sent: without the screen's own keys, with the footer image's address."""
+    from app.api.games.common import logo_of
+
+    return {**{k: v for k, v in c.items() if not k.startswith("_")}, "footer_image_url": logo_of(c.get("_footer_image"))}
+
+
+async def set_footer_image(session, event: Events, key: Optional[str]) -> dict:
+    """One wide picture at the screen's foot in place of the logos (None: the logos again).
+    Kept beside the controls (`_footer_image`), so no control change loses it."""
+    row = await session.get(LiveThemes, event.id)
+    merged = screen_control((row.screen if row is not None else None) or {})
+    if key:
+        merged["_footer_image"] = key
+    else:
+        merged.pop("_footer_image", None)
+    if row is None:
+        row = LiveThemes(event_id=event.id)
+        session.add(row)
+    row.screen = merged
+    await session.commit()
+    themes.forget(("theme", event.id))
+    room.room_changed(event.id)
+    return public_control(merged)
 
 
 async def put_control(session, event: Events, change: dict) -> dict:

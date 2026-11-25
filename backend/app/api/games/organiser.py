@@ -102,6 +102,7 @@ def settings_out(s: GameSettings, plan: dict) -> dict:
         "theme": s.theme,
         "accent": s.accent,
         "logo_url": common.logo_of(s.logo_url),
+        "footer_image_url": common.logo_of(getattr(s, "footer_image_url", None)),
         "board_layout": s.board_layout,
         "board_rows": s.board_rows,
         "ticker_on": s.ticker_on,
@@ -173,6 +174,52 @@ async def upload_logo(session: SessionDep, user: ClubAuth, event_id: int, logo: 
         raise err(422, "LOGO_NOT_IMAGE", "That is not a picture we can read.")
     s = await common.ensure_settings(session, event.id)
     s.logo_url = await asyncio.to_thread(field.store, prepared)
+    s.updated_at = common.now()
+    await session.commit()
+    bus.changed(event.id, "settings")
+    return settings_out(s, await _plan(session, event, user))
+
+
+async def store_footer_image(upload: UploadFile, folder: str) -> str:
+    """One wide picture for a screen's foot, stored; its key. Shared with the live room's screen."""
+    import asyncio
+
+    from app.core.layout import pool
+    from app.core.storage import shapes
+    from app.core.storage.fields import S3ImageField
+
+    if not (upload.content_type or "").startswith("image/"):
+        raise err(422, "FOOTER_NOT_IMAGE", "The footer image must be a picture.")
+    raw = await upload.read(10 * 1024 * 1024 + 1)
+    field = S3ImageField(upload_to=folder, variations=shapes.FOOTER_SIZES, public=True)
+    try:
+        prepared = await pool.run(field.prepare, raw)
+    except Exception as exc:  # noqa: BLE001 - not a picture we can read
+        if getattr(exc, "status_code", None):
+            raise
+        raise err(422, "FOOTER_NOT_IMAGE", "That is not a picture we can read.")
+    return await asyncio.to_thread(field.store, prepared)
+
+
+@router.post("/settings/footer-image", summary="One wide picture shown at the venue screen's foot in place of the logos; answers the settings")
+async def upload_footer_image(session: SessionDep, user: ClubAuth, event_id: int, image: UploadFile = File(...)) -> dict:
+    event = await _event(session, user, event_id)
+    await _gate_any(session, event, user)
+    key = await store_footer_image(image, "events/games/footers/")
+    s = await common.ensure_settings(session, event.id)
+    s.footer_image_url = key
+    s.updated_at = common.now()
+    await session.commit()
+    bus.changed(event.id, "settings")
+    return settings_out(s, await _plan(session, event, user))
+
+
+@router.delete("/settings/footer-image", summary="Back to the logos at the venue screen's foot; answers the settings")
+async def delete_footer_image(session: SessionDep, user: ClubAuth, event_id: int) -> dict:
+    event = await _event(session, user, event_id)
+    await _gate_any(session, event, user)
+    s = await common.ensure_settings(session, event.id)
+    s.footer_image_url = None
     s.updated_at = common.now()
     await session.commit()
     bus.changed(event.id, "settings")
