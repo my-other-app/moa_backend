@@ -32,6 +32,7 @@ from zoneinfo import ZoneInfo
 
 import sqlalchemy as sa
 from sqlalchemy import String, and_, case, cast, exists, func, literal, or_, select, union_all, update
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import joinedload, selectinload
 
@@ -98,6 +99,46 @@ async def channels_for(session, event: Events, kind: Optional[DeliveryKind] = No
     if DeliveryChannel.whatsapp not in out and await club_whatsapp.can_route(session, event.club_id, TEMPLATE_OF.get(kind)):
         out.append(DeliveryChannel.whatsapp)
     return out
+
+
+# --- email, WhatsApp or both ------------------------------------------------
+
+#: How a kind reaches guests: both channels (as before), email alone, or
+#: WhatsApp with the email for whoever WhatsApp cannot reach.
+MODES = ("both", "email", "whatsapp")
+#: The kinds an event chooses for (Events.delivery_channels).
+MODE_KINDS = (DeliveryKind.ticket, DeliveryKind.reminder, DeliveryKind.certificate)
+
+#: Why an email went in place of WhatsApp, on the email row (fallback_code / fallback_reason).
+EMAIL_NO_OPT_IN = ("EMAIL_NO_OPT_IN", "Sent by email: they didn't opt in to WhatsApp")
+EMAIL_NO_NUMBER = ("EMAIL_NO_NUMBER", "Sent by email: no WhatsApp number we can reach")
+EMAIL_NO_WHATSAPP = ("EMAIL_NO_WHATSAPP", "Sent by email: WhatsApp isn't available")
+EMAIL_WA_FAILED = "EMAIL_WA_FAILED"
+
+
+def channel_mode(event: Events, kind: DeliveryKind) -> str:
+    """The event's choice for this kind: "both" unless it said otherwise."""
+    value = (getattr(event, "delivery_channels", None) or {}).get(kind.value)
+    return value if value in MODES else "both"
+
+
+def channel_modes(event: Events) -> dict:
+    return {k.value: channel_mode(event, k) for k in MODE_KINDS}
+
+
+async def whatsapp_available(session, event: Events) -> Optional[str]:
+    """None when WhatsApp can send for this event's club (the platform's
+    number, or the club's own active one); otherwise why not, in plain words."""
+    from app.api.club_whatsapp import service as club_whatsapp
+
+    if whatsapp.configured() or await club_whatsapp.can_route(session, event.club_id):
+        return None
+    return "WhatsApp isn't set up yet, so everything goes by email."
+
+
+def _whatsapp_reachable():
+    """Guests WhatsApp may reach: they asked, left a number, and it hasn't bounced."""
+    return and_(*_wants_whatsapp(), EventRegistrationsLink.wa_bounced_at.is_(None))
 
 
 def _wants_whatsapp() -> list:
@@ -189,6 +230,7 @@ async def queue(
     force: bool = False,
     send: bool = False,
     email_only: bool = False,
+    mode: Optional[str] = None,
 ) -> dict:
     """Put a pending row in place for every guest and channel that should be
     sent, and answer with what was queued and why the rest was not. Nothing is
@@ -207,7 +249,13 @@ async def queue(
     it -- it counts as queued, since it is.
 
     `email_only`: a send on the public's behalf (a ticket sent again to whoever
-    typed the address) is mail alone; WhatsApp is never set off by it."""
+    typed the address) is mail alone; WhatsApp is never set off by it.
+
+    `mode`: "email", "whatsapp" or "both" for this send; unset, the event's
+    choice for the kind (channel_mode). "whatsapp" sends no email to a guest
+    WhatsApp can reach -- the WhatsApp row carries `email_instead`, so if it
+    cannot be sent the email goes after all -- and the email to everyone else,
+    with why on the row. Nobody is left with nothing."""
     scope = [EventRegistrationsLink.event_id == event.id, EventRegistrationsLink.is_deleted == False]  # noqa: E712
     if registration_ids:
         scope.append(EventRegistrationsLink.id.in_(list(registration_ids)))
@@ -239,16 +287,35 @@ async def queue(
     )
     table = Deliveries.__table__
     ids: list[uuid.UUID] = []
-    active = [DeliveryChannel.email] if email_only else await channels_for(session, event, kind)
+    mode = "email" if email_only else (mode if mode in MODES else channel_mode(event, kind))
+    available = [DeliveryChannel.email] if mode == "email" else await channels_for(session, event, kind)
+    wa_on = DeliveryChannel.whatsapp in available
+    # "whatsapp" for a reminder: the email side of it is the journey's
+    # pre-event email, never a delivery row; nothing to limit here.
+    wa_first = mode == "whatsapp" and kind is not DeliveryKind.reminder
+    active = available
+    R = EventRegistrationsLink
     for channel in active:
         by_whatsapp = channel is DeliveryChannel.whatsapp
+        # The email in "whatsapp" mode: only to those WhatsApp can't reach, and why.
+        email_for_rest = wa_first and not by_whatsapp
+        limit = [sa.not_(_whatsapp_reachable())] if (email_for_rest and wa_on) else []
+        if email_for_rest and wa_on:
+            why_code = case((func.coalesce(R.whatsapp_opt_in, False) == False, EMAIL_NO_OPT_IN[0]), else_=EMAIL_NO_NUMBER[0])  # noqa: E712
+            why_words = case((func.coalesce(R.whatsapp_opt_in, False) == False, EMAIL_NO_OPT_IN[1]), else_=EMAIL_NO_NUMBER[1])  # noqa: E712
+        elif email_for_rest:
+            why_code, why_words = literal(EMAIL_NO_WHATSAPP[0]), literal(EMAIL_NO_WHATSAPP[1])
+        else:
+            why_code = why_words = literal(None, type_=String)
+        instead = literal(True) if (by_whatsapp and wa_first) else literal(None, type_=sa.Boolean)
+        row_reset = {**reset, "email_instead": True if (by_whatsapp and wa_first) else None}
         if only == "failed":
             # Retry what failed, was skipped or was given up on; nothing new.
             stmt = (
                 update(table)
                 .where(table.c.event_id == event.id, table.c.kind == kind, table.c.channel == channel,
                        table.c.status.in_(AGAIN), table.c.registration_id.in_(eligible_ids))
-                .values(**reset)
+                .values(**row_reset)
                 .returning(table.c.id)
             )
         else:
@@ -257,18 +324,21 @@ async def queue(
                 cast(literal(kind.name), table.c.kind.type), cast(literal(channel.name), table.c.channel.type),
                 cast(literal(DeliveryStatus.pending.name), table.c.status.type),
                 literal(0), literal(0), literal(0), literal(now, TZAwareDateTime()), literal(now, TZAwareDateTime()), literal(now, TZAwareDateTime()),
-            ).where(*scope, _eligible(kind), *(_wants_whatsapp() if by_whatsapp else []))
+                why_code, why_words, instead,
+            ).where(*scope, _eligible(kind), *(_wants_whatsapp() if by_whatsapp else []), *limit)
+            ins = pg_insert(table)
             stmt = (
-                pg_insert(table)
+                ins
                 .from_select(
                     ["id", "event_id", "registration_id", "kind", "channel", "status", "attempts", "tries", "design_version",
-                     "queued_at", "created_at", "updated_at"],
+                     "queued_at", "created_at", "updated_at", "fallback_code", "fallback_reason", "email_instead"],
                     source,
                 )
                 # A WhatsApp message already sent is never sent again, even
                 # when the email is (`force`): once per guest, kind and channel.
                 .on_conflict_do_update(
-                    constraint="uq_deliveries_registration_kind_channel", set_=reset,
+                    constraint="uq_deliveries_registration_kind_channel",
+                    set_={**row_reset, "fallback_code": ins.excluded.fallback_code, "fallback_reason": ins.excluded.fallback_reason},
                     where=table.c.status.in_(AGAIN if by_whatsapp else again),
                 )
                 .returning(table.c.id)
@@ -526,6 +596,9 @@ class _Ready:
     # When it goes from the platform's number though the club wanted its
     # own: (code, words), kept on the row and its attempt (club_whatsapp.delivery_routes).
     fallback: Optional[tuple] = None
+    # A WhatsApp row skipped because WhatsApp cannot reach this guest (not
+    # because the ticket or event is gone): its email may go instead.
+    unreachable: bool = False
 
 
 @dataclass
@@ -637,6 +710,7 @@ async def _read(db: pipeline.Db, c: _Claim, run: _Run) -> Optional[_Ready]:
 
                 # They wrote STOP to the club: not on WhatsApp, from its number or the platform's.
                 ready.skip = await optout.delivery_skip(s, event.club_id, ready.org_name, reg.phone)
+            ready.unreachable = ready.skip is not None
             if ready.skip is None and ready.route is None and template:
                 # From the platform's number: why, when the club wanted its own (a refusal
                 # Meta sent by webhook is on the row already, from requeue_from_platform).
@@ -660,6 +734,7 @@ async def _read(db: pipeline.Db, c: _Claim, run: _Run) -> Optional[_Ready]:
             ready.quota_kind = QUOTA_KIND[d.kind]
             via = whatsapp_via(ready.route) if d.channel is DeliveryChannel.whatsapp else quota.PLATFORM
             ready.terms, ready.skip = await quota.check(s, event.club_id, d.channel.value, ready.quota_kind, via=via, cache=run.terms)
+            ready.unreachable = ready.skip is not None and d.channel is DeliveryChannel.whatsapp
         if ready.skip is None and d.kind is DeliveryKind.ticket and d.channel is DeliveryChannel.email:
             # A ticket goes out in the event's designed invite when there is
             # one switched on; otherwise in the plain words. Someone the club
@@ -761,6 +836,8 @@ async def _handle(db: pipeline.Db, c: _Claim, run: _Run) -> None:
         return
     if ready.skip is not None:
         await _record(db, c, ready, dict(status=DeliveryStatus.skipped, error=ready.skip, provider_id=None, sent_at=None, next_attempt_at=None))
+        if ready.unreachable:
+            await _email_instead(db, ready, ready.skip)
         return
     try:
         response, version = await _send(db, c, ready, run)
@@ -770,6 +847,7 @@ async def _handle(db: pipeline.Db, c: _Claim, run: _Run) -> None:
             db, c, ready, dict(status=DeliveryStatus.skipped, error=exc.reason, provider_id=None, sent_at=None, next_attempt_at=None),
             dead_number=exc.reason if exc.permanent else None, dead_code=exc.code,
         )
+        await _email_instead(db, ready, exc.reason)
         return
     except transport.MailDeferred as exc:
         error = (str(exc) or exc.__class__.__name__)[:300]
@@ -792,7 +870,7 @@ async def _handle(db: pipeline.Db, c: _Claim, run: _Run) -> None:
     route_values = dict(
         via=via, fallback_code=(fallback[0] or None) if fallback else None,
         fallback_reason=((fallback[1] or "")[:300] or None) if fallback else None,
-    )
+    ) if ready.d.channel is DeliveryChannel.whatsapp else {}
     meter = None
     if ready.quota_kind is not None:
         d = ready.d
@@ -812,6 +890,53 @@ async def _handle(db: pipeline.Db, c: _Claim, run: _Run) -> None:
     )
 
 
+
+
+def _email_instead_stmt(d: Deliveries, why: str):
+    """The email row of this guest and kind, pending, saying why it goes in
+    WhatsApp's place. A row already sent (or in flight) is left alone: they
+    have the email, or are about to."""
+    table = Deliveries.__table__
+    now = pipeline.now()
+    words = f"Sent by email: WhatsApp couldn't reach them ({why})"[:300]
+    values = dict(
+        status=DeliveryStatus.pending, error=None, outcome=None, outcome_at=None, reason=None, reason_code=None,
+        tries=0, queued_at=now, claimed_at=None, next_attempt_at=None, updated_at=now,
+        via=None, fallback_code=EMAIL_WA_FAILED, fallback_reason=words, email_instead=None,
+    )
+    ins = pg_insert(table).values(
+        id=uuid.uuid4(), event_id=d.event_id, registration_id=d.registration_id, kind=d.kind, channel=DeliveryChannel.email,
+        attempts=0, design_version=0, created_at=now, **values,
+    )
+    return ins.on_conflict_do_update(
+        constraint="uq_deliveries_registration_kind_channel", set_=values, where=table.c.status.in_(AGAIN),
+    ).returning(table.c.id)
+
+
+async def email_instead_later(session, d: Deliveries, why: str) -> bool:
+    """A WhatsApp send Meta later failed for good (a bounce by webhook): the
+    email in its place, when the row was sent instead of it -- in the
+    caller's transaction, with the job that sends it. True when queued."""
+    if d.channel is not DeliveryChannel.whatsapp or not d.email_instead or d.kind is DeliveryKind.reminder:
+        return False
+    ids = (await session.execute(_email_instead_stmt(d, why))).scalars().all()
+    if ids:
+        await jobs.enqueue(session, SEND_IDS_JOB, {"ids": [str(i) for i in ids]}, priority=jobs.HIGH)
+    return bool(ids)
+
+
+async def _email_instead(db: pipeline.Db, ready: _Ready, why: str) -> None:
+    """After a WhatsApp row sent in place of the email could not reach the
+    guest: the email after all (email_instead_later), in a transaction of
+    its own that cannot undo the WhatsApp row's record."""
+    d = ready.d
+    if d.channel is not DeliveryChannel.whatsapp or not d.email_instead or d.kind is DeliveryKind.reminder:
+        return
+
+    async def write(s) -> None:
+        await email_instead_later(s, d, why or "not sent")
+
+    await _note(db, d.id, "the email in WhatsApp's place could not be queued", write)
 
 
 async def deliver(session, delivery_id: uuid.UUID) -> Optional[Deliveries]:
@@ -1051,6 +1176,8 @@ async def queue_reminders(session, now: Optional[datetime] = None) -> int:
             or_(E.has_fee == False, R.is_paid == True),  # noqa: E712
             R.created_at <= E.event_datetime - literal(REMINDER_LEAD + REMINDER_AFTER_SIGNUP, sa.Interval()),
             ~exists(has_one),
+            # The club chose email alone for reminders: the journey's pre-event email has it.
+            func.coalesce(sa.cast(E.delivery_channels, JSONB)["reminder"].astext, "both") != "email",
         )
     )
     if own_only:

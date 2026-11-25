@@ -22,11 +22,38 @@ class DeliveryBrief(BaseModel):
     fallback_reason: Optional[str] = None
 
 
+#: How a send reaches guests: email alone, WhatsApp (email for whoever it can't reach), or both.
+ChannelMode = Literal["email", "whatsapp", "both"]
+
+
 class SendTicketsRequest(BaseModel):
     # unsent: everyone not yet reached; failed: retry what failed or was
     # skipped; all: everyone again, delivered or not.
     only: Literal["unsent", "failed", "all"] = "unsent"
     registration_ids: Optional[list[UUID]] = Field(default=None, max_length=5000)
+    # Unset: the event's choice for this kind (GET .../delivery-channels).
+    channels: Optional[ChannelMode] = None
+
+
+class SendOneRequest(BaseModel):
+    """One guest's ticket or certificate again. The body is optional."""
+
+    channels: Optional[ChannelMode] = None
+
+
+class DeliveryChannels(BaseModel):
+    """Per event: how each automatic send reaches guests. "both" by default."""
+
+    ticket: ChannelMode = "both"
+    reminder: ChannelMode = "both"
+    certificate: ChannelMode = "both"
+
+
+class DeliveryChannelsState(DeliveryChannels):
+    # Whether WhatsApp can send at all for this event's club (the platform's
+    # number, or the club's own); when not, why. Every choice still saves.
+    whatsapp_available: bool
+    whatsapp_note: Optional[str] = None
 
 
 class SendResponse(BaseModel):

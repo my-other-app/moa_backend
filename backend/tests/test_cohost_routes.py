@@ -239,6 +239,9 @@ ROUTES = {
     "POST /api/v1/events/{event_id}/tickets/{registration_id}/reinstate": ALLOW,
     "GET /api/v1/events/{event_id}/tickets/bundle.zip": ALLOW,
     "GET /api/v1/events/{event_id}/deliveries/summary": ALLOW,
+    # Email / WhatsApp / both per kind: a co-host sends tickets, so it chooses how too.
+    "GET /api/v1/events/{event_id}/delivery-channels": ALLOW,
+    "PUT /api/v1/events/{event_id}/delivery-channels": ALLOW,
     "GET /api/v1/events/{event_id}/deliveries": ALLOW,
     # certificates
     "GET /api/v1/events/{event_id}/certificates/summary": ALLOW,

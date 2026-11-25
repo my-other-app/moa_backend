@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime, timezone
 
 import sqlalchemy as sa
-from sqlalchemy import UUID, Column, Enum, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import UUID, Boolean, Column, Enum, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.core.utils.db_fields import TZAwareDateTime
@@ -132,6 +132,10 @@ class Deliveries(AbstractSQLModel, TimestampsMixin):
     via = Column(String(8), nullable=True)
     fallback_code = Column(String(40), nullable=True)
     fallback_reason = Column(String(300), nullable=True)
+    # A WhatsApp row sent instead of the email ("whatsapp" for its kind): when
+    # WhatsApp cannot reach the guest (skipped, an undeliverable number, a
+    # later bounce from Meta), the email goes in its place. Null otherwise.
+    email_instead = Column(Boolean, nullable=True)
 
     registration = relationship("EventRegistrationsLink")
 
