@@ -500,6 +500,9 @@ class Screen(BaseModel):
     agenda: list[dict] = Field(default_factory=list)
     sponsors: list[dict] = Field(default_factory=list)
     overall: Optional[list[dict]] = None
+    # The logo strip along the screen's foot: the host club, then sponsors and partners.
+    club: Optional[dict] = None
+    partners: list[dict] = Field(default_factory=list)
 
 
 # --- the look ----------------------------------------------------------------------
@@ -551,6 +554,7 @@ class ScreenControl(BaseModel):
     idle_slides: list[str] = Field(default_factory=list)
     slide_seconds: int = 12
     wall_size: int = 6
+    logo_footer: bool = True
 
 
 class ScreenControlPatch(BaseModel):
@@ -560,6 +564,7 @@ class ScreenControlPatch(BaseModel):
     idle_slides: Optional[list[str]] = Field(None, max_length=3)
     slide_seconds: Optional[int] = None
     wall_size: Optional[int] = None
+    logo_footer: Optional[bool] = None
 
 
 # --- winners ----------------------------------------------------------------------

@@ -252,7 +252,7 @@ async def public_theme(session, event_id: int) -> dict:
 
 #: `results: hidden` is the screen as it always was: an open question's tally
 #: from time-up (service.screen_shown). An organiser may show it live.
-SCREEN_DEFAULTS = {"mode": "auto", "results": "hidden", "ticker": False, "idle_slides": [], "slide_seconds": 12, "wall_size": 6}
+SCREEN_DEFAULTS = {"mode": "auto", "results": "hidden", "ticker": False, "idle_slides": [], "slide_seconds": 12, "wall_size": 6, "logo_footer": True}
 SLIDES = ("agenda", "sponsors", "join")
 
 
@@ -274,6 +274,8 @@ def clean_control(c: dict) -> dict:
         raise _sc_bad("results", "results is live or hidden.")
     if not isinstance(c["ticker"], bool):
         raise _sc_bad("ticker", "ticker is true or false.")
+    if not isinstance(c["logo_footer"], bool):
+        raise _sc_bad("logo_footer", "logo_footer is true or false.")
     slides = c["idle_slides"]
     if not isinstance(slides, list) or len(set(slides)) != len(slides) or any(s not in SLIDES for s in slides):
         raise _sc_bad("idle_slides", "idle_slides lists agenda, sponsors and join, each at most once.")

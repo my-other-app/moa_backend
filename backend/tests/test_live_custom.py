@@ -750,9 +750,48 @@ async def test_hidden_results_one_answer_only_and_a_timer(client, session, world
 # ─── The big screen ──────────────────────────────────────────────────────
 
 
+async def test_the_screen_carries_the_host_club_and_partner_logos_until_turned_off(client, session, world, fake_s3):
+    from PIL import Image
+
+    from app.api.event_partners.models import EventPartners
+    from app.api.events.models import Events
+    from app.api.live import stream
+
+    def png():
+        out = io.BytesIO()
+        Image.new("RGB", (200, 200), (10, 120, 200)).save(out, "PNG")
+        return {"bytes": out.getvalue(), "filename": "logo.png"}
+
+    world["club"].logo = png()
+    for kind, name, pos, logo in (
+        ("partner", "Second Partner", 1, png()),
+        ("partner", "First Partner", 0, png()),
+        ("sponsor", "Title Sponsor", 0, png()),
+        ("partner", "No Logo", 2, None),
+    ):
+        session.add(EventPartners(event_id=world["eid"], kind=kind, name=name, position=pos, logo=logo, label="Title" if kind == "sponsor" else None))
+    await session.commit()
+    screen = (await client.get(_u(world, "/screen"), headers=world["hv"])).json()
+    assert screen["club"]["name"] == "Quiz Society" and "clubs/logos/" in screen["club"]["logo_url"]
+    assert [p["name"] for p in screen["partners"]] == ["Title Sponsor", "First Partner", "Second Partner"]
+    assert screen["partners"][0]["kind"] == "sponsor" and screen["partners"][0]["label"] == "Title"
+    # The room's pushed screen snapshot carries the same strip.
+    event = await session.get(Events, world["eid"])
+    pushed = await stream._club_body(session, service, event, "screen")
+    assert pushed["club"] == screen["club"] and pushed["partners"] == screen["partners"]
+    # Old consoles keep today's body.
+    assert "club" not in (await client.get(_u(world, "/screen"), headers=world["h"])).json()
+    # The organiser can turn the strip off.
+    put = await client.put(_u(world, "/screen/control"), json={"logo_footer": False}, headers=world["hv"])
+    assert put.status_code == 200 and put.json()["logo_footer"] is False
+    off = (await client.get(_u(world, "/screen"), headers=world["hv"])).json()
+    assert off["club"] is None and off["partners"] == []
+    assert (await client.put(_u(world, "/screen/control"), json={"logo_footer": "maybe"}, headers=world["hv"])).status_code == 422
+
+
 async def test_the_screens_controls_and_what_it_shows(client, session, world):
     control = (await client.get(_u(world, "/screen/control"), headers=world["hv"])).json()
-    assert control == {"mode": "auto", "results": "hidden", "ticker": False, "idle_slides": [], "slide_seconds": 12, "wall_size": 6}
+    assert control == {"mode": "auto", "results": "hidden", "ticker": False, "idle_slides": [], "slide_seconds": 12, "wall_size": 6, "logo_footer": True}
     assert (await client.get(_u(world, "/screen"), headers=world["hv"])).json()["shows"] == "qa"
     bad = await client.put(_u(world, "/screen/control"), json={"idle_slides": ["agenda", "agenda"]}, headers=world["hv"])
     assert bad.status_code == 422
