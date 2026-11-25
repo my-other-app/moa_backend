@@ -13,12 +13,12 @@ Idempotent (IF NOT EXISTS / IF EXISTS).
 Downgrade drops the two columns.
 
 Revision ID: send_channels
-Revises: games
+Revises: games_screen_colors
 """
 from alembic import op
 
 revision = "send_channels"
-down_revision = "games"
+down_revision = "games_screen_colors"
 branch_labels = None
 depends_on = None
 
