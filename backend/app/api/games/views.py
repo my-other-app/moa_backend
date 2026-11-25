@@ -25,7 +25,23 @@ def look_of(settings: Optional[GameSettings]) -> dict:
         "board_rows": s.board_rows if s else 7,
         "ticker_on": s.ticker_on if s else True,
         "join_box_on": s.join_box_on if s else True,
+        "colors": colors_of(s),
     }
+
+
+COLOR_KEYS = ("background", "surface", "text", "accent", "gold", "silver", "bronze")
+
+
+def colors_of(s: Optional[GameSettings]) -> dict:
+    """The saved custom colours, every key present (null = the theme's)."""
+    saved = (s.colors if s is not None else None) or {}
+    return {k: saved.get(k) for k in COLOR_KEYS}
+
+
+def screen_rows(settings: Optional[GameSettings]) -> int:
+    """How many rows a venue screen shows per board: board_rows, or everyone (0) up to SCREEN_MAX."""
+    rows = settings.board_rows if settings is not None else 7
+    return boards.SCREEN_MAX if not rows else max(rows, 10)
 
 
 def event_block(event) -> dict:
@@ -66,10 +82,10 @@ async def hunt_body(session, event, settings: Optional[GameSettings]) -> Optiona
     return {k: v for k, v in hunt.hunt_out(h).items() if k in ("status", "starts_at", "ends_at", "paused_at", "server_now", "duration_minutes", "mode")}
 
 
-async def board_body(session, event, settings: Optional[GameSettings], limit: int = 10) -> dict:
+async def board_body(session, event, settings: Optional[GameSettings], limit: int = 10, cap: int = boards.MAX_LIMIT) -> dict:
     return {
-        "cards": await boards.board(session, event.id, CARDS, limit) if await common.active(session, event, settings, CARDS) else None,
-        "hunt": await boards.board(session, event.id, HUNT, limit) if await common.active(session, event, settings, HUNT) else None,
+        "cards": await boards.board(session, event.id, CARDS, limit, cap=cap) if await common.active(session, event, settings, CARDS) else None,
+        "hunt": await boards.board(session, event.id, HUNT, limit, cap=cap) if await common.active(session, event, settings, HUNT) else None,
     }
 
 
@@ -83,7 +99,9 @@ async def screen(session, event, settings: Optional[GameSettings]) -> dict:
     """GET /games/screen/{token}: the look, both boards, the ticker and the hunt's timer."""
     return {
         **await settings_body(session, event, settings),
-        "boards": await board_body(session, event, settings),
+        # The whole board the screen shows (the stream's `board` carries the top
+        # 10 only, so a screen showing more re-reads this when one arrives).
+        "boards": await board_body(session, event, settings, screen_rows(settings), cap=boards.SCREEN_MAX),
         "feed": await feed_body(session, event, settings),
         "hunt_timer": await hunt_body(session, event, settings),
         "server_now": common.now(),

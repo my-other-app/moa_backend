@@ -20,7 +20,8 @@ from sqlalchemy import func, select
 
 from app.api.deliveries import service as deliveries
 from app.api.events.models import EventRegistrationsLink
-from app.api.games import access, boards, bus, cards, common, hunt, tokens
+from app.api.games import access, boards, bus, cards, common, hunt, tokens, views
+from app.api.live import theme as live_theme
 from app.api.games.common import err
 from app.api.games.models import (
     CARDS,
@@ -81,6 +82,17 @@ async def _gate_any(session, event, user) -> None:
 # ─── Settings ──────────────────────────────────────────────────────────
 
 
+def color_warnings(s: GameSettings) -> list[dict]:
+    """Text that would be hard to read on the screen (WCAG AA 4.5:1, as the live room checks); a warning, not a refusal."""
+    c = views.colors_of(s)
+    out = []
+    if c["text"]:
+        for fill in ("background", "surface"):
+            if c[fill] and live_theme.contrast(c["text"], c[fill]) < live_theme.TEXT_MIN:
+                out.append({"field": "colors.text", "code": "LOW_CONTRAST", "message": f"The text colour is hard to read on the {fill} colour.", "ratio": round(live_theme.contrast(c["text"], c[fill]), 2)})
+    return out
+
+
 def settings_out(s: GameSettings, plan: dict) -> dict:
     return {
         "cards_on": s.cards_on,
@@ -94,6 +106,8 @@ def settings_out(s: GameSettings, plan: dict) -> dict:
         "board_rows": s.board_rows,
         "ticker_on": s.ticker_on,
         "join_box_on": s.join_box_on,
+        "colors": views.colors_of(s),
+        "color_warnings": color_warnings(s),
         "screen_version": s.screen_version or 1,
         "plan": plan,
         "updated_at": s.updated_at,
@@ -122,8 +136,10 @@ async def patch_settings(session: SessionDep, user: ClubAuth, event_id: int, bod
     s = await common.ensure_settings(session, event.id)
     await session.execute(select(GameSettings.id).where(GameSettings.id == s.id).with_for_update())
     for key, value in data.items():
-        if value is None and key not in ("accent", "logo_url"):
+        if value is None and key not in ("accent", "logo_url", "colors"):
             continue
+        if key == "colors" and value is not None:
+            value = {k: v.upper() for k, v in value.items() if v} or None
         setattr(s, key, value)
     s.updated_at = common.now()
     if data.get("cards_on"):

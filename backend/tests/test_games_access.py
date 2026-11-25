@@ -14,7 +14,7 @@ from sqlalchemy import select, update
 from starlette.requests import Request  # noqa: F401
 
 from app.api.club_access import policy
-from app.api.games import bus, cards, stream, tokens
+from app.api.games import bus, cards, common, stream, tokens
 from app.api.games.models import GamePlayers
 from app.api.subscriptions import gates
 from app.api.subscriptions.models import PlanFeatures, Plans
@@ -231,10 +231,48 @@ async def test_the_look_and_names_are_validated_and_saved(make_world):
     assert first["cards_on"] is False and first["theme"] == "neon_arcade" and first["board_rows"] == 7 and first["screen_version"] == 1
     saved = await w.client.patch(base, json={"theme": "ocean_glow", "board_layout": "list", "board_rows": 10, "ticker_on": False, "join_box_on": False, "cards_name": "Squad Cards", "accent": "#00ffaa"}, headers=w.club_h)
     assert saved.status_code == 200 and saved.json()["theme"] == "ocean_glow" and saved.json()["board_rows"] == 10 and saved.json()["ticker_on"] is False
-    for bad in ({"theme": "pink"}, {"board_rows": 6}, {"cards_name": "x" * 41}, {"board_layout": "grid"}, {"accent": "red"}):
+    for bad in ({"theme": "pink"}, {"board_rows": 6}, {"board_rows": 500}, {"cards_name": "x" * 41}, {"board_layout": "grid"}, {"accent": "red"}):
         assert (await w.client.patch(base, json=bad, headers=w.club_h)).status_code == 422
     pub = (await w.client.get(games(w.eid, "/public"))).json()
     assert pub["theme"] == "ocean_glow" and pub["cards"] is None
+
+
+async def test_the_screen_colours_are_hex_saved_cleared_and_warned_about(make_world):
+    w = await make_world()
+    base = org(w.eid, "/settings")
+    assert (await w.client.get(base, headers=w.club_h)).json()["colors"] == {k: None for k in ("background", "surface", "text", "accent", "gold", "silver", "bronze")}
+    for bad in ({"colors": {"background": "red"}}, {"colors": {"gold": "#12345"}}, {"colors": {"text": "#GGGGGG"}}, {"colors": {"glow": "#000000"}}):
+        assert (await w.client.patch(base, json=bad, headers=w.club_h)).status_code == 422
+    saved = (await w.client.patch(base, json={"colors": {"background": "#0a0a0a", "surface": "#1b1b1b", "text": "#ffffff", "gold": "#ffd700"}}, headers=w.club_h)).json()
+    assert saved["colors"]["background"] == "#0A0A0A" and saved["colors"]["gold"] == "#FFD700" and saved["colors"]["silver"] is None and saved["color_warnings"] == []
+    murky = (await w.client.patch(base, json={"colors": {"background": "#222222", "text": "#333333"}}, headers=w.club_h)).json()
+    assert murky["colors"]["surface"] is None and [x["code"] for x in murky["color_warnings"]] == ["LOW_CONTRAST"]
+    await w.client.patch(base, json={"board_rows": 5}, headers=w.club_h)
+    assert (await w.client.get(base, headers=w.club_h)).json()["colors"]["text"] == "#333333"
+    token = (await w.client.get(org(w.eid, "/screen"), headers=w.club_h)).json()["token"]
+    assert (await w.client.get(gp(f"/screen/{token}"))).json()["colors"]["background"] == "#222222"
+    cleared = (await w.client.patch(base, json={"colors": None}, headers=w.club_h)).json()
+    assert set(cleared["colors"].values()) == {None} and cleared["color_warnings"] == []
+
+
+async def test_a_screen_set_to_everyone_gets_the_whole_board_and_the_stream_stays_small(make_world):
+    w = await make_world()
+    await w.turn_on()
+    for reg in await w.guests(14):
+        await w.client.post(games(w.eid, "/cards/reveal"), headers=await w.player(reg))
+    token = (await w.client.get(org(w.eid, "/screen"), headers=w.club_h)).json()["token"]
+    assert len((await w.client.get(gp(f"/screen/{token}"))).json()["boards"]["cards"]["rows"]) == 10
+    assert (await w.client.patch(org(w.eid, "/settings"), json={"board_rows": 0}, headers=w.club_h)).json()["board_rows"] == 0
+    screen = (await w.client.get(gp(f"/screen/{token}"))).json()
+    rows = screen["boards"]["cards"]["rows"]
+    assert screen["board_rows"] == 0 and len(rows) == 14 == screen["boards"]["cards"]["of"] and [r["rank"] for r in rows] == list(range(1, 15))
+    from app.api.games import views
+
+    settings = await common.settings_of(w.session, w.eid)
+    event = await common.event_of(w.session, w.eid)
+    assert len((await views.topic(w.session, event, settings, "board"))["cards"]["rows"]) == 10
+    for rows_ in (25, 50):
+        assert (await w.client.patch(org(w.eid, "/settings"), json={"board_rows": rows_}, headers=w.club_h)).status_code == 200
 
 
 async def test_a_logo_is_uploaded_as_a_picture_and_shows_on_the_screens(make_world, fake_s3):

@@ -38,6 +38,21 @@ class HintIn(In):
     point_id: Optional[uuid.UUID] = None
 
 
+HEX = r"^#[0-9a-fA-F]{6}$"
+
+
+class ScreenColors(In):
+    """The venue screen's colours over the theme; a missing or null key keeps the theme's."""
+
+    background: Optional[str] = Field(default=None, pattern=HEX)
+    surface: Optional[str] = Field(default=None, pattern=HEX)
+    text: Optional[str] = Field(default=None, pattern=HEX)
+    accent: Optional[str] = Field(default=None, pattern=HEX)
+    gold: Optional[str] = Field(default=None, pattern=HEX)
+    silver: Optional[str] = Field(default=None, pattern=HEX)
+    bronze: Optional[str] = Field(default=None, pattern=HEX)
+
+
 class SettingsPatch(In):
     cards_on: Optional[bool] = None
     cards_name: Optional[str] = Field(default=None, min_length=1, max_length=40)
@@ -47,9 +62,12 @@ class SettingsPatch(In):
     accent: Optional[str] = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
     logo_url: Optional[str] = Field(default=None, max_length=500)
     board_layout: Optional[Literal["podium", "list"]] = None
-    board_rows: Optional[Literal[5, 7, 10]] = None
+    #: 0 shows everyone on the venue screen (up to boards.SCREEN_MAX).
+    board_rows: Optional[Literal[0, 5, 7, 10, 25, 50]] = None
     ticker_on: Optional[bool] = None
     join_box_on: Optional[bool] = None
+    #: null clears every custom colour.
+    colors: Optional[ScreenColors] = None
 
     @field_validator("cards_name", "hunt_name")
     @classmethod
