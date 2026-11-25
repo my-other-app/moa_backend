@@ -45,6 +45,8 @@ async def record(session, provider_id: str, channel: str, v: Verdict, at: dateti
 
     touched = 0
     marked = None
+    # WhatsApp rows sent in the email's place that Meta failed for good.
+    instead: list = []
     for model, via_attempt in (
         (Deliveries, getattr(attempt, "delivery_id", None)),
         (MessageDeliveries, getattr(attempt, "message_delivery_id", None)),
@@ -66,6 +68,8 @@ async def record(session, provider_id: str, channel: str, v: Verdict, at: dateti
                 touched += 1
                 if same_address and reg is not None:
                     marked = reg
+                if model is Deliveries and channel == "whatsapp" and is_permanent(v) and getattr(row, "email_instead", None):
+                    instead.append(row)
     if is_permanent(v) and channel == "email":
         # A mail a club's mailbox sent (app/api/club_mailbox): its thread says it bounced.
         from app.api.club_mailbox import outbound as mailbox_outbound
@@ -116,6 +120,12 @@ async def record(session, provider_id: str, channel: str, v: Verdict, at: dateti
             dead_address = address or (suppression.normal(marked.email) if marked is not None else "")
             reason = suppression.COMPLAINT if v.outcome is DeliveryOutcome.complained else suppression.BOUNCE
             await suppression.add(session, dead_address, reason, v.reason)
+    if instead:
+        from app.api.deliveries import service as deliveries
+
+        for row in instead:
+            # The email after all: nobody is left with nothing.
+            await deliveries.email_instead_later(session, row, v.reason or "the number couldn't be reached")
     if commit:
         await session.commit()
     return touched

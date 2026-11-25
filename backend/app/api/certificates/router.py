@@ -22,7 +22,7 @@ from app.api.certificates.schemas import (
 )
 from app.api.deliveries import service as deliveries
 from app.api.deliveries.models import DeliveryKind
-from app.api.deliveries.schemas import SendResponse, SendTicketsRequest
+from app.api.deliveries.schemas import SendOneRequest, SendResponse, SendTicketsRequest
 from app.api.events.certificates import number_of
 from app.config import settings
 from app.core import site
@@ -81,17 +81,19 @@ async def send(
     event = await deliveries.event_for_club(session, user, event_id)
     result = await deliveries.queue(
         session, event, DeliveryKind.certificate, registration_ids=body.registration_ids, only=body.only, force=body.only == "all", send=True,
+        mode=body.channels,
     )
     return SendResponse(**{k: v for k, v in result.items() if k != "ids"})
 
 
 @router.post("/{registration_id}/send", summary="One guest's certificate again")
 async def send_one(
-    session: SessionDep, user: ClubAuth, event_id: int, registration_id: UUID
+    session: SessionDep, user: ClubAuth, event_id: int, registration_id: UUID, body: Optional[SendOneRequest] = None,
 ) -> SendResponse:
     event = await deliveries.event_for_club(session, user, event_id)
     result = await deliveries.queue(
-        session, event, DeliveryKind.certificate, registration_ids=[registration_id], only="all", force=True, send=True
+        session, event, DeliveryKind.certificate, registration_ids=[registration_id], only="all", force=True, send=True,
+        mode=body.channels if body else None,
     )
     return SendResponse(**{k: v for k, v in result.items() if k != "ids"})
 

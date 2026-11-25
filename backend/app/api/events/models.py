@@ -155,6 +155,10 @@ class Events(AbstractSQLModel, TimestampsMixin, SoftDeleteMixin):
     reprint_policy = Column(Enum(ReprintPolicy), nullable=False, default=ReprintPolicy.anyone)
     auto_print_badges = Column(Boolean, nullable=False, default=False)
     preprinted_carries = Column(JSON, nullable=False, default=list)
+    # How each automatic send reaches guests (app/api/deliveries/service.py
+    # channel_modes): {"ticket"|"reminder"|"certificate": "both"|"email"|"whatsapp"}.
+    # Null, or a kind left out, is "both".
+    delivery_channels = Column(JSON, nullable=True)
     # Self check-in from a guest's phone, via a kiosk's QR.
     self_check_in_enabled = Column(Boolean, nullable=False, default=False)
     self_check_in_verify = Column(Enum(SelfCheckInVerify), nullable=False, default=SelfCheckInVerify.email)

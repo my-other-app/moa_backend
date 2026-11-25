@@ -7,9 +7,12 @@ from fastapi import APIRouter, Query, Response
 from app.api.deliveries import service
 from app.api.deliveries.models import DeliveryChannel, DeliveryKind
 from app.api.deliveries.schemas import (
+    DeliveryChannels,
+    DeliveryChannelsState,
     DeliveryLog,
     DeliverySummary,
     RevokeRequest,
+    SendOneRequest,
     SendResponse,
     SendTicketsRequest,
     TicketState,
@@ -40,6 +43,7 @@ async def send_tickets(
         only=body.only,
         force=body.only == "all",
         send=True,
+        mode=body.channels,
     )
     return SendResponse(**{k: v for k, v in result.items() if k != "ids"})
 
@@ -50,12 +54,14 @@ async def send_one(
     user: ClubAuth,
     event_id: int,
     registration_id: UUID,
+    body: Optional[SendOneRequest] = None,
 ) -> SendResponse:
     """A guest who lost the email, or a corrected address. Earlier deliveries
-    do not stop it."""
+    do not stop it. `channels` unset: the event's choice for tickets."""
     event = await service.event_for_club(session, user, event_id)
     result = await service.queue(
-        session, event, DeliveryKind.ticket, registration_ids=[registration_id], only="all", force=True, send=True
+        session, event, DeliveryKind.ticket, registration_ids=[registration_id], only="all", force=True, send=True,
+        mode=body.channels if body else None,
     )
     return SendResponse(**{k: v for k, v in result.items() if k != "ids"})
 
@@ -123,3 +129,27 @@ async def deliveries_log(
             order=order,
         )
     )
+
+
+async def _channels_state(session, event) -> DeliveryChannelsState:
+    note = await service.whatsapp_available(session, event)
+    return DeliveryChannelsState(**service.channel_modes(event), whatsapp_available=note is None, whatsapp_note=note)
+
+
+@router.get("/delivery-channels", summary="How tickets, reminders and certificates reach guests")
+async def get_delivery_channels(session: SessionDep, user: ClubAuth, event_id: int) -> DeliveryChannelsState:
+    event = await service.event_for_club(session, user, event_id)
+    return await _channels_state(session, event)
+
+
+@router.put("/delivery-channels", summary="Choose email, WhatsApp or both for each automatic send")
+async def put_delivery_channels(
+    session: SessionDep, user: ClubAuth, event_id: int, body: DeliveryChannels
+) -> DeliveryChannelsState:
+    """"whatsapp" still emails whoever WhatsApp can't reach (not opted in, no
+    number, or the message failed). Applies to sends from now on."""
+    event = await service.event_for_club(session, user, event_id)
+    event.delivery_channels = body.model_dump()
+    await session.commit()
+    await session.refresh(event)
+    return await _channels_state(session, event)
