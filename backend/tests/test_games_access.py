@@ -537,3 +537,39 @@ def test_a_game_qr_layer_and_the_game_tokens_validate_on_an_id_card_only():
     assert "qr_extra" in codes(lay(qr, game_qr, {**game_qr, "id": "g2"}), "badge")
 
 
+
+
+async def test_a_screen_shows_the_host_club_and_the_partners_with_logos_in_page_order(make_world, fake_s3):
+    from app.api.event_partners.models import EventPartners
+
+    def png():
+        out = io.BytesIO()
+        Image.new("RGB", (200, 200), (10, 120, 200)).save(out, "PNG")
+        return {"bytes": out.getvalue(), "filename": "logo.png"}
+
+    w = await make_world()
+    await w.turn_on()
+    w.club.logo = png()
+    for kind, name, pos, logo in (
+        ("partner", "Second Partner", 1, png()),
+        ("partner", "First Partner", 0, png()),
+        ("sponsor", "Title Sponsor", 0, png()),
+        ("partner", "No Logo", 2, None),
+    ):
+        w.session.add(EventPartners(event_id=w.eid, kind=kind, name=name, position=pos, logo=logo, label="Title" if kind == "sponsor" else None))
+    await w.session.commit()
+    token = (await w.client.get(org(w.eid, "/screen"), headers=w.club_h)).json()["token"]
+    screen = (await w.client.get(gp(f"/screen/{token}"))).json()
+    assert screen["club"]["name"] == w.club.name and "clubs/logos/" in screen["club"]["logo_url"]
+    assert [p["name"] for p in screen["partners"]] == ["Title Sponsor", "First Partner", "Second Partner"]
+    first = screen["partners"][0]
+    assert first["kind"] == "sponsor" and first["label"] == "Title" and "events/partners/" in first["logo_url"]
+    assert all(p["logo_url"] for p in screen["partners"])
+
+
+async def test_a_screen_without_a_club_logo_or_partners_sends_an_empty_strip(make_world):
+    w = await make_world()
+    await w.turn_on()
+    token = (await w.client.get(org(w.eid, "/screen"), headers=w.club_h)).json()["token"]
+    screen = (await w.client.get(gp(f"/screen/{token}"))).json()
+    assert screen["club"] == {"name": w.club.name, "logo_url": None} and screen["partners"] == []
