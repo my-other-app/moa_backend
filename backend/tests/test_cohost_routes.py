@@ -321,6 +321,7 @@ ROUTES = {
     "PATCH /api/v1/events/{event_id}/kiosks/settings": ALLOW,
     "POST /api/v1/events/{event_id}/kiosks/{device_id}/rotate": ALLOW,
     "DELETE /api/v1/events/{event_id}/kiosks/{device_id}": ALLOW,
+    "PATCH /api/v1/events/{event_id}/kiosks/{device_id}": ALLOW,
     # agenda
     "POST /api/v1/events/{event_id}/agenda": ALLOW,
     "PATCH /api/v1/events/{event_id}/agenda/{item_id}": ALLOW,

@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
 
@@ -34,6 +34,9 @@ LEASE = timedelta(seconds=90)
 MAX_ATTEMPTS = 3
 #: A printer is "online" when it claimed (its heartbeat) this recently.
 ONLINE_WITHIN = timedelta(seconds=30)
+#: A card for a door whose station is offline waits this long before any
+#: online station may print it.
+DOOR_FALLBACK_AFTER = timedelta(seconds=45)
 OPEN = ("queued", "printing")
 SOURCES = {"kiosk": PrintSource.kiosk, "dashboard": PrintSource.manual, "door": PrintSource.checkin}
 LEASE_LOST = "The printer didn't confirm this card."
@@ -62,10 +65,10 @@ async def printers_online(session, event_id: int) -> int:
 async def list_printers(session, event: Events) -> list[dict]:
     now = _now()
     rows = await session.scalars(
-        select(KioskDevices).where(KioskDevices.event_id == event.id, KioskDevices.role == "printer", KioskDevices.revoked_at.is_(None), KioskDevices.expires_at > now).order_by(KioskDevices.name)
+        select(KioskDevices).options(joinedload(KioskDevices.door)).where(KioskDevices.event_id == event.id, KioskDevices.role == "printer", KioskDevices.revoked_at.is_(None), KioskDevices.expires_at > now).order_by(KioskDevices.name)
     )
     return [
-        {"id": d.id, "name": d.name, "door_label": d.door_label, "online": bool(d.last_seen_at and d.last_seen_at > now - ONLINE_WITHIN), "last_seen_at": d.last_seen_at, "expires_at": d.expires_at}
+        {"id": d.id, "name": d.name, "door_label": d.door_label, "door": _door_ref(d.door), "online": bool(d.last_seen_at and d.last_seen_at > now - ONLINE_WITHIN), "last_seen_at": d.last_seen_at, "expires_at": d.expires_at}
         for d in rows
     ]
 
@@ -73,17 +76,24 @@ async def list_printers(session, event: Events) -> list[dict]:
 # --- the request as the clients read it ---------------------------------------------------
 
 
+def _door_ref(door) -> Optional[dict]:
+    return {"id": door.id, "name": door.name} if door is not None else None
+
+
 def _load():
-    return select(CardPrintRequests).options(joinedload(CardPrintRequests.registration), joinedload(CardPrintRequests.printer), joinedload(CardPrintRequests.claimer)).execution_options(populate_existing=True)
+    return select(CardPrintRequests).options(
+        joinedload(CardPrintRequests.registration), joinedload(CardPrintRequests.printer), joinedload(CardPrintRequests.claimer), joinedload(CardPrintRequests.door)
+    ).execution_options(populate_existing=True)
 
 
-def _out(r: CardPrintRequests, position: Optional[int]) -> dict:
+def _out(r: CardPrintRequests, position: Optional[int], station=None) -> dict:
     who = r.claimer or r.printer
+    station = who or station
     return {
         "id": r.id, "registration_id": r.registration_id, "name": (r.registration.full_name if r.registration else "") or "",
         "ticket_code": (r.registration.ticket_id if r.registration else "") or "", "source": r.source, "status": r.status, "attempts": r.attempts,
         "printer": {"id": who.id, "name": who.name} if who is not None else None, "error": r.error, "created_at": r.created_at, "printed_at": r.printed_at,
-        "position": position,
+        "position": position, "door": _door_ref(r.door), "station": {"id": station.id, "name": station.name} if station is not None else None,
     }
 
 
@@ -96,9 +106,17 @@ async def read(session, request_id) -> CardPrintRequests | None:
     return await session.scalar(_load().where(CardPrintRequests.id == request_id))
 
 
+async def _expected_station(session, r: CardPrintRequests):
+    """The station a queued card will most likely come out of: its door's
+    online station. None when any free station may take it."""
+    if r.status != "queued" or r.door_id is None or r.claimer is not None or r.printer is not None:
+        return None
+    return await session.scalar(_online_printers(r.event_id).where(KioskDevices.door_id == r.door_id).order_by(KioskDevices.last_seen_at.desc()).limit(1))
+
+
 async def out_of(session, request_id) -> dict:
     r = await read(session, request_id)
-    return _out(r, (await _positions(session, r.event_id)).get(r.id) if r.status == "queued" else None)
+    return _out(r, (await _positions(session, r.event_id)).get(r.id) if r.status == "queued" else None, await _expected_station(session, r))
 
 
 async def listing(session, event: Events, status: str, limit: int) -> dict:
@@ -132,7 +150,7 @@ async def registration_in(session, event: Events, registration_id) -> EventRegis
 
 async def ask(
     session, event: Events, reg: EventRegistrationsLink, *, source: str, user_id: Optional[int] = None, device: Optional[KioskDevices] = None,
-    printer_id=None, override: bool = False, by_organiser: bool = False,
+    printer_id=None, door_id=None, override: bool = False, by_organiser: bool = False,
 ) -> tuple[dict, bool]:
     """Queue this guest's card. Returns (the request, created): the open
     request when there already is one, so a double tap prints once."""
@@ -147,7 +165,7 @@ async def ask(
         raise CustomHTTPException(409, message=NO_PRINTER if printer_id is None else "That printer is not online right now.", error_code="NO_PRINTER")
     row = CardPrintRequests(
         id=uuid.uuid4(), event_id=event.id, registration_id=reg.id, source=source, requested_by_user_id=user_id, requested_by_device_id=device.id if device else None,
-        printer_id=printer_id, status="queued", attempts=0, override=bool(override and by_organiser),
+        printer_id=printer_id, door_id=door_id, status="queued", attempts=0, override=bool(override and by_organiser),
     )
     try:
         async with session.begin_nested():
@@ -182,7 +200,7 @@ async def kiosk_ask(session, device: KioskDevices, *, redemption: Optional[str],
     reg = await registration_in(session, event, registration_id)
     if await checkins.check_in_of(session, reg.id) is None:
         raise CustomHTTPException(409, message="Scan your ticket at the kiosk first.", error_code="NOT_ADMITTED")
-    return await ask(session, event, reg, source="kiosk", device=device)
+    return await ask(session, event, reg, source="kiosk", device=device, door_id=device.door_id)
 
 
 async def of_device(session, device: KioskDevices, request_id) -> dict:
@@ -206,7 +224,27 @@ async def _expire_leases(session, event_id: int) -> None:
 
 
 def _mine(device: KioskDevices):
-    return (CardPrintRequests.event_id == device.event_id, CardPrintRequests.status == "queued", (CardPrintRequests.printer_id.is_(None)) | (CardPrintRequests.printer_id == device.id))
+    """What this station may take. A card picked for this station is its
+    own. Otherwise, by the card's door:
+
+    - no door: any station;
+    - this station's door: this station;
+    - a door with no online station: a station with no door at once, and
+      any station once the card has waited DOOR_FALLBACK_AFTER, so nothing
+      is stuck behind a station that went away."""
+    R = CardPrintRequests
+    now = _now()
+    staffed = _online_printers(device.event_id).where(KioskDevices.door_id.is_not(None)).with_only_columns(KioskDevices.door_id)
+    unstaffed = R.door_id.not_in(staffed)
+    by_door = [R.door_id.is_(None), and_(unstaffed, R.created_at < now - DOOR_FALLBACK_AFTER)]
+    if device.door_id is not None:
+        by_door.append(R.door_id == device.door_id)
+    else:
+        by_door.append(unstaffed)
+    return (
+        R.event_id == device.event_id, R.status == "queued",
+        or_(R.printer_id == device.id, and_(R.printer_id.is_(None), or_(*by_door))),
+    )
 
 
 async def claim(session, device: KioskDevices) -> dict:
