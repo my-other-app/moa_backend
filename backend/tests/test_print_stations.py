@@ -751,3 +751,46 @@ async def test_an_app_check_in_prints_nothing_with_auto_print_off(client, sessio
     assert r.status_code == 200, r.text
     claimed = await client.post(f"{API}/kiosk/printer/claim", headers=world["printer"])
     assert claimed.json().get("request") is None, claimed.text
+
+
+# --- the phone app's door console --------------------------------------------------------------
+
+
+async def _gate_scan(client, world, reg, headers):
+    r = await client.post(_ev(world, "/gate/scan"), json={"code": reg.ticket_id, "client_ref": uuid.uuid4().hex}, headers=headers)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+async def test_the_apps_door_scan_queues_the_card_at_its_doors_printer(client, session, world):
+    a, gate_a = await _door(client, world, "Help desk A")
+    await _prints_for(client, world, world["printer_id"], a)
+    r = await client.patch(_ev(world, "/idcards/settings"), json={"auto_print_badges": True}, headers=world["club"])
+    assert r.status_code == 200, r.text
+    await _beat(session, world["printer_id"])
+    await _beat(session, world["printer2_id"])
+    reg = world["regs"][0]
+    out = await _gate_scan(client, world, reg, {**gate_a, "X-App-Version": "1.4.1+11"})
+    assert out["outcome"] == "CHECKED_IN", out
+    assert await _claimed(client, world["printer2"]) is None  # not the other desk's printer
+    req = await _claimed(client, world["printer"])
+    assert req is not None and str(req["registration_id"]) == str(reg.id)
+
+
+async def test_the_web_consoles_scan_does_not_queue_a_card_itself(client, session, world):
+    """The web console asks for the card after its scan (and may print it on its own screen instead)."""
+    a, gate_a = await _door(client, world, "Help desk A")
+    r = await client.patch(_ev(world, "/idcards/settings"), json={"auto_print_badges": True}, headers=world["club"])
+    assert r.status_code == 200, r.text
+    await _beat(session, world["printer_id"])
+    out = await _gate_scan(client, world, world["regs"][1], gate_a)
+    assert out["outcome"] == "CHECKED_IN", out
+    assert await _claimed(client, world["printer"]) is None
+
+
+async def test_the_apps_door_scan_prints_nothing_with_auto_print_off(client, session, world):
+    a, gate_a = await _door(client, world, "Help desk A")
+    await _beat(session, world["printer_id"])
+    out = await _gate_scan(client, world, world["regs"][2], {**gate_a, "X-App-Version": "1.4.1+11"})
+    assert out["outcome"] == "CHECKED_IN", out
+    assert await _claimed(client, world["printer"]) is None
