@@ -716,3 +716,38 @@ async def test_a_station_is_paired_for_a_door_and_set_back_to_any(client, sessio
     # Only a print station's door is changed this way; a tablet's is its own.
     assert (await client.patch(_ev(world, f"/kiosks/{world['kiosk_id']}"), json={"door_id": a}, headers=world["club"])).status_code == 409
     assert (await client.patch(_ev(world, f"/kiosks/{dev}"), json={"door_id": a}, headers=world["outsider"])).status_code in (403, 404)
+
+
+# --- the volunteer app's check-in --------------------------------------------------------------
+
+
+async def _app_volunteer(client, session, world, make_user, mint_token, email):
+    vol = await make_user(email=email)
+    await session.commit()
+    r = await client.post(f"{API}/events/volunteer/add", json={"email_id": email, "event_id": world["event"].id}, headers=world["club"])
+    assert r.status_code == 200, r.text
+    return auth_header(await mint_token(vol))
+
+
+async def test_an_app_check_in_sends_the_card_to_a_printer_when_auto_print_is_on(client, session, world, make_user, mint_token):
+    vol = await _app_volunteer(client, session, world, make_user, mint_token, "app-vol-ps@example.com")
+    r = await client.patch(_ev(world, "/idcards/settings"), json={"auto_print_badges": True}, headers=world["club"])
+    assert r.status_code == 200, r.text
+    await _beat(session, world["printer_id"])
+    reg = world["regs"][0]
+    r = await client.post(f"{API}/events/volunteer/checkin/{world['event'].id}", json={"ticket_id": reg.ticket_id}, headers=vol)
+    assert r.status_code == 200, r.text
+    claimed = await client.post(f"{API}/kiosk/printer/claim", headers=world["printer"])
+    assert claimed.status_code == 200, claimed.text
+    req = claimed.json()["request"]
+    assert req is not None and str(req["registration_id"]) == str(reg.id), claimed.text
+
+
+async def test_an_app_check_in_prints_nothing_with_auto_print_off(client, session, world, make_user, mint_token):
+    vol = await _app_volunteer(client, session, world, make_user, mint_token, "app-vol2-ps@example.com")
+    await _beat(session, world["printer_id"])
+    reg = world["regs"][1]
+    r = await client.post(f"{API}/events/volunteer/checkin/{world['event'].id}", json={"ticket_id": reg.ticket_id}, headers=vol)
+    assert r.status_code == 200, r.text
+    claimed = await client.post(f"{API}/kiosk/printer/claim", headers=world["printer"])
+    assert claimed.json().get("request") is None, claimed.text
