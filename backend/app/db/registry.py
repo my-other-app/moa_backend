@@ -64,6 +64,8 @@ from app.api.club_whatsapp import reach_models as _club_whatsapp_reach_models  #
 from app.api.club_mailbox import models as _club_mailbox_models  # noqa: F401
 # The platform's own inbox: admin@, developer@, developers@, info@ (app/api/platform_mail).
 from app.api.platform_mail import models as _platform_mail_models  # noqa: F401
+# The admin WhatsApp inbox for the platform's own number (app/api/platform_whatsapp).
+from app.api.platform_whatsapp import models as _platform_whatsapp_models  # noqa: F401
 # Results, cancellations, club refunds, guest notices, club password reset codes (app/api/club_ops).
 from app.api.club_ops import models as _club_ops_models  # noqa: F401
 # Connected AI assistants: clients, grants, tokens, pending actions, announcement drafts (app/api/mcp).
