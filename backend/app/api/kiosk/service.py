@@ -55,10 +55,10 @@ def pair_url(token: str, role: str = "kiosk") -> str:
 
 async def create_device(session, event: Events, *, name: str, door_label: Optional[str], door_id, shift_hours: int, created_by, role: str = "kiosk") -> dict:
     """Bound to one event, rotated per shift, revocable. The token is shown
-    once. A print station is no door: it makes none, and its label is only
-    the "where" on the cards it prints."""
+    once. A print station makes no door: it may be set to print for an
+    existing one (door_id), and its label is the "where" on its cards."""
     if role == "printer":
-        door = None
+        door = await doors_mod.door_of(session, event, door_id) if door_id is not None else None
     elif door_id is not None:
         door = await doors_mod.door_of(session, event, door_id)
     else:
@@ -75,6 +75,19 @@ async def device_of(session, event: Events, device_id) -> KioskDevices:
     if d is None or d.event_id != event.id:
         raise CustomHTTPException(404, message="That kiosk could not be found.")
     return d
+
+
+async def set_printer_door(session, event: Events, device_id, door_id) -> dict:
+    """Which door a print station prints for; None is any door."""
+    d = await device_of(session, event, device_id)
+    if (d.role or "kiosk") != "printer":
+        raise CustomHTTPException(409, message="Only a print station's door can be changed here.", error_code="NOT_A_PRINTER")
+    door = await doors_mod.door_of(session, event, door_id) if door_id is not None else None
+    d.door_id = door.id if door is not None else None
+    if door is not None:
+        d.door_label = door.name
+    await session.commit()
+    return device_out(d)
 
 
 async def rotate_device(session, event: Events, device_id, *, shift_hours: int) -> dict:

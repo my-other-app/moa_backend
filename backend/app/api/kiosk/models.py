@@ -88,6 +88,9 @@ class CardPrintRequests(AbstractSQLModel, TimestampsMixin):
     requested_by_device_id = Column(UUID(as_uuid=True), ForeignKey("kiosk_devices.id", ondelete="SET NULL"), nullable=True)
     # A chosen printer; null is any printer of the event.
     printer_id = Column(UUID(as_uuid=True), ForeignKey("kiosk_devices.id", ondelete="SET NULL"), nullable=True)
+    # The door it was asked for at: that door's print station takes it first.
+    # Null is any station (print_requests.claim has the rules).
+    door_id = Column(UUID(as_uuid=True), ForeignKey("doors.id", ondelete="SET NULL"), nullable=True)
     # queued -> printing -> printed | failed; cancelled
     status = Column(String(16), nullable=False, default="queued", server_default="queued")
     attempts = Column(Integer, nullable=False, default=0, server_default="0")
@@ -101,10 +104,12 @@ class CardPrintRequests(AbstractSQLModel, TimestampsMixin):
     registration = relationship("EventRegistrationsLink")
     printer = relationship("KioskDevices", foreign_keys=[printer_id])
     claimer = relationship("KioskDevices", foreign_keys=[claimed_by])
+    door = relationship("Doors")
 
     __table_args__ = (
         sa.CheckConstraint("status IN ('queued', 'printing', 'printed', 'failed', 'cancelled')", name="ck_card_print_requests_status"),
         sa.Index("ix_card_print_requests_event_status", "event_id", "status", "created_at"),
         sa.Index("ix_card_print_requests_registration", "registration_id"),
+        sa.Index("ix_card_print_requests_event_door", "event_id", "door_id"),
         sa.Index("uq_card_print_requests_open", "event_id", "registration_id", unique=True, postgresql_where=sa.text("status IN ('queued', 'printing')")),
     )

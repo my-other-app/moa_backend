@@ -123,6 +123,11 @@ class PrinterRef(BaseModel):
     name: str
 
 
+class DoorRef(BaseModel):
+    id: UUID
+    name: str
+
+
 class PrintRequestOut(BaseModel):
     id: UUID
     registration_id: UUID
@@ -136,6 +141,10 @@ class PrintRequestOut(BaseModel):
     created_at: Optional[datetime] = None
     printed_at: Optional[datetime] = None
     position: Optional[int] = None
+    # The door it was asked for at (null: any station), and the station
+    # that has it or is expected to (null: the next free one).
+    door: Optional[DoorRef] = None
+    station: Optional[PrinterRef] = None
 
 
 class PrintRequestList(BaseModel):
@@ -166,17 +175,29 @@ class ClaimResult(BaseModel):
 class DashboardPrintBody(BaseModel):
     registration_id: UUID
     printer_id: Optional[UUID] = None
+    # The door whose station should print it; null is any station.
+    door_id: Optional[UUID] = None
     override: bool = False
 
 
 class DoorPrintBody(BaseModel):
     override: bool = False
+    # The door the console runs at, for a signed-in volunteer or the club.
+    # A door's gate link always prints at its own door.
+    door_id: Optional[UUID] = None
+    door: Optional[str] = Field(default=None, max_length=40)
+
+
+class KioskDoorUpdate(BaseModel):
+    # Null: the station prints for any door.
+    door_id: Optional[UUID] = None
 
 
 class PrinterOut(BaseModel):
     id: UUID
     name: str
     door_label: str
+    door: Optional[DoorRef] = None
     online: bool
     last_seen_at: Optional[datetime]
     expires_at: datetime

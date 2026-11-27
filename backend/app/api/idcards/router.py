@@ -51,7 +51,12 @@ async def print_request(session: SessionDep, user: ClubAuth, event_id: int, body
     event = await deliveries.event_for_club(session, user, event_id)
     await gates.require_feature(session, event.club_id, "badges", actor=user, event=event)
     reg = await print_requests.registration_in(session, event, body.registration_id)
-    out, created = await print_requests.ask(session, event, reg, source="dashboard", user_id=user.id, printer_id=body.printer_id, override=body.override, by_organiser=True)
+    door_id = None
+    if body.door_id is not None:
+        from app.api.checkins import doors as doors_mod
+
+        door_id = (await doors_mod.door_of(session, event, body.door_id)).id
+    out, created = await print_requests.ask(session, event, reg, source="dashboard", user_id=user.id, printer_id=body.printer_id, door_id=door_id, override=body.override, by_organiser=True)
     response.status_code = 201 if created else 200
     return PrintRequestOut(**out)
 

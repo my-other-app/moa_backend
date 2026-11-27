@@ -178,7 +178,16 @@ async def gate_print_request(request: Request, session: SessionDep, actor: GateA
 
     event = _event(request)
     reg = await print_requests.registration_in(session, event, registration_id)
-    out, created = await print_requests.ask(session, event, reg, source="door", user_id=actor.user_id, override=body.override and actor.full, by_organiser=actor.full)
+    # The card prints at this door's station: a gate link's own door, else
+    # the door the console says it runs at (by id, or by its typed name).
+    door = actor.door
+    if door is None and body.door_id is not None:
+        door = await doors_mod.door_of(session, event, body.door_id)
+    elif door is None and body.door:
+        door = await doors_mod.by_name(session, event.id, doors_mod.normalize(body.door))
+    out, created = await print_requests.ask(
+        session, event, reg, source="door", user_id=actor.user_id, door_id=door.id if door is not None else None, override=body.override and actor.full, by_organiser=actor.full,
+    )
     response.status_code = 201 if created else 200
     return PrintRequestOut(**out)
 

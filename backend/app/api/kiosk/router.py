@@ -13,6 +13,7 @@ from app.api.kiosk.schemas import (
     KioskContext,
     KioskCreate,
     KioskDeviceOut,
+    KioskDoorUpdate,
     KioskRotate,
     KioskSettings,
     KioskSettingsUpdate,
@@ -64,6 +65,12 @@ async def kiosk_settings(session: SessionDep, user: ClubAuth, event_id: int) -> 
 async def update_kiosk_settings(session: SessionDep, user: ClubAuth, event_id: int, body: KioskSettingsUpdate) -> KioskSettings:
     event = await deliveries.event_for_club(session, user, event_id)
     return KioskSettings(**await service.update_kiosk_settings(session, event, body))
+
+
+@admin_router.patch("/{device_id}", summary="Pick the door a print station prints for")
+async def update_kiosk(session: SessionDep, user: ClubAuth, event_id: int, device_id: UUID, body: KioskDoorUpdate) -> KioskDeviceOut:
+    event = await deliveries.event_for_club(session, user, event_id)
+    return KioskDeviceOut(**await service.set_printer_door(session, event, device_id, body.door_id))
 
 
 @admin_router.post("/{device_id}/rotate", summary="A new token for a new shift")

@@ -507,7 +507,7 @@ async def test_the_dashboard_lists_printers_and_the_queue(client, session, world
     await _beat(session, world["printer2_id"], seconds_ago=120)
     printers = (await client.get(_ev(world, "/idcards/printers"), headers=h)).json()
     assert [(p["name"], p["online"]) for p in printers] == [("Desk printer", True), ("Stage printer", False)]
-    assert set(printers[0]) == {"id", "name", "door_label", "online", "last_seen_at", "expires_at"}
+    assert set(printers[0]) == {"id", "name", "door_label", "door", "online", "last_seen_at", "expires_at"}
     for i in range(3):
         r = await client.post(_ev(world, "/idcards/print-requests"), json={"registration_id": str(world["regs"][i].id)}, headers=h)
         assert r.status_code == 201 and r.json()["position"] == i + 1
@@ -569,3 +569,150 @@ async def test_the_door_console_queues_a_card_with_the_door_permission(client, s
     assert allowed.status_code == 201
     # And a request for a guest of another event is not found.
     assert (await client.post(_ev(world, f"/gate/print-request/{uuid.uuid4()}"), json={}, headers=h)).status_code == 404
+
+
+# --- each door prints on its own station ------------------------------------------------------
+
+
+async def _door(client, world, name):
+    r = await client.post(_ev(world, "/doors"), json={"name": name, "kind": "door"}, headers=world["club"])
+    assert r.status_code in (200, 201), r.text
+    door_id = r.json()["id"]
+    key = (await client.post(_ev(world, f"/doors/{door_id}/link"), json={"can_walkup": False}, headers=world["club"])).json()["key"]
+    return door_id, {"X-Gate-Key": key}
+
+
+async def _prints_for(client, world, device_id, door_id):
+    r = await client.patch(_ev(world, f"/kiosks/{device_id}"), json={"door_id": door_id}, headers=world["club"])
+    assert r.status_code == 200, r.text
+    assert r.json()["door_id"] == door_id
+    return r.json()
+
+
+async def _claimed(client, headers):
+    r = await client.post(f"{API}/kiosk/printer/claim", headers=headers)
+    assert r.status_code == 200, r.text
+    return r.json()["request"]
+
+
+async def _door_ask(client, world, reg, headers, body=None):
+    r = await client.post(_ev(world, f"/gate/print-request/{reg.id}"), json=body or {}, headers=headers)
+    assert r.status_code in (200, 201), r.text
+    return r.json()
+
+
+async def test_each_door_prints_on_its_own_station(client, session, world):
+    a, gate_a = await _door(client, world, "Help desk A")
+    b, gate_b = await _door(client, world, "Help desk B")
+    await _prints_for(client, world, world["printer_id"], a)
+    await _prints_for(client, world, world["printer2_id"], b)
+    await _beat(session, world["printer_id"])
+    await _beat(session, world["printer2_id"])
+    first = await _door_ask(client, world, world["regs"][0], gate_a)
+    second = await _door_ask(client, world, world["regs"][1], gate_b)
+    assert first["door"]["name"] == "Help desk A" and first["station"]["name"] == "Desk printer"
+    assert second["door"]["name"] == "Help desk B" and second["station"]["name"] == "Stage printer"
+    # B's station skips A's older card and takes its own.
+    got_b = await _claimed(client, world["printer2"])
+    assert got_b["id"] == second["id"]
+    assert await _claimed(client, world["printer2"]) is None
+    got_a = await _claimed(client, world["printer"])
+    assert got_a["id"] == first["id"]
+    # The queue and the printers list say where.
+    items = {i["id"]: i for i in (await client.get(_ev(world, "/idcards/print-requests"), headers=world["club"])).json()["items"]}
+    assert items[first["id"]]["door"]["name"] == "Help desk A" and items[first["id"]]["station"]["name"] == "Desk printer"
+    assert items[second["id"]]["station"]["name"] == "Stage printer"
+    printers = {p["name"]: p for p in (await client.get(_ev(world, "/idcards/printers"), headers=world["club"])).json()}
+    assert printers["Desk printer"]["door"]["name"] == "Help desk A" and printers["Stage printer"]["door"]["name"] == "Help desk B"
+
+
+async def test_a_station_with_no_door_covers_a_door_whose_station_is_offline(client, session, world):
+    a, gate_a = await _door(client, world, "Help desk A")
+    b, gate_b = await _door(client, world, "Help desk B")
+    await _prints_for(client, world, world["printer2_id"], b)
+    await _beat(session, world["printer2_id"], seconds_ago=120)  # B's station is away
+    await _beat(session, world["printer_id"])  # a station with no door
+    card = await _door_ask(client, world, world["regs"][0], gate_b)
+    assert card["station"] is None
+    assert (await _claimed(client, world["printer"]))["id"] == card["id"]
+    # A door whose station is online keeps its cards from the doorless station.
+    await _beat(session, world["printer2_id"])
+    held = await _door_ask(client, world, world["regs"][1], gate_b)
+    assert await _claimed(client, world["printer"]) is None
+    assert (await _claimed(client, world["printer2"]))["id"] == held["id"]
+
+
+async def test_a_card_for_an_offline_door_goes_to_any_station_after_a_wait(client, session, world):
+    a, gate_a = await _door(client, world, "Help desk A")
+    b, gate_b = await _door(client, world, "Help desk B")
+    await _prints_for(client, world, world["printer_id"], a)
+    await _prints_for(client, world, world["printer2_id"], b)
+    await _beat(session, world["printer_id"])
+    await _beat(session, world["printer2_id"], seconds_ago=120)
+    card = await _door_ask(client, world, world["regs"][0], gate_b)
+    # Fresh: A's station leaves it for B's.
+    assert await _claimed(client, world["printer"]) is None
+    await session.execute(update(CardPrintRequests).where(CardPrintRequests.id == uuid.UUID(card["id"])).values(created_at=datetime.now(timezone.utc) - timedelta(seconds=60)))
+    await session.commit()
+    got = await _claimed(client, world["printer"])
+    assert got["id"] == card["id"] and got["attempt"] == 1
+
+
+async def test_a_dashboard_card_has_no_door_unless_one_is_picked(client, session, world):
+    a, _ = await _door(client, world, "Help desk A")
+    await _prints_for(client, world, world["printer_id"], a)
+    await _beat(session, world["printer_id"])
+    r = await client.post(_ev(world, "/idcards/print-requests"), json={"registration_id": str(world["regs"][0].id)}, headers=world["club"])
+    assert r.status_code == 201 and r.json()["door"] is None and r.json()["station"] is None
+    # Any station takes a card with no door, a door's station too.
+    assert (await _claimed(client, world["printer"]))["id"] == r.json()["id"]
+    picked = await client.post(_ev(world, "/idcards/print-requests"), json={"registration_id": str(world["regs"][1].id), "door_id": a}, headers=world["club"])
+    assert picked.status_code == 201 and picked.json()["door"]["id"] == a
+    other_event_door = await client.post(_ev(world, "/idcards/print-requests"), json={"registration_id": str(world["regs"][2].id), "door_id": str(uuid.uuid4())}, headers=world["club"])
+    assert other_event_door.status_code == 404
+
+
+async def test_a_kiosk_card_prints_at_the_kiosks_door(client, session, world):
+    kiosk_door = (await client.get(_ev(world, "/kiosks"), headers=world["club"])).json()
+    kiosk_door = next(d["door_id"] for d in kiosk_door if d["id"] == world["kiosk_id"])
+    assert kiosk_door is not None
+    b, _ = await _door(client, world, "Help desk B")
+    await _prints_for(client, world, world["printer_id"], kiosk_door)
+    await _prints_for(client, world, world["printer2_id"], b)
+    await _beat(session, world["printer_id"])
+    await _beat(session, world["printer2_id"])
+    r = await _ask(client, world, world["regs"][0])
+    assert r.status_code == 201 and r.json()["door"]["id"] == kiosk_door and r.json()["station"]["name"] == "Desk printer"
+    assert await _claimed(client, world["printer2"]) is None
+    assert (await _claimed(client, world["printer"]))["id"] == r.json()["id"]
+
+
+async def test_the_console_sends_its_door_and_one_card_per_guest_still_holds(client, session, world):
+    a, gate_a = await _door(client, world, "Help desk A")
+    b, gate_b = await _door(client, world, "Help desk B")
+    await _beat(session, world["printer_id"])
+    reg = world["regs"][0]
+    # A signed-in volunteer or the club: the door the console runs at.
+    first = await _door_ask(client, world, reg, world["club"], {"door_id": b})
+    assert first["door"]["id"] == b
+    # The same guest from another door: the one open card, unchanged.
+    again = await _door_ask(client, world, reg, gate_a)
+    assert again["id"] == first["id"] and again["door"]["id"] == b
+    n = await session.scalar(select(func.count()).select_from(CardPrintRequests).where(CardPrintRequests.registration_id == reg.id))
+    assert n == 1
+    # By the door's name too, and a gate link always wins over what the body says.
+    by_name = await _door_ask(client, world, world["regs"][1], world["club"], {"door": "help desk a"})
+    assert by_name["door"]["id"] == a
+    link = await _door_ask(client, world, world["regs"][2], gate_a, {"door_id": b})
+    assert link["door"]["id"] == a
+
+
+async def test_a_station_is_paired_for_a_door_and_set_back_to_any(client, session, world):
+    a, _ = await _door(client, world, "Help desk A")
+    r = await client.post(_ev(world, "/kiosks"), json={"name": "Door A laptop", "role": "printer", "door_id": a}, headers=world["club"])
+    assert r.status_code == 200 and r.json()["device"]["door_id"] == a and r.json()["device"]["door_label"] == "Help desk A"
+    dev = r.json()["device"]["id"]
+    assert (await _prints_for(client, world, dev, None))["door_id"] is None
+    # Only a print station's door is changed this way; a tablet's is its own.
+    assert (await client.patch(_ev(world, f"/kiosks/{world['kiosk_id']}"), json={"door_id": a}, headers=world["club"])).status_code == 409
+    assert (await client.patch(_ev(world, f"/kiosks/{dev}"), json={"door_id": a}, headers=world["outsider"])).status_code in (403, 404)
