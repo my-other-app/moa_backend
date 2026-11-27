@@ -137,5 +137,8 @@ async def whatsapp_hook(request: Request, session: SessionDep) -> dict:
     # admin inbox (app/api/platform_whatsapp). Never raises.
     from app.api.platform_whatsapp import service as platform_inbox
 
-    result["inbox"] = await platform_inbox.handle_safely(session, payload if isinstance(payload, dict) else {})
+    inbox = await platform_inbox.handle_safely(session, payload if isinstance(payload, dict) else {})
+    # The answer stays as it was unless the inbox kept something.
+    if any(inbox.values()):
+        result["inbox"] = inbox
     return result

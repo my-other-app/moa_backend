@@ -143,7 +143,7 @@ async def test_a_bad_signature_keeps_nothing(client, session, world, meta):
 
 async def test_a_club_numbers_messages_are_never_kept_here(client, session, world, meta):
     r = await hook(client, inbound(number="555000111"))
-    assert r.status_code == 202 and r.json()["inbox"]["messages"] == 0
+    assert r.status_code == 202 and "inbox" not in r.json()
     assert await conv_of(session) is None
     assert (await client.get(INBOX, headers=world.h)).json()["total"] == 0
 
