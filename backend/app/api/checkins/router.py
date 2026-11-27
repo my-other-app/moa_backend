@@ -127,7 +127,44 @@ async def gate_scan(request: Request, session: SessionDep, actor: GateAuth, even
     is not a scan code: find the guest by it in the search instead."""
     if not actor.permissions["check_in"]:
         raise CustomHTTPException(403, message="You may not check guests in at this door.")
-    return ScanResult(**await service.scan(session, _event(request), code=body.code, door_label=body.door, client_ref=body.client_ref, scanned_at=body.scanned_at, actor=actor, via=CheckInVia.gate, background=background_tasks))
+    event = _event(request)
+    result = await service.scan(session, event, code=body.code, door_label=body.door, client_ref=body.client_ref, scanned_at=body.scanned_at, actor=actor, via=CheckInVia.gate, background=background_tasks)
+    if request.headers.get(APP_VERSION_HEADER) and result.get("outcome") == "CHECKED_IN":
+        await _app_card(session, event, body.code, body.door, actor)
+    return ScanResult(**result)
+
+
+#: The MyOtherApp phone app sends its version on every request; the web door console does not.
+APP_VERSION_HEADER = "X-App-Version"
+
+
+async def _app_card(session, event, code: str, door_name: Optional[str], actor) -> None:
+    """The phone app's door console admits but never asks for the card the
+    way the web console does after its scan. With "Print the card when a
+    guest is checked in" on, ask for it here, at the console's door (so a
+    desk's own printer takes it). Best effort: the check-in is already saved,
+    and a card that cannot be queued is logged, never an error."""
+    if not getattr(event, "auto_print_badges", False):
+        return
+    import logging
+
+    from sqlalchemy import func, select
+
+    from app.api.checkins.models import Doors
+    from app.api.events.models import EventRegistrationsLink as R
+    from app.api.kiosk import print_requests
+
+    try:
+        reg = await session.scalar(select(R).where(R.event_id == event.id, R.ticket_id == (code or "").strip().upper(), R.is_deleted == False))  # noqa: E712
+        if reg is None or getattr(reg, "badge_printed_at", None) is not None:
+            return
+        door_id = getattr(getattr(actor, "door", None), "id", None)
+        if door_id is None and door_name:
+            door_id = await session.scalar(select(Doors.id).where(Doors.event_id == event.id, func.lower(Doors.name) == door_name.strip().lower()))
+        await print_requests.ask(session, event, reg, source="door", user_id=actor.user_id, door_id=door_id, override=False, by_organiser=bool(actor.full))
+    except Exception:  # noqa: BLE001 - printing is best effort after the check-in
+        logging.getLogger(__name__).warning("could not queue the card after an app door scan", exc_info=True)
+        await session.rollback()
 
 
 @router.post("/gate/scan-batch", summary="The offline queue, drained")
