@@ -794,3 +794,19 @@ async def test_the_apps_door_scan_prints_nothing_with_auto_print_off(client, ses
     out = await _gate_scan(client, world, world["regs"][2], {**gate_a, "X-App-Version": "1.4.1+11"})
     assert out["outcome"] == "CHECKED_IN", out
     assert await _claimed(client, world["printer"]) is None
+
+
+async def test_a_card_prints_after_the_heartbeat_expired_the_device(client, session, world):
+    """The heartbeat commits the request's session; the card must still read its station's door and event."""
+    a, gate_a = await _door(client, world, "Help desk A")
+    await _prints_for(client, world, world["printer_id"], a)
+    await _beat(session, world["printer_id"])
+    reg = world["regs"][0]
+    asked = await client.post(_ev(world, "/idcards/print-requests"), json={"registration_id": str(reg.id), "override": True}, headers=world["club"])
+    assert asked.status_code in (200, 201), asked.text
+    await _beat(session, world["printer_id"], seconds_ago=120)  # stale, so the claim's heartbeat writes
+    req = await _claimed(client, world["printer"])
+    assert req is not None
+    await _beat(session, world["printer_id"], seconds_ago=120)
+    pdf = await client.get(f"{API}{req['card_url']}", headers=world["printer"])
+    assert pdf.status_code == 200 and pdf.content[:4] == b"%PDF", pdf.text

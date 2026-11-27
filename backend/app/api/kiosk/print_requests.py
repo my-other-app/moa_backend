@@ -277,6 +277,21 @@ async def _own(session, device: KioskDevices, request_id) -> CardPrintRequests:
     return r
 
 
+async def _fresh(session, device: KioskDevices) -> KioskDevices:
+    """The device with its door and event (and the event's club) loaded now.
+    The printer's heartbeat may have committed this request's session, which
+    expires what the auth dependency loaded; reading device.door or
+    device.event then would lazy-load outside the async greenlet and fail."""
+    from app.api.events.models import Events
+
+    return await session.scalar(
+        select(KioskDevices)
+        .options(joinedload(KioskDevices.door), joinedload(KioskDevices.event).joinedload(Events.club))
+        .where(KioskDevices.id == device.id)
+        .execution_options(populate_existing=True)
+    )
+
+
 async def card_for(session, device: KioskDevices, request_id) -> bytes:
     """The card, for the request this station is printing right now: drawn
     and recorded as a print. A retry of a card that never came out (attempt
@@ -287,6 +302,7 @@ async def card_for(session, device: KioskDevices, request_id) -> bytes:
     from app.api.idcards.service import card_pdf
 
     r = await _own(session, device, request_id)
+    device = await _fresh(session, device)
     if r.status != "printing":
         raise CustomHTTPException(409, message="That request is not being printed.", error_code="NOT_PRINTING")
     actor = GateActor(kind="kiosk", name=device.name, door=device.door, can_check_in=True, full=r.source != "kiosk" or r.attempts > 1)
@@ -322,6 +338,7 @@ async def test_card(session, device: KioskDevices) -> bytes:
     from app.api.idcards.service import _draw_card
     from app.api.subscriptions import gates
 
+    device = await _fresh(session, device)
     event = device.event
     await gates.require_feature(session, event.club_id, "badges", actor=None, event=event)
     style = await badge_style(session, event, None)
