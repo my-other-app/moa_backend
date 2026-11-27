@@ -176,6 +176,8 @@ class DeliveryAttempts(AbstractSQLModel):
         UniqueConstraint("provider_id", name="uq_delivery_attempts_provider_id"),
         # This month's fallbacks, for the club and the admins.
         sa.Index("ix_delivery_attempts_fallback", "created_at", postgresql_where=sa.text("fallback_code IS NOT NULL")),
+        # A WhatsApp number's sends, for the admin WhatsApp inbox (app/api/platform_whatsapp).
+        sa.Index("ix_delivery_attempts_wa_address", "address", "created_at", postgresql_where=sa.text("provider = 'whatsapp'")),
     )
 
 

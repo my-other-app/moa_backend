@@ -129,7 +129,16 @@ async def whatsapp_hook(request: Request, session: SessionDep) -> dict:
     if not platform:
         return out
     try:
-        return {**out, **await service.whatsapp(session, payload)}
+        result = {**out, **await service.whatsapp(session, payload)}
     except Exception:  # noqa: BLE001
         logger.exception("whatsapp hook failed")
-        return {**out, "matched": 0}
+        result = {**out, "matched": 0}
+    # Then, on its own: what people wrote to the platform's number, for the
+    # admin inbox (app/api/platform_whatsapp). Never raises.
+    from app.api.platform_whatsapp import service as platform_inbox
+
+    inbox = await platform_inbox.handle_safely(session, payload if isinstance(payload, dict) else {})
+    # The answer stays as it was unless the inbox kept something.
+    if any(inbox.values()):
+        result["inbox"] = inbox
+    return result
