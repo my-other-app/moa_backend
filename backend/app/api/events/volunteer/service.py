@@ -277,6 +277,7 @@ async def checkin_user(
     )
     outcome = result["outcome"]
     if outcome == "CHECKED_IN":
+        await _queue_card(session, event, ticker_id.strip(), user)
         return True
     if outcome == "WRONG_EVENT":
         name = (result.get("other_event") or {}).get("name") or "another event"
@@ -290,6 +291,32 @@ async def checkin_user(
     if outcome == "EVENT_NOT_OPEN":
         raise CustomHTTPException(400, "The door is closed for this event.", error_code="EVENT_NOT_OPEN")
     raise CustomHTTPException(400, "Registration not found", error_code="REGISTRATION_NOT_FOUND")
+
+
+async def _queue_card(session: AsyncSession, event: Events, ticket_id: str, user) -> None:
+    """With "Print the card when a guest is checked in" on, a check-in from
+    the volunteer app sends the guest's card to the print stations, as the
+    door console does after its scan. It goes to any printer (the app has no
+    door). Never fails the check-in: a card that cannot be queued is logged,
+    and the help desk can print it from the guest's page."""
+    if not getattr(event, "auto_print_badges", False):
+        return
+    try:
+        from app.api.events.models import EventRegistrationsLink
+        from app.api.kiosk import print_requests
+
+        reg = await session.scalar(select(EventRegistrationsLink).where(
+            EventRegistrationsLink.event_id == event.id, EventRegistrationsLink.ticket_id == ticket_id,
+            EventRegistrationsLink.is_deleted == False,  # noqa: E712
+        ))
+        if reg is None or getattr(reg, "badge_printed_at", None) is not None:
+            return
+        await print_requests.ask(session, event, reg, source="door", user_id=getattr(user, "id", None), override=False, by_organiser=False)
+    except Exception:  # noqa: BLE001 - the check-in already happened; printing is best effort
+        import logging
+
+        logging.getLogger(__name__).warning("could not queue the card after an app check-in", exc_info=True)
+        await session.rollback()
 
 
 async def validate_ticket(
